@@ -81,6 +81,7 @@ internal sealed class GameServices
         CopyBattleLoader.Load(configDir);
         MissionChainLoader.Load(configDir);
         ShipBreakLoader.Load(configDir);
+        ShipAdvanceLoader.Load(configDir);
         ShipMainLoader.Load(configDir);
         AssistShipLoader.Load(configDir);
         EquipLoader.Load(configDir, equipmentMods.Equipment);

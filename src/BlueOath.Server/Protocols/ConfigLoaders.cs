@@ -664,6 +664,35 @@ internal static class ShipBreakLoader
         _stages.TryGetValue(templateId, out ConfigShipBreak? config) ? config : null;
 }
 
+/// <summary>舰娘等级上限突破配置（config_ship_advance）。键为下一次 AdvLv。</summary>
+internal static class ShipAdvanceLoader
+{
+    private static readonly Dictionary<int, ConfigShipAdvance> _levels = new();
+    private static bool _loaded;
+
+    internal static void Load(string configDir)
+    {
+        if (_loaded) return;
+        try
+        {
+            _levels.Clear();
+            foreach (var (id, config) in ConfigDbLoader.LoadAll<ConfigShipAdvance>(
+                         configDir, "config_ship_advance.db"))
+                _levels[id] = config;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ShipAdvance] load failed: {ex.Message}");
+        }
+        _loaded = true;
+    }
+
+    internal static ConfigShipAdvance? Get(int nextAdvLv) =>
+        _levels.TryGetValue(nextAdvLv, out ConfigShipAdvance? config) ? config : null;
+
+    internal static bool HasConfig => _levels.Count > 0;
+}
+
 internal static class AssistShipLoader
 {
     private static readonly Dictionary<int, ConfigAssistShipInfo> _ships = new();

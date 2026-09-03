@@ -487,6 +487,43 @@ internal sealed class HeroService(GameServices services)
         return new([], updatedHero, consumedIds, true);
     }
 
+    /// <summary>处理 hero.HeroAdvMaxLv：按 config_ship_advance 提升等级上限突破次数。</summary>
+    internal async Task<AdvanceResult> BuildAdvanceMaxLvRetAsync(
+        TRequest request, string profileId, CancellationToken ct)
+    {
+        if (request.Args is null)
+            return new([], null, [], false);
+
+        uint heroId = ProtocolDecoder.DecodeHeroIdArg(request.Args);
+        if (heroId == 0)
+            return new([], null, [], false);
+
+        using var _ = await services.LockAccountAsync(profileId, ct);
+        PlayerAccount account = await services.GetOrCreateAccountAsync(profileId, ct);
+        List<Hero> heroes = account.Dock.Heroes.ToList();
+        int heroIndex = heroes.FindIndex(hero => hero.HeroId == heroId);
+        if (heroIndex < 0)
+            return new([], null, [], false);
+
+        Hero hero = heroes[heroIndex];
+        if (hero.AdvLv == int.MaxValue)
+            return new([], null, [], false);
+
+        int nextAdvLv = hero.AdvLv + 1;
+        ConfigShipAdvance? config = ShipAdvanceLoader.Get(nextAdvLv);
+        if (ShipAdvanceLoader.HasConfig && (config is null || hero.Level < config.InitialLevel ||
+            config.MaxLevel <= config.InitialLevel))
+            return new([], null, [], false);
+
+        Hero updatedHero = hero with { AdvLv = nextAdvLv };
+        heroes[heroIndex] = updatedHero;
+        await services.SaveAccountAsync(account with
+        {
+            Dock = account.Dock with { Heroes = heroes }
+        }, ct);
+        return new([], updatedHero, [], true);
+    }
+
     /// <summary>
     /// 处理 hero.HeroAdvanceMUB（彩色船突破）：按 config_ship_break 校验，消耗
     /// TAdvanceMubItemInfo{ItemId,ItemNum} 道具（碎片）与货币，Advance+1、TemplateId=break_to。

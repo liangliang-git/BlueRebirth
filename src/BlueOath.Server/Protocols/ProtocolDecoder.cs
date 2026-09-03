@@ -31,6 +31,10 @@ internal static class ProtocolDecoder
         return 0;
     }
 
+    /// <summary>解码仅含 HeroId(字段 1, uint32) 的舰娘操作参数。</summary>
+    internal static uint DecodeHeroIdArg(byte[] args) =>
+        checked((uint)DecodeVarintField(args, 1));
+
     /// <summary>取指定 string 字段（wire type 2）的值，缺失返回 null。</summary>
     internal static string? DecodeStringField(ReadOnlySpan<byte> data, int field)
     {

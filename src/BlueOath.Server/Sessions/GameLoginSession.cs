@@ -51,6 +51,16 @@ internal sealed class GameLoginSession(MessageRouter router, ILoggerFactory logg
                     var request = TMessageCodec.DecodeRequest(payload);
                     _messageLogger.Log(LogLevel.Information, "GameSession received request method={Method}", request.Method);
 
+                    if (request.Method == "hero.HeroAdvMaxLv")
+                    {
+                        _fileLogger.LogInformation(
+                            "CAPTURE HeroAdvMaxLv callback={CallbackHandler} token={Token} argsLen={ArgsLength} argsHex={ArgsHex}",
+                            request.CallbackHandler,
+                            request.Token,
+                            request.Args?.Length ?? 0,
+                            Convert.ToHexString(request.Args ?? []));
+                    }
+
                     // player.Login 先解析 pid，更新会话的 profileId，后续请求按该账号读取。
                     if (request.Method == "player.Login")
                         profileId = _router.ResolveLoginProfileId(request);

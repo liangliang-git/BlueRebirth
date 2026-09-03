@@ -287,10 +287,39 @@ internal sealed class HeroModule(HeroService hero, GameServices services) : IGam
                     ],
                 };
                 break;
+            case "hero.HeroAdvMaxLv":
+                HeroService.AdvanceResult advanceMaxLv =
+                    await hero.BuildAdvanceMaxLvRetAsync(request, ctx.ProfileId, ctx.Ct);
+                if (!advanceMaxLv.Changed || advanceMaxLv.UpdatedHero is null)
+                {
+                    result = new ModuleResult
+                    {
+                        Ret = advanceMaxLv.Ret,
+                        Err = 1,
+                        ErrMsg = "advance max level failed",
+                    };
+                    break;
+                }
+                PlayerAccount maxLvAccount = await ctx.GetAccountAsync();
+                uint maxLvNow = (uint)ctx.Now;
+                result = new ModuleResult
+                {
+                    Ret = advanceMaxLv.Ret,
+                    PrePushes =
+                    [
+                        TMessageCodec.EncodeResponse(new TResponse(
+                            Method: "hero.UpdateHeroBagData",
+                            Ret: PlayerDataCodec.Encode(new HeroBag(
+                                [GameServices.ToHeroGrid(advanceMaxLv.UpdatedHero)], maxLvAccount.Dock.BagSize)),
+                            Time: maxLvNow)),
+                        services.BuildBagPush(maxLvAccount, maxLvNow),
+                        await services.BuildUpdateUserInfoPushAsync(ctx.ProfileId, maxLvNow, ctx.Ct),
+                    ],
+                };
+                break;
             case "hero.HeroIntensify":
             case "hero.AutoEquip":
             case "hero.AutoUnEquip":
-            case "hero.HeroAdvMaxLv":
             case "hero.HeroEquipEffect":
             case "hero.EquipBinding":
             case "hero.EquipUnBinding":

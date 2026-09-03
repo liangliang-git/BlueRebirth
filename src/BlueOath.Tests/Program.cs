@@ -26,6 +26,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("zero-count bag entries encode an explicit deletion marker", BagDeletionMarkerCodecTest),
     ("normal treasure request and equipment reward use client protobuf layout", TreasureCodecTest),
     ("hero advance preserves neighbors and unbinds consumed equipment", HeroAdvanceStateTest),
+    ("hero max-level advance increments AdvLv and persists", HeroAdvMaxLvStateTest),
     ("build ship response omits empty special rewards", BuildShipRewardCodecTest),
     ("120-draw ship reward creates a hero instance and heals legacy bag pollution", BuildShipHundredRewardIntegrationTest),
     ("traditional construction config, protocol and queue match the client", ConstructionConfigAndCodecTest),
@@ -85,6 +86,8 @@ if (args.Contains("--treasure-integration", StringComparer.OrdinalIgnoreCase))
     tests = [("equipment treasure consumes its box and persists a new equipment instance", TreasureIntegrationTest)];
 if (args.Contains("--hero-advance", StringComparer.OrdinalIgnoreCase))
     tests = [("hero advance preserves neighbors and unbinds consumed equipment", HeroAdvanceStateTest)];
+if (args.Contains("--hero-adv-max-level", StringComparer.OrdinalIgnoreCase))
+    tests = [("hero max-level advance increments AdvLv and persists", HeroAdvMaxLvStateTest)];
 if (args.Contains("--buildship-codec", StringComparer.OrdinalIgnoreCase))
     tests = [("build ship response omits empty special rewards", BuildShipRewardCodecTest)];
 if (args.Contains("--buildship-reward", StringComparer.OrdinalIgnoreCase))
@@ -397,6 +400,51 @@ static async Task HeroAdvanceStateTest()
             new TRequest("hero.HeroAdvance", selfConsumeArgs), profileId, CancellationToken.None);
         Assert(!rejected.Changed,
             "hero advance allowed the target hero to consume itself");
+    }
+    finally
+    {
+        if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, true);
+    }
+}
+
+static async Task HeroAdvMaxLvStateTest()
+{
+    string root = FindRepositoryRoot();
+    string dataRoot = Path.Combine(Path.GetTempPath(), "blueoath-hero-adv-max-lv-" + Guid.NewGuid().ToString("N"));
+    const string profileId = "hero-adv-max-lv";
+    try
+    {
+        var repo = new SqliteGameRepository(dataRoot);
+        PlayerAccount account = PlayerAccountFactory.CreateDefault(profileId, 1) with
+        {
+            Dock = new HeroDock([new Hero(70, 10210511, 80, AdvLv: 0)])
+        };
+        await repo.SaveAccountAsync(account);
+
+        ServerOptions options = ServerOptions.Parse(
+            ["--data=" + dataRoot,
+             "--client-path=" + Path.Combine(root, "blueoath", "blueoath"),
+             "--profile-id=" + profileId]);
+        using Microsoft.Extensions.Logging.ILoggerFactory loggerFactory =
+            Microsoft.Extensions.Logging.LoggerFactory.Create(_ => { });
+        var services = new GameServices(repo, options, loggerFactory);
+        var heroService = new HeroService(services);
+
+        byte[] args = new ProtocolPackage().Write(0x08, 70UL).ToArray();
+        HeroService.AdvanceResult result = await heroService.BuildAdvanceMaxLvRetAsync(
+            new TRequest("hero.HeroAdvMaxLv", args), profileId, CancellationToken.None);
+        Assert(result.Changed && result.UpdatedHero?.HeroId == 70 && result.UpdatedHero.AdvLv == 1,
+            $"hero max-level advance did not increment AdvLv (changed={result.Changed}, hero={result.UpdatedHero?.HeroId}, advLv={result.UpdatedHero?.AdvLv})");
+
+        PlayerAccount saved = await repo.LoadAccountAsync(profileId)
+            ?? throw new InvalidDataException("max-level advanced account disappeared");
+        Assert(saved.Dock.Heroes.Single().AdvLv == 1,
+            "hero max-level advance did not persist AdvLv");
+
+        HeroService.AdvanceResult missing = await heroService.BuildAdvanceMaxLvRetAsync(
+            new TRequest("hero.HeroAdvMaxLv", new ProtocolPackage().Write(0x08, 999UL).ToArray()),
+            profileId, CancellationToken.None);
+        Assert(!missing.Changed, "hero max-level advance accepted a nonexistent hero");
     }
     finally
     {

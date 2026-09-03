@@ -119,7 +119,7 @@
 | hero.StudySkill | 学习技能 | 空响应 |
 | hero.AutoEquip | 自动装备 | 空响应 |
 | hero.AutoUnEquip | 自动卸装 | 空响应 |
-| hero.HeroAdvMaxLv | 等级突破 | 空响应 |
+| hero.HeroAdvMaxLv | 等级突破 | 已实现：按 HeroId 递增 AdvLv 并同步舰娘、背包、用户信息 |
 | hero.HeroEquipEffect | 装备效果 | 空响应 |
 | hero.HeroRemould | 改造 | 空响应 |
 | hero.EquipBinding | 装备绑定 | 空响应 |
