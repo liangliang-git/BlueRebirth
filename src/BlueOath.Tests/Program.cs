@@ -23,6 +23,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("temporary game login frame round-trips", GameLoginFrameTest),
     ("equipment enhancement response contains required payload", EquipEnhanceRetCodecTest),
     ("battle equipment attributes include enhancement increments", EquipBattleAttributeTest),
+    ("battle equipment renovation skills unlock at star level", EquipRenovationSkillTest),
     ("equipment renovation request decodes consumed equipment ids", EquipRiseStarArgsCodecTest),
     ("zero-count bag entries encode an explicit deletion marker", BagDeletionMarkerCodecTest),
     ("normal treasure request and equipment reward use client protobuf layout", TreasureCodecTest),
@@ -67,6 +68,8 @@ if (args.Contains("--equip-integration", StringComparer.OrdinalIgnoreCase))
     tests = [("equipped UR equipment supports normal and bound enhancement", EquipEnhanceIntegrationTest)];
 if (args.Contains("--equip-battle-attrs", StringComparer.OrdinalIgnoreCase))
     tests = [("battle equipment attributes include enhancement increments", EquipBattleAttributeTest)];
+if (args.Contains("--equip-renovation-skill", StringComparer.OrdinalIgnoreCase))
+    tests = [("battle equipment renovation skills unlock at star level", EquipRenovationSkillTest)];
 if (args.Contains("--equipment-mod", StringComparer.OrdinalIgnoreCase))
     tests = [("equipment mod adds a client/server template and GM shop good", EquipmentModTest)];
 if (args.Contains("--equipment-mod-config", StringComparer.OrdinalIgnoreCase))
@@ -733,6 +736,23 @@ static Task EquipBattleAttributeTest()
 
     Assert(props.SequenceEqual([(8, 27L), (3200, 40L)]),
         "battle equipment payload omitted EnhanceLv * EnhanceProp");
+    return Task.CompletedTask;
+}
+
+static Task EquipRenovationSkillTest()
+{
+    ConfigEquip config = new()
+    {
+        EId = 30044,
+        RenovateSkill = [50001]
+    };
+
+    Assert(ProtocolEncoder.BuildBattleEquipSkills(config, new EquipItem(1, 30044, Star: 0)).Count == 0,
+        "renovation skill unlocked before equipment star level");
+    IReadOnlyList<(int SkillId, int Level)> skills = ProtocolEncoder.BuildBattleEquipSkills(
+        config, new EquipItem(1, 30044, Star: 1));
+    Assert(skills.SequenceEqual([(50001, 1)]),
+        "battle equipment payload omitted RenovateSkill after star upgrade");
     return Task.CompletedTask;
 }
 
