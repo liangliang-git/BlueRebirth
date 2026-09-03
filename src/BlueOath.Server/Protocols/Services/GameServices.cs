@@ -1288,8 +1288,17 @@ internal sealed class GameServices
     public byte[] BuildEquipPush(PlayerAccount account, uint now, IReadOnlyList<uint>? removedEquipIds = null)
     {
         var equip = account.Equip ?? new PlayerEquip([], EquipBagSize: 2000);
-        var info = equip.Items.Select(e => new EquipInfo(e.EquipId, e.TemplateId, e.EnhanceLv,
-            e.Star, e.HeroId, e.EnhanceExp)).ToList();
+        var info = equip.Items.Select(e =>
+        {
+            ConfigEquip? config = GetEquipConfig(e.TemplateId);
+            IReadOnlyList<EquipPSkill>? skills = config is null
+                ? null
+                : ProtocolEncoder.BuildBattleEquipSkills(config, e)
+                    .Select(skill => new EquipPSkill(skill.SkillId, skill.Level))
+                    .ToList();
+            return new EquipInfo(e.EquipId, e.TemplateId, e.EnhanceLv,
+                e.Star, e.HeroId, e.EnhanceExp, skills);
+        }).ToList();
         if (removedEquipIds is { Count: > 0 })
             foreach (uint id in removedEquipIds)
                 info.Add(new EquipInfo(EquipId: id, TemplateId: 0));

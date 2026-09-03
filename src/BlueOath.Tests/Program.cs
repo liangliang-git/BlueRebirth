@@ -24,6 +24,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("equipment enhancement response contains required payload", EquipEnhanceRetCodecTest),
     ("battle equipment attributes include enhancement increments", EquipBattleAttributeTest),
     ("battle equipment renovation skills unlock at star level", EquipRenovationSkillTest),
+    ("equipment push encodes renovation skill list", EquipRenovationSkillCodecTest),
     ("equipment renovation request decodes consumed equipment ids", EquipRiseStarArgsCodecTest),
     ("zero-count bag entries encode an explicit deletion marker", BagDeletionMarkerCodecTest),
     ("normal treasure request and equipment reward use client protobuf layout", TreasureCodecTest),
@@ -69,7 +70,9 @@ if (args.Contains("--equip-integration", StringComparer.OrdinalIgnoreCase))
 if (args.Contains("--equip-battle-attrs", StringComparer.OrdinalIgnoreCase))
     tests = [("battle equipment attributes include enhancement increments", EquipBattleAttributeTest)];
 if (args.Contains("--equip-renovation-skill", StringComparer.OrdinalIgnoreCase))
-    tests = [("battle equipment renovation skills unlock at star level", EquipRenovationSkillTest)];
+    tests = [
+        ("battle equipment renovation skills unlock at star level", EquipRenovationSkillTest),
+        ("equipment push encodes renovation skill list", EquipRenovationSkillCodecTest)];
 if (args.Contains("--equipment-mod", StringComparer.OrdinalIgnoreCase))
     tests = [("equipment mod adds a client/server template and GM shop good", EquipmentModTest)];
 if (args.Contains("--equipment-mod-config", StringComparer.OrdinalIgnoreCase))
@@ -753,6 +756,19 @@ static Task EquipRenovationSkillTest()
         config, new EquipItem(1, 30044, Star: 1));
     Assert(skills.SequenceEqual([(50001, 1)]),
         "battle equipment payload omitted RenovateSkill after star upgrade");
+    return Task.CompletedTask;
+}
+
+static Task EquipRenovationSkillCodecTest()
+{
+    byte[] locked = PlayerDataCodec.Encode(new EquipInfo(187, 30044, Star: 0));
+    Assert(!locked.Contains((byte)0x3A),
+        "equipment push must not expose renovation skill before star upgrade");
+
+    byte[] unlocked = PlayerDataCodec.Encode(new EquipInfo(187, 30044, Star: 2,
+        PSkillList: [new EquipPSkill(50001, 1)]));
+    Assert(unlocked.AsSpan().IndexOf(new byte[] { 0x3A, 0x06, 0x08, 0xD1, 0x86, 0x03, 0x10, 0x01 }) >= 0,
+        "equipment push omitted TEquipInfo.PSkillList field 7");
     return Task.CompletedTask;
 }
 

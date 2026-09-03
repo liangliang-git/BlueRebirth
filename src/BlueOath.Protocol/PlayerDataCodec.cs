@@ -216,9 +216,13 @@ public sealed record FashionInfo(int SfId = 0, IReadOnlyList<int>? FashionTid = 
 /// <summary>时装列表（TFashionList）。</summary>
 public sealed record FashionList(IReadOnlyList<FashionInfo>? FashionInfo = null);
 
+/// <summary>装备改造技能（TEquipPSkillList）。字段号取自 equip_pb.lua。</summary>
+public sealed record EquipPSkill(int PSkillId = 0, int PSkillLv = 0);
+
 /// <summary>单个装备实例（TEquipInfo）。字段号取自 equip_pb.lua。</summary>
 public sealed record EquipInfo(uint EquipId = 0, int TemplateId = 0, int EnhanceLv = 0,
-    int Star = 0, uint HeroId = 0, int EnhanceExp = 0);
+    int Star = 0, uint HeroId = 0, int EnhanceExp = 0,
+    IReadOnlyList<EquipPSkill>? PSkillList = null);
 
 /// <summary>装备仓库推送（TEquipList）。EquipNum 可选，客户端补零。</summary>
 public sealed record EquipList(int EquipBagSize = 0,
@@ -1077,6 +1081,16 @@ var reader = new GameLoginCodec.ProtoReader(payload);
         WriteVarintField(output, 4, unchecked((ulong)value.Star));
         WriteVarintField(output, 5, value.HeroId);
         WriteVarintField(output, 6, unchecked((ulong)value.EnhanceExp));
+        if (value.PSkillList is { Count: > 0 })
+            foreach (EquipPSkill skill in value.PSkillList)
+            {
+                using var skillOutput = new MemoryStream();
+                if (skill.PSkillId != 0)
+                    WriteVarintField(skillOutput, 1, unchecked((ulong)skill.PSkillId));
+                if (skill.PSkillLv != 0)
+                    WriteVarintField(skillOutput, 2, unchecked((ulong)skill.PSkillLv));
+                WriteMessage(output, 7, skillOutput.ToArray());
+            }
         return output.ToArray();
     }
 
