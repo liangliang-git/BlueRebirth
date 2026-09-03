@@ -44,6 +44,19 @@ internal static class ProtocolEncoder
         return result;
     }
 
+    /// <summary>Returns equipment passive skills unlocked by renovation stars.</summary>
+    internal static IReadOnlyList<(int SkillId, int Level)> BuildBattleEquipSkills(
+        ConfigEquip config, EquipItem? instance = null)
+    {
+        if (instance is not { Star: > 0 } || config.RenovateSkill is not { Count: > 0 })
+            return [];
+        return config.RenovateSkill
+            .Where(skillId => skillId > 0)
+            .Distinct()
+            .Select(skillId => (checked((int)skillId), 1))
+            .ToList();
+    }
+
     /// <summary>编码 TBuildShipRet: BuildShipResult(1, repeated TCommonReward)。</summary>
     internal static byte[] EncodeBuildShipRet(IReadOnlyList<CommonReward> rewards)
     {
@@ -488,6 +501,13 @@ internal static class ProtocolEncoder
                     av.Write(0x10, unchecked((ulong)value)); // value
                     byte[] avb = av.ToArray();
                     eq.Write(0x22, avb);
+                }
+                foreach ((int skillId, int level) in BuildBattleEquipSkills(ecfg, instance))
+                {
+                    ProtocolPackage skill = new();
+                    skill.Write(0x08, unchecked((ulong)skillId)); // PSkillId(1)
+                    skill.Write(0x10, unchecked((ulong)level)); // PSkillLv(2)
+                    eq.Write(0x2A, skill.ToArray()); // PSkillEquipList(5)
                 }
 
                 byte[] eqb = eq.ToArray();
