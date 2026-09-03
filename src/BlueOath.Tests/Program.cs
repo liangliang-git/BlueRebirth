@@ -22,6 +22,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("client login wire envelope round-trips", ClientLoginWireTest),
     ("temporary game login frame round-trips", GameLoginFrameTest),
     ("equipment enhancement response contains required payload", EquipEnhanceRetCodecTest),
+    ("battle equipment attributes include enhancement increments", EquipBattleAttributeTest),
     ("equipment renovation request decodes consumed equipment ids", EquipRiseStarArgsCodecTest),
     ("zero-count bag entries encode an explicit deletion marker", BagDeletionMarkerCodecTest),
     ("normal treasure request and equipment reward use client protobuf layout", TreasureCodecTest),
@@ -64,6 +65,8 @@ if (args.Contains("--tcp-integration", StringComparer.OrdinalIgnoreCase))
     tests = [("tcp server pins legacy login ids to the selected launcher profile", TcpIntegrationTest)];
 if (args.Contains("--equip-integration", StringComparer.OrdinalIgnoreCase))
     tests = [("equipped UR equipment supports normal and bound enhancement", EquipEnhanceIntegrationTest)];
+if (args.Contains("--equip-battle-attrs", StringComparer.OrdinalIgnoreCase))
+    tests = [("battle equipment attributes include enhancement increments", EquipBattleAttributeTest)];
 if (args.Contains("--equipment-mod", StringComparer.OrdinalIgnoreCase))
     tests = [("equipment mod adds a client/server template and GM shop good", EquipmentModTest)];
 if (args.Contains("--equipment-mod-config", StringComparer.OrdinalIgnoreCase))
@@ -713,6 +716,23 @@ static Task EquipEnhanceRetCodecTest()
     var payload = TMessageCodec.EncodeEquipEnhanceRet(42, 3, 200);
     Assert(payload.AsSpan().SequenceEqual(new byte[] { 0x08, 0x2A, 0x10, 0x03, 0x18, 0xC8, 0x01 }),
         "equipment enhancement response protobuf mismatch");
+    return Task.CompletedTask;
+}
+
+static Task EquipBattleAttributeTest()
+{
+    ConfigEquip config = new()
+    {
+        EId = 900001,
+        EquipProp = [[8, 15], [3200, 20]],
+        EnhanceProp = [[8, 3], [3200, 5]]
+    };
+
+    IReadOnlyList<(int AttrId, long Value)> props = ProtocolEncoder.BuildBattleEquipProps(
+        config, new EquipItem(1, checked((int)config.EId), EnhanceLv: 4, Star: 2));
+
+    Assert(props.SequenceEqual([(8, 27L), (3200, 40L)]),
+        "battle equipment payload omitted EnhanceLv * EnhanceProp");
     return Task.CompletedTask;
 }
 
