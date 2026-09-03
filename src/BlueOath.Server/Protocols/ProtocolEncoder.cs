@@ -11,6 +11,39 @@ namespace BlueOath.Server.Protocols;
 /// </summary>
 internal static class ProtocolEncoder
 {
+    /// <summary>
+    /// Builds battle-time equipment attributes from template base values and per-instance
+    /// enhancement level. Assist ships have no instance and therefore receive base values only.
+    /// </summary>
+    internal static IReadOnlyList<(int AttrId, long Value)> BuildBattleEquipProps(
+        ConfigEquip config, EquipItem? instance = null)
+    {
+        List<(int AttrId, long Value)> result = [];
+        Dictionary<int, int> indexes = [];
+
+        void Add(List<long>? prop, long multiplier)
+        {
+            if (prop is not { Count: >= 2 }) return;
+            int attrId = checked((int)prop[0]);
+            long value = checked(prop[1] * multiplier);
+            if (indexes.TryGetValue(attrId, out int index))
+            {
+                (int id, long oldValue) = result[index];
+                result[index] = (id, checked(oldValue + value));
+            }
+            else
+            {
+                indexes[attrId] = result.Count;
+                result.Add((attrId, value));
+            }
+        }
+
+        foreach (List<long> prop in config.EquipProp ?? []) Add(prop, 1);
+        if (instance is { EnhanceLv: > 0 })
+            foreach (List<long> prop in config.EnhanceProp ?? []) Add(prop, instance.EnhanceLv);
+        return result;
+    }
+
     /// <summary>编码 TBuildShipRet: BuildShipResult(1, repeated TCommonReward)。</summary>
     internal static byte[] EncodeBuildShipRet(IReadOnlyList<CommonReward> rewards)
     {
@@ -419,7 +452,7 @@ internal static class ProtocolEncoder
             // 航母的空袭依赖飞机装备（PlaneNum），否则空袭技能不出现。
             // 玩家自有舰船从 EquipSlots → EquipItem.TemplateId → ConfigEquip 读取装备。
             var equipById = playerEquip?.Items.ToDictionary(e => e.EquipId) ?? new Dictionary<uint, EquipItem>();
-            List<ConfigEquip> shipEquips = [];
+            List<(ConfigEquip Config, EquipItem? Instance)> shipEquips = [];
             if (assist?.Equip is { Count: > 0 })
             {
                 for (int ei = 0; ei < assist.Equip.Count; ei++)
@@ -427,7 +460,7 @@ internal static class ProtocolEncoder
                     int eid = checked((int)assist.Equip[ei]);
                     if (eid == 0) continue;
                     ConfigEquip? ecfg = EquipLoader.Get(eid);
-                    if (ecfg is not null) shipEquips.Add(ecfg);
+                    if (ecfg is not null) shipEquips.Add((ecfg, null));
                 }
             }
             else if (h.EquipSlots is { Count: > 0 })
@@ -437,27 +470,25 @@ internal static class ProtocolEncoder
                     if (slotId == 0) continue;
                     if (!equipById.TryGetValue(slotId, out EquipItem? eqItem)) continue;
                     ConfigEquip? ecfg = EquipLoader.Get(eqItem.TemplateId);
-                    if (ecfg is not null) shipEquips.Add(ecfg);
+                    if (ecfg is not null) shipEquips.Add((ecfg, eqItem));
                 }
             }
 
             for (int ei = 0; ei < shipEquips.Count; ei++)
             {
-                ConfigEquip ecfg = shipEquips[ei];
+                (ConfigEquip ecfg, EquipItem? instance) = shipEquips[ei];
                 ProtocolPackage eq = new();
                 eq.Write(0x08, unchecked((ulong)ecfg.EId)); // EquipTid(1)
                 eq.Write(0x10, unchecked((ulong)ei)); // EquipIndex(2)
                 eq.Write(0x18, 100UL); // PlaneNum(3)
-                if (ecfg.EquipProp is { Count: > 0 })
-                    foreach (List<long> ap in ecfg.EquipProp)
-                        if (ap is { Count: >= 2 })
-                        {
-                            ProtocolPackage av = new();
-                            av.Write(0x08, unchecked((ulong)ap[0])); // propId
-                            av.Write(0x10, unchecked((ulong)ap[1])); // value
-                            byte[] avb = av.ToArray();
-                            eq.Write(0x22, avb);
-                        }
+                foreach ((int attrId, long value) in BuildBattleEquipProps(ecfg, instance))
+                {
+                    ProtocolPackage av = new();
+                    av.Write(0x08, unchecked((ulong)attrId)); // propId
+                    av.Write(0x10, unchecked((ulong)value)); // value
+                    byte[] avb = av.ToArray();
+                    eq.Write(0x22, avb);
+                }
 
                 byte[] eqb = eq.ToArray();
                 ship.Write(0x3A, eqb);
