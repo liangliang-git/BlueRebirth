@@ -44,6 +44,13 @@ internal sealed class HeroService(GameServices services)
         IReadOnlyList<uint> ConsumedHeroIds,
         bool Changed);
 
+    internal sealed record IntensifyResult(
+        byte[] Ret,
+        Hero? UpdatedHero,
+        IReadOnlyList<uint> ConsumedHeroIds,
+        bool Changed,
+        string Error = "");
+
     internal async Task<byte[]> BuildChangeEquipRetAsync(TRequest request, string profileId, CancellationToken ct)
     {
         if (request.Args is null)
@@ -400,6 +407,115 @@ internal sealed class HeroService(GameServices services)
         PlayerAccount account = await services.GetOrCreateAccountAsync(profileId, ct);
         List<HeroGrid> heroes = account.Dock.Heroes.Select(GameServices.ToHeroGrid).ToList();
         return PlayerDataCodec.Encode(new HeroBag(heroes, account.Dock.BagSize));
+    }
+
+    internal async Task<IntensifyResult> BuildIntensifyRetAsync(
+        TRequest request, string profileId, CancellationToken ct)
+    {
+        if (request.Args is null) return new([], null, [], false, "intensify request is missing");
+        HeroIntensifyArg arg = ProtocolDecoder.DecodeHeroIntensifyArg(request.Args);
+        List<uint> consumedIds = arg.ConsumedHeros.ToList();
+        if (arg.HeroId == 0 || consumedIds.Count is < 1 or > 12 ||
+            consumedIds.Any(id => id == 0 || id == arg.HeroId) ||
+            consumedIds.Distinct().Count() != consumedIds.Count)
+            return new([], null, [], false, "intensify request is invalid");
+
+        using var _ = await services.LockAccountAsync(profileId, ct);
+        PlayerAccount account = await services.GetOrCreateAccountAsync(profileId, ct);
+        List<Hero> heroes = account.Dock.Heroes.ToList();
+        int targetIndex = heroes.FindIndex(hero => hero.HeroId == arg.HeroId);
+        if (targetIndex < 0 || heroes.Count(hero => hero.HeroId == arg.HeroId) != 1)
+            return new([], null, [], false, "intensify target does not exist");
+
+        HashSet<uint> consumedSet = consumedIds.ToHashSet();
+        List<Hero> materials = heroes.Where(hero => consumedSet.Contains(hero.HeroId)).ToList();
+        if (materials.Count != consumedIds.Count || materials.Any(material =>
+                material.Lock || material.Level != 1 || material.Advance > 1 ||
+                material.Intensify is { Count: > 0 } || IsHeroInUse(account, material.HeroId)))
+            return new([], null, [], false, "intensify material is unavailable");
+
+        Hero target = heroes[targetIndex];
+        ConfigShipNeedPowerExp? targetNeed = ShipIntensifyConfigLoader.GetNeedPower(target.TemplateId);
+        ConfigShipMaxPower? targetMax = ShipIntensifyConfigLoader.GetMaxPower(target.TemplateId);
+        if (targetNeed?.NeedPowerExp is not { Count: > 0 } needEntries ||
+            targetMax?.MaxPowerProp is not { Count: > 0 } maxEntries)
+            return new([], null, [], false, "intensify target config is missing");
+
+        int diamondCost = arg.SuperIntensify
+            ? checked(ShipIntensifyConfigLoader.DiamondCostPerHero * materials.Count)
+            : 0;
+        if (account.Character.Diamond < diamondCost)
+            return new([], null, [], false, "insufficient diamonds");
+
+        Dictionary<int, long> addedExp = [];
+        foreach (Hero material in materials)
+        {
+            ConfigShipNeedPowerExp? materialNeed = ShipIntensifyConfigLoader.GetNeedPower(material.TemplateId);
+            ConfigShipProvidePowerExp? materialProvide =
+                ShipIntensifyConfigLoader.GetProvidePower(material.TemplateId);
+            if (materialNeed is null || materialProvide?.ProvidePowerExp is not { Count: > 0 } provides)
+                return new([], null, [], false, "intensify material config is missing");
+
+            int ratio = materialNeed.EnhanceType == targetNeed.EnhanceType
+                ? ShipIntensifyConfigLoader.SameTypeRatio
+                : 10_000;
+            foreach (List<long> provide in provides)
+            {
+                if (provide.Count < 2 || provide[0] <= 0 || provide[1] <= 0) continue;
+                int attrType = checked((int)provide[0]);
+                long exp = checked(provide[1] * ratio / 10_000);
+                if (arg.SuperIntensify) exp = checked(exp * 2);
+                addedExp[attrType] = checked(addedExp.GetValueOrDefault(attrType) + exp);
+            }
+        }
+
+        Dictionary<int, long> needByAttr = needEntries
+            .Where(entry => entry.Count >= 2 && entry[0] > 0 && entry[1] > 0)
+            .ToDictionary(entry => checked((int)entry[0]), entry => entry[1]);
+        Dictionary<int, long> maxByAttr = maxEntries
+            .Where(entry => entry.Count >= 2 && entry[0] > 0 && entry[1] >= 0)
+            .ToDictionary(entry => checked((int)entry[0]), entry => entry[1]);
+        Dictionary<int, AttrIntensify> attrs = (target.Intensify ?? [])
+            .GroupBy(value => value.AttrType)
+            .ToDictionary(group => group.Key, group => group.Last());
+        bool gained = false;
+        foreach ((int attrType, long needExp) in needByAttr)
+        {
+            if (!maxByAttr.TryGetValue(attrType, out long maxLevel) || maxLevel <= 0 ||
+                !addedExp.TryGetValue(attrType, out long add) || add <= 0)
+                continue;
+
+            AttrIntensify current = attrs.GetValueOrDefault(attrType, new AttrIntensify(attrType));
+            long currentTotal = checked(Math.Max(0, current.IntensifyLvl) * needExp +
+                                        Math.Max(0, current.CurExp));
+            long cap = checked(maxLevel * needExp);
+            if (currentTotal >= cap) continue;
+            long nextTotal = Math.Min(cap, checked(currentTotal + add));
+            attrs[attrType] = new AttrIntensify(
+                attrType,
+                checked((int)(nextTotal / needExp)),
+                checked((int)(nextTotal % needExp)));
+            gained |= nextTotal > currentTotal;
+        }
+        if (!gained) return new([], null, [], false, "all intensify attributes are capped");
+
+        Hero updatedTarget = target with { Intensify = attrs.Values.OrderBy(value => value.AttrType).ToList() };
+        heroes.RemoveAll(hero => consumedSet.Contains(hero.HeroId));
+        targetIndex = heroes.FindIndex(hero => hero.HeroId == arg.HeroId);
+        if (targetIndex < 0) return new([], null, [], false, "intensify target disappeared");
+        heroes[targetIndex] = updatedTarget;
+
+        PlayerEquip equip = account.Equip ?? new PlayerEquip([], 2000);
+        List<EquipItem> equips = equip.Items.Select(item =>
+            consumedSet.Contains(item.HeroId) ? item with { HeroId = 0 } : item).ToList();
+        account = account with
+        {
+            Character = account.Character with { Diamond = account.Character.Diamond - diamondCost },
+            Dock = account.Dock with { Heroes = heroes },
+            Equip = equip with { Items = equips },
+        };
+        await services.SaveAccountAsync(account, ct);
+        return new([], updatedTarget, consumedIds, true);
     }
 
     /// <summary>处理 hero.HeroAdvance：按 config_ship_break 校验并执行突破。</summary>

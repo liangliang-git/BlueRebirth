@@ -25,6 +25,9 @@ public sealed class PSkillEntry
     }
 }
 
+/// <summary>舰娘强化属性（TAttrIntensify）。</summary>
+public sealed record AttrIntensify(int AttrType = 0, int IntensifyLvl = 0, int CurExp = 0);
+
 /// <summary>Resources consumed by a single traditional build formula.</summary>
 public sealed record BuildItem(int ResId = 0, int Count = 0);
 
@@ -117,7 +120,7 @@ public sealed record HeroGrid(uint HeroId = 0, int TemplateId = 0, int Lvl = 0, 
     long CurHp = 0, int Mood = 0, int MarryType = 0, IReadOnlyList<uint>? EquipSlots = null, string Name = "",
     int ChangeNameTime = 0, bool Lock = false, int Advance = 0, int AdvLv = 0,
     IReadOnlyList<PSkillEntry>? PSkills = null, IReadOnlyList<int>? ArrRemouldEffect = null,
-    int RemouldLV = 0);
+    int RemouldLV = 0, IReadOnlyList<AttrIntensify>? Intensify = null);
 
 /// <summary>Payload for the <c>hero.UpdateHeroBagData</c> server message (THeroInfo).</summary>
 public sealed record HeroBag(IReadOnlyList<HeroGrid>? HeroInfo = null, int HeroBagSize = 0);
@@ -729,6 +732,17 @@ var reader = new GameLoginCodec.ProtoReader(payload);
         // Exp 必须无条件编码：girlinfo GirlShowPage._LoadPropertInfo 里
         // math.tointeger(Exp) .. "/" .. needExp 拼接，Exp 为 nil 会崩。
         WriteVarintField(output, 5, unchecked((ulong)value.Exp));
+        if (value.Intensify is { Count: > 0 })
+        {
+            foreach (AttrIntensify attr in value.Intensify)
+            {
+                using var attrOutput = new MemoryStream();
+                WriteVarintField(attrOutput, 1, unchecked((ulong)attr.AttrType));
+                WriteVarintField(attrOutput, 2, unchecked((ulong)attr.IntensifyLvl));
+                WriteVarintField(attrOutput, 3, unchecked((ulong)attr.CurExp));
+                WriteMessage(output, 7, attrOutput.ToArray());
+            }
+        }
         if (value.CreateTime != 0) WriteVarintField(output, 8, unchecked((ulong)value.CreateTime));
         if (value.CurHp != 0) WriteVarintField(output, 9, unchecked((ulong)value.CurHp));
         // PSkill (field 13, repeated TMapFiledPSkillExp)：编码所有实际技能数据。
@@ -862,6 +876,14 @@ var reader = new GameLoginCodec.ProtoReader(payload);
         using var output = new MemoryStream();
         WriteMessage(output, 1, Encoding.UTF8.GetBytes(value.Key));
         WriteMessage(output, 2, Encoding.UTF8.GetBytes(value.Value));
+        return output.ToArray();
+    }
+
+    public static byte[] EncodeGuideSettingRet(IReadOnlyList<GuideSetting> settings)
+    {
+        using var output = new MemoryStream();
+        foreach (GuideSetting setting in settings)
+            WriteMessage(output, 3, Encode(setting));
         return output.ToArray();
     }
 

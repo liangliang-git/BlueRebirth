@@ -1,5 +1,6 @@
 using System.Text;
 using BlueOath.Core;
+using BlueOath.Protocol;
 
 namespace BlueOath.Server.Protocols;
 
@@ -192,6 +193,64 @@ internal static class ProtocolDecoder
             }
 
         return new HeroAddExpArg(heroId, items);
+    }
+
+    internal static HeroIntensifyArg DecodeHeroIntensifyArg(ReadOnlySpan<byte> data)
+    {
+        ProtoReader reader = new(data);
+        uint heroId = 0;
+        List<uint> consumedHeros = [];
+        bool superIntensify = false;
+        while (reader.TryReadField(out int field, out int wire))
+        {
+            switch (field)
+            {
+                case 1 when wire == 0:
+                    heroId = checked((uint)reader.ReadVarint());
+                    break;
+                case 2 when wire == 0:
+                    consumedHeros.Add(checked((uint)reader.ReadVarint()));
+                    break;
+                case 2 when wire == 2:
+                    ProtoReader packed = new(reader.ReadBytes());
+                    while (packed.HasRemaining)
+                        consumedHeros.Add(checked((uint)packed.ReadVarint()));
+                    break;
+                case 3 when wire == 0:
+                    superIntensify = reader.ReadVarint() != 0;
+                    break;
+                default:
+                    reader.Skip(wire);
+                    break;
+            }
+        }
+        return new HeroIntensifyArg(heroId, consumedHeros, superIntensify);
+    }
+
+    internal static IReadOnlyList<GuideSetting> DecodeGuideSettingArg(ReadOnlySpan<byte> data)
+    {
+        ProtoReader reader = new(data);
+        List<GuideSetting> settings = [];
+        while (reader.TryReadField(out int field, out int wire))
+        {
+            if (field != 1 || wire != 2)
+            {
+                reader.Skip(wire);
+                continue;
+            }
+
+            ProtoReader item = new(reader.ReadBytes());
+            string key = "";
+            string value = "";
+            while (item.TryReadField(out int itemField, out int itemWire))
+            {
+                if (itemField == 1 && itemWire == 2) key = item.ReadString();
+                else if (itemField == 2 && itemWire == 2) value = item.ReadString();
+                else item.Skip(itemWire);
+            }
+            if (!string.IsNullOrEmpty(key)) settings.Add(new GuideSetting(key, value));
+        }
+        return settings;
     }
 
     /// <summary>解码 hero.HeroAdvance 参数：HeroId(1, uint32), ConsumedHeros(2, repeated uint32), ConsumeItems(3, repeated uint32)。</summary>

@@ -31,6 +31,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("hero intensify request and hero-grid fields match client protobuf", HeroIntensifyCodecTest),
     ("guide setting request echoes changed toggle values", GuideSettingCodecTest),
     ("hero intensify consumes materials and persists attribute gains", HeroIntensifyStateTest),
+    ("battle hero attributes include intensify levels", HeroIntensifyBattleAttributeTest),
     ("hero advance preserves neighbors and unbinds consumed equipment", HeroAdvanceStateTest),
     ("hero max-level advance increments AdvLv and persists", HeroAdvMaxLvStateTest),
     ("build ship response omits empty special rewards", BuildShipRewardCodecTest),
@@ -103,6 +104,7 @@ if (args.Contains("--hero-intensify", StringComparer.OrdinalIgnoreCase))
         ("hero intensify request and hero-grid fields match client protobuf", HeroIntensifyCodecTest),
         ("guide setting request echoes changed toggle values", GuideSettingCodecTest),
         ("hero intensify consumes materials and persists attribute gains", HeroIntensifyStateTest),
+        ("battle hero attributes include intensify levels", HeroIntensifyBattleAttributeTest),
     ];
 if (args.Contains("--hero-adv-max-level", StringComparer.OrdinalIgnoreCase))
     tests = [("hero max-level advance increments AdvLv and persists", HeroAdvMaxLvStateTest)];
@@ -449,15 +451,28 @@ static Task HeroIntensifyCodecTest()
 
 static Task GuideSettingCodecTest()
 {
-    const string key = "LOGIC_HERO_INTENSIFY_MORESELECT";
-    byte[] item = new ProtocolPackage().Write(0x0A, key).Write(0x12, "true").ToArray();
-    byte[] request = new ProtocolPackage().Write(0x0A, item).ToArray();
+    GuideSetting[] expected =
+    [
+        new("LOGIC_HERO_INTENSIFY_TypeMatchCancel", "true"),
+        new("LOGIC_HERO_INTENSIFY_RHeroSelect", "true"),
+        new("LOGIC_HERO_INTENSIFY_MORESELECT", "true"),
+    ];
+    var requestPackage = new ProtocolPackage();
+    foreach (GuideSetting setting in expected)
+    {
+        byte[] item = new ProtocolPackage()
+            .Write(0x0A, setting.Key)
+            .Write(0x12, setting.Value)
+            .ToArray();
+        requestPackage.Write(0x0A, item);
+    }
+    byte[] request = requestPackage.ToArray();
     IReadOnlyList<GuideSetting> settings = ProtocolDecoder.DecodeGuideSettingArg(request);
-    Assert(settings.SequenceEqual([new GuideSetting(key, "true")]),
+    Assert(settings.SequenceEqual(expected),
         "guide setting request protobuf mismatch");
 
     byte[] response = PlayerDataCodec.EncodeGuideSettingRet(settings);
-    Assert(ContainsSequence(response, Encoding.UTF8.GetBytes(key)) &&
+    Assert(expected.All(setting => ContainsSequence(response, Encoding.UTF8.GetBytes(setting.Key))) &&
            ContainsSequence(response, Encoding.UTF8.GetBytes("true")),
         "guide setting response did not echo changed toggle value");
     return Task.CompletedTask;
@@ -486,9 +501,11 @@ static async Task HeroIntensifyStateTest()
         };
         await repo.SaveAccountAsync(account);
 
+        string clientPath = Environment.GetEnvironmentVariable("BLUEOATH_CLIENT_PATH")
+            ?? Path.Combine(root, "blueoath", "blueoath");
         ServerOptions options = ServerOptions.Parse(
             ["--data=" + dataRoot,
-             "--client-path=" + Path.Combine(root, "blueoath", "blueoath"),
+             "--client-path=" + clientPath,
              "--profile-id=" + profileId]);
         using Microsoft.Extensions.Logging.ILoggerFactory loggerFactory =
             Microsoft.Extensions.Logging.LoggerFactory.Create(_ => { });
@@ -534,6 +551,17 @@ static async Task HeroIntensifyStateTest()
     {
         if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, true);
     }
+}
+
+static Task HeroIntensifyBattleAttributeTest()
+{
+    var hero = new Hero(10, 10210511, 1,
+        Intensify: [new AttrIntensify(8, 24, 0), new AttrIntensify(9, 3, 200)]);
+    Assert(ProtocolEncoder.ApplyHeroIntensify(hero, 8, 215) == 239 &&
+           ProtocolEncoder.ApplyHeroIntensify(hero, 9, 311) == 314 &&
+           ProtocolEncoder.ApplyHeroIntensify(hero, 10, 1673) == 1673,
+        "battle hero payload omitted IntensifyLvl from matching attributes");
+    return Task.CompletedTask;
 }
 
 static async Task HeroAdvMaxLvStateTest()

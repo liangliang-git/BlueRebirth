@@ -637,6 +637,61 @@ internal static class ShipMainLoader
         => baseValue + levelup * Math.Max(0, level - 1);
 }
 
+internal static class ShipIntensifyConfigLoader
+{
+    private static readonly Dictionary<int, ConfigShipNeedPowerExp> NeedPower = [];
+    private static readonly Dictionary<int, ConfigShipProvidePowerExp> ProvidePower = [];
+    private static readonly Dictionary<int, ConfigShipMaxPower> MaxPower = [];
+    private static string _loadedFrom = "";
+    private static int _sameTypeRatio = 10_000;
+    private static int _diamondCostPerHero = 5;
+
+    internal static void Load(string configDir)
+    {
+        if (string.Equals(_loadedFrom, configDir, StringComparison.OrdinalIgnoreCase)) return;
+        NeedPower.Clear();
+        ProvidePower.Clear();
+        MaxPower.Clear();
+        _sameTypeRatio = 10_000;
+        _diamondCostPerHero = 5;
+        try
+        {
+            foreach (var (id, config) in ConfigDbLoader.LoadAll<ConfigShipNeedPowerExp>(
+                         configDir, "config_ship_need_power_exp.db"))
+                NeedPower[id] = config;
+            foreach (var (id, config) in ConfigDbLoader.LoadAll<ConfigShipProvidePowerExp>(
+                         configDir, "config_ship_provide_power_exp.db"))
+                ProvidePower[id] = config;
+            foreach (var (id, config) in ConfigDbLoader.LoadAll<ConfigShipMaxPower>(
+                         configDir, "config_ship_max_power.db"))
+                MaxPower[id] = config;
+
+            Dictionary<int, ConfigParameter> parameters = ConfigDbLoader.LoadAll<ConfigParameter>(
+                configDir, "config_parameter.db");
+            if (parameters.TryGetValue(110, out ConfigParameter? ratio))
+                _sameTypeRatio = checked((int)ratio.Value);
+            if (parameters.TryGetValue(31, out ConfigParameter? diamondCost))
+                _diamondCostPerHero = checked((int)diamondCost.Value);
+        }
+        finally
+        {
+            _loadedFrom = configDir;
+        }
+    }
+
+    internal static ConfigShipNeedPowerExp? GetNeedPower(int templateId) =>
+        NeedPower.GetValueOrDefault(templateId);
+
+    internal static ConfigShipProvidePowerExp? GetProvidePower(int templateId) =>
+        ProvidePower.GetValueOrDefault(templateId);
+
+    internal static ConfigShipMaxPower? GetMaxPower(int templateId) =>
+        MaxPower.GetValueOrDefault(templateId);
+
+    internal static int SameTypeRatio => _sameTypeRatio;
+    internal static int DiamondCostPerHero => _diamondCostPerHero;
+}
+
 /// <summary>舰娘突破阶段配置。</summary>
 internal static class ShipBreakLoader
 {

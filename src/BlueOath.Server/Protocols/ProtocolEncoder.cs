@@ -11,6 +11,13 @@ namespace BlueOath.Server.Protocols;
 /// </summary>
 internal static class ProtocolEncoder
 {
+    internal static long ApplyHeroIntensify(Hero hero, int attrId, long baseValue)
+    {
+        int level = hero.Intensify?
+            .LastOrDefault(value => value.AttrType == attrId)?.IntensifyLvl ?? 0;
+        return checked(baseValue + Math.Max(0, level));
+    }
+
     /// <summary>
     /// Builds battle-time equipment attributes from template base values and per-instance
     /// enhancement level. Assist ships have no instance and therefore receive base values only.
@@ -430,7 +437,7 @@ internal static class ProtocolEncoder
                 if (cfg.CarryPlaneCount > 0) scoutNum = cfg.CarryPlaneCount;
             }
 
-            foreach ((int attrId, long val) in new[]
+            foreach ((int attrId, long baseValue) in new[]
                      {
                          (1, shipHp), (5, scoutNum), (8, attack), (9, defense),
                          (10, torpedoAttack), (11, torpedoDefense),
@@ -438,6 +445,7 @@ internal static class ProtocolEncoder
                          (17, crit), (18, antiCrit), (19, hit), (20, dodge)
                      })
             {
+                long val = ApplyHeroIntensify(h, attrId, baseValue);
                 ProtocolPackage attr = new();
                 attr.Write(0x08, unchecked((ulong)attrId));
                 attr.Write(0x10, unchecked((ulong)val));
@@ -780,8 +788,9 @@ internal static class ProtocolEncoder
             ship.Write(0x10, unchecked((ulong)h.TemplateId));
             ship.Write(0x18, unchecked((ulong)h.Level));
             ship.Write(0x20, unchecked((ulong)i));
-            foreach ((int attrId, int val) in new[] { (1, 1000), (2, 100), (3, 50) })
+            foreach ((int attrId, int baseValue) in new[] { (1, 1000), (2, 100), (3, 50) })
             {
+                long val = ApplyHeroIntensify(h, attrId, baseValue);
                 ProtocolPackage attr = new();
                 attr.Write(0x08, unchecked((ulong)attrId));
                 attr.Write(0x10, unchecked((ulong)val));

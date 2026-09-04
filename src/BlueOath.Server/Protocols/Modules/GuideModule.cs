@@ -1,4 +1,5 @@
 ﻿using BlueOath.Protocol;
+using BlueOath.Core;
 using Microsoft.Extensions.Logging;
 
 namespace BlueOath.Server.Protocols;
@@ -13,10 +14,29 @@ internal sealed class GuideModule(GameServices services) : IGameModule
         byte[] ret = request.Method switch
         {
             "guide.PlotReward" => await BuildPlotRewardAsync(ctx, request.Args ?? []),
-            "guide.Setting" => [],
+            "guide.Setting" => await BuildSettingAsync(ctx, request.Args ?? []),
             _ => []
         };
         return ModuleResult.Ok(ret);
+    }
+
+    private async Task<byte[]> BuildSettingAsync(GameContext ctx, byte[] args)
+    {
+        IReadOnlyList<GuideSetting> changed = ProtocolDecoder.DecodeGuideSettingArg(args);
+        if (changed.Count == 0) return [];
+
+        using var _ = await services.LockAccountAsync(ctx.ProfileId, ctx.Ct);
+        PlayerAccount account = await ctx.GetAccountAsync();
+        Dictionary<string, string> settings = account.GuideSettings?.ToDictionary(
+            pair => pair.Key, pair => pair.Value, StringComparer.Ordinal) ??
+            new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (GuideSetting setting in changed)
+            settings[setting.Key] = setting.Value;
+        await services.SaveAccountAsync(account with { GuideSettings = settings }, ctx.Ct);
+
+        // GuideService._ReceiveUserSetting only applies the toggles when Ret contains
+        // TGuideInfo.Setting. Empty success responses leave all three UI toggles unchanged.
+        return PlayerDataCodec.EncodeGuideSettingRet(changed);
     }
 
     private async Task<byte[]> BuildPlotRewardAsync(GameContext ctx, byte[] args)

@@ -37,6 +37,12 @@ internal sealed record ItemCount(int Id = 0, int Num = 0);
 /// <summary>THeroAddExpArg（hero.AddExp）: HeroId(1, uint32) / Items(2, repeated {ItemId(2), Num(3)})。</summary>
 internal sealed record HeroAddExpArg(uint HeroId = 0, List<ItemCount> Items = null!);
 
+/// <summary>TIntensifyHeroArgs：目标舰娘、素材舰娘、钻石双倍强化。</summary>
+internal sealed record HeroIntensifyArg(
+    uint HeroId = 0,
+    IReadOnlyList<uint> ConsumedHeros = null!,
+    bool SuperIntensify = false);
+
 /// <summary>THeroMarryArg（hero.Marry）: HeroId(1, uint32) / MarryType(2, int32)。</summary>
 internal sealed record MarryArg(uint HeroId = 0, int MarryType = 1);
 

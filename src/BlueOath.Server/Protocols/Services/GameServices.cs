@@ -83,6 +83,7 @@ internal sealed class GameServices
         ShipBreakLoader.Load(configDir);
         ShipAdvanceLoader.Load(configDir);
         ShipMainLoader.Load(configDir);
+        ShipIntensifyConfigLoader.Load(configDir);
         AssistShipLoader.Load(configDir);
         EquipLoader.Load(configDir, equipmentMods.Equipment);
         PSkillGroupLoader.Load(configDir);
@@ -190,17 +191,21 @@ internal sealed class GameServices
     /// </summary>
     public byte[] BuildGuideInfoPush(uint now, PlayerAccount account)
     {
-        var settings = new List<GuideSetting>
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            new("GUIDE_DONE_STAGES", BuildDoneGuideStages()),
-            new("GUIDE_DOING_STAGE", ""),
-            new("PlotPassKey", ""),
-            new("PlotUtcTime", "0"),
-            new("PlotToggleSkipTip", "0"),
+            ["GUIDE_DONE_STAGES"] = BuildDoneGuideStages(),
+            ["GUIDE_DOING_STAGE"] = "",
+            ["PlotPassKey"] = "",
+            ["PlotUtcTime"] = "0",
+            ["PlotToggleSkipTip"] = "0",
         };
+        foreach (var (key, value) in account.GuideSettings ?? new Dictionary<string, string>())
+            settings[key] = value;
         var plotList = PlotTriggerLoader.AllPlotIds;
         _fileLogger.LogInformation("guide.GuideInfo push PlotList count={Count}", plotList.Count);
-        var guideInfo = new GuideInfo(PlotList: plotList, Setting: settings);
+        var guideInfo = new GuideInfo(
+            PlotList: plotList,
+            Setting: settings.Select(pair => new GuideSetting(pair.Key, pair.Value)).ToList());
         var ret = PlayerDataCodec.Encode(guideInfo);
         var push = new TResponse(Method: "guide.GuideInfo", Ret: ret, Time: now, IsResponse: 0);
         return TMessageCodec.EncodeResponse(push);
@@ -692,7 +697,7 @@ internal sealed class GameServices
         new(hero.HeroId, hero.TemplateId, hero.Level, hero.Fashioning, hero.Exp, hero.CreateTime,
             hero.UpdateTime, hero.Affection, hero.MarryTime, hero.CurHp, hero.Mood, hero.MarryType,
             hero.EquipSlots, hero.Name, hero.ChangeNameTime, hero.Lock, hero.Advance, hero.AdvLv, hero.PSkills,
-            hero.RemouldEffects, hero.RemouldLevel);
+            hero.RemouldEffects, hero.RemouldLevel, hero.Intensify);
 
     /// <summary>
     /// 由舰娘 TemplateId（config_ship_main 的 key）推导图鉴 IllustrateId

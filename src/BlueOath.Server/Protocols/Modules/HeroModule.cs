@@ -24,6 +24,41 @@ internal sealed class HeroModule(HeroService hero, GameServices services) : IGam
                 result = await UpdateHero(ctx,
                     await hero.BuildAddExpRetAsync(request, ctx.ProfileId, ctx.Ct));
                 break;
+            case "hero.HeroIntensify":
+                HeroService.IntensifyResult intensify =
+                    await hero.BuildIntensifyRetAsync(request, ctx.ProfileId, ctx.Ct);
+                if (!intensify.Changed || intensify.UpdatedHero is null)
+                {
+                    result = new ModuleResult
+                    {
+                        Ret = intensify.Ret,
+                        Err = 1,
+                        ErrMsg = intensify.Error,
+                    };
+                    break;
+                }
+                PlayerAccount intensifyAccount = await ctx.GetAccountAsync();
+                uint intensifyNow = (uint)ctx.Now;
+                List<HeroGrid> intensifyHeroes =
+                [
+                    GameServices.ToHeroGrid(intensify.UpdatedHero),
+                    .. intensify.ConsumedHeroIds.Select(id => new HeroGrid(HeroId: id, TemplateId: 0)),
+                ];
+                result = new ModuleResult
+                {
+                    Ret = intensify.Ret,
+                    PrePushes =
+                    [
+                        TMessageCodec.EncodeResponse(new TResponse(
+                            Method: "hero.UpdateHeroBagData",
+                            Ret: PlayerDataCodec.Encode(new HeroBag(
+                                intensifyHeroes, intensifyAccount.Dock.BagSize)),
+                            Time: intensifyNow)),
+                        services.BuildEquipPush(intensifyAccount, intensifyNow),
+                        await services.BuildUpdateUserInfoPushAsync(ctx.ProfileId, intensifyNow, ctx.Ct),
+                    ],
+                };
+                break;
             case "hero.Marry":
                 HeroService.MarryResult marry =
                     await hero.BuildMarryRetAsync(request, ctx.ProfileId, ctx.Now, ctx.Ct);
@@ -317,7 +352,6 @@ internal sealed class HeroModule(HeroService hero, GameServices services) : IGam
                     ],
                 };
                 break;
-            case "hero.HeroIntensify":
             case "hero.AutoEquip":
             case "hero.AutoUnEquip":
             case "hero.HeroEquipEffect":
