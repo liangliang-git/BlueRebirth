@@ -28,6 +28,9 @@ var tests = new (string Name, Func<Task> Run)[]
     ("equipment renovation request decodes consumed equipment ids", EquipRiseStarArgsCodecTest),
     ("zero-count bag entries encode an explicit deletion marker", BagDeletionMarkerCodecTest),
     ("normal treasure request and equipment reward use client protobuf layout", TreasureCodecTest),
+    ("hero intensify request and hero-grid fields match client protobuf", HeroIntensifyCodecTest),
+    ("guide setting request echoes changed toggle values", GuideSettingCodecTest),
+    ("hero intensify consumes materials and persists attribute gains", HeroIntensifyStateTest),
     ("hero advance preserves neighbors and unbinds consumed equipment", HeroAdvanceStateTest),
     ("hero max-level advance increments AdvLv and persists", HeroAdvMaxLvStateTest),
     ("build ship response omits empty special rewards", BuildShipRewardCodecTest),
@@ -95,6 +98,12 @@ if (args.Contains("--treasure-integration", StringComparer.OrdinalIgnoreCase))
     tests = [("equipment treasure consumes its box and persists a new equipment instance", TreasureIntegrationTest)];
 if (args.Contains("--hero-advance", StringComparer.OrdinalIgnoreCase))
     tests = [("hero advance preserves neighbors and unbinds consumed equipment", HeroAdvanceStateTest)];
+if (args.Contains("--hero-intensify", StringComparer.OrdinalIgnoreCase))
+    tests = [
+        ("hero intensify request and hero-grid fields match client protobuf", HeroIntensifyCodecTest),
+        ("guide setting request echoes changed toggle values", GuideSettingCodecTest),
+        ("hero intensify consumes materials and persists attribute gains", HeroIntensifyStateTest),
+    ];
 if (args.Contains("--hero-adv-max-level", StringComparer.OrdinalIgnoreCase))
     tests = [("hero max-level advance increments AdvLv and persists", HeroAdvMaxLvStateTest)];
 if (args.Contains("--buildship-codec", StringComparer.OrdinalIgnoreCase))
@@ -409,6 +418,117 @@ static async Task HeroAdvanceStateTest()
             new TRequest("hero.HeroAdvance", selfConsumeArgs), profileId, CancellationToken.None);
         Assert(!rejected.Changed,
             "hero advance allowed the target hero to consume itself");
+    }
+    finally
+    {
+        if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, true);
+    }
+}
+
+static Task HeroIntensifyCodecTest()
+{
+    byte[] request = new ProtocolPackage()
+        .Write(0x08, 10UL)
+        .Write(0x10, 20UL)
+        .Write(0x10, 30UL)
+        .Write(0x18, 1UL)
+        .ToArray();
+    HeroIntensifyArg arg = ProtocolDecoder.DecodeHeroIntensifyArg(request);
+    Assert(arg.HeroId == 10 && arg.ConsumedHeros.SequenceEqual([20U, 30U]) && arg.SuperIntensify,
+        "hero intensify request protobuf mismatch");
+
+    byte[] hero = PlayerDataCodec.Encode(new HeroGrid(
+        HeroId: 10,
+        TemplateId: 10210511,
+        Intensify: [new AttrIntensify(8, 2, 1500)]));
+    Assert(ContainsSequence(hero,
+            new byte[] { 0x3A, 0x07, 0x08, 0x08, 0x10, 0x02, 0x18, 0xDC, 0x0B }),
+        "hero grid omitted TAttrIntensify values");
+    return Task.CompletedTask;
+}
+
+static Task GuideSettingCodecTest()
+{
+    const string key = "LOGIC_HERO_INTENSIFY_MORESELECT";
+    byte[] item = new ProtocolPackage().Write(0x0A, key).Write(0x12, "true").ToArray();
+    byte[] request = new ProtocolPackage().Write(0x0A, item).ToArray();
+    IReadOnlyList<GuideSetting> settings = ProtocolDecoder.DecodeGuideSettingArg(request);
+    Assert(settings.SequenceEqual([new GuideSetting(key, "true")]),
+        "guide setting request protobuf mismatch");
+
+    byte[] response = PlayerDataCodec.EncodeGuideSettingRet(settings);
+    Assert(ContainsSequence(response, Encoding.UTF8.GetBytes(key)) &&
+           ContainsSequence(response, Encoding.UTF8.GetBytes("true")),
+        "guide setting response did not echo changed toggle value");
+    return Task.CompletedTask;
+}
+
+static async Task HeroIntensifyStateTest()
+{
+    string root = FindRepositoryRoot();
+    string dataRoot = Path.Combine(Path.GetTempPath(), "blueoath-hero-intensify-" + Guid.NewGuid().ToString("N"));
+    const string profileId = "hero-intensify-state";
+    try
+    {
+        var repo = new SqliteGameRepository(dataRoot);
+        PlayerAccount defaults = PlayerAccountFactory.CreateDefault(profileId, 1);
+        PlayerAccount account = defaults with
+        {
+            Character = defaults.Character with { SecretaryId = 30, Diamond = 100 },
+            Dock = new HeroDock(
+            [
+                new Hero(10, 10210511, 1, Intensify: [new AttrIntensify(8, 23, 3000)]),
+                new Hero(20, 10210511, 1, EquipSlots: [101, 0, 0, 0, 0, 0]),
+                new Hero(30, 10210511, 1),
+                new Hero(40, 10210511, 1, Lock: true),
+            ]),
+            Equip = new PlayerEquip([new EquipItem(101, 30151, HeroId: 20)], 2000),
+        };
+        await repo.SaveAccountAsync(account);
+
+        ServerOptions options = ServerOptions.Parse(
+            ["--data=" + dataRoot,
+             "--client-path=" + Path.Combine(root, "blueoath", "blueoath"),
+             "--profile-id=" + profileId]);
+        using Microsoft.Extensions.Logging.ILoggerFactory loggerFactory =
+            Microsoft.Extensions.Logging.LoggerFactory.Create(_ => { });
+        var services = new GameServices(repo, options, loggerFactory);
+        var heroService = new HeroService(services);
+
+        byte[] lockedArgs = new ProtocolPackage()
+            .Write(0x08, 10UL)
+            .Write(0x10, 40UL)
+            .ToArray();
+        HeroService.IntensifyResult locked = await heroService.BuildIntensifyRetAsync(
+            new TRequest("hero.HeroIntensify", lockedArgs), profileId, CancellationToken.None);
+        Assert(!locked.Changed, "hero intensify consumed a locked material hero");
+
+        byte[] args = new ProtocolPackage()
+            .Write(0x08, 10UL)
+            .Write(0x10, 20UL)
+            .Write(0x18, 1UL)
+            .ToArray();
+        HeroService.IntensifyResult result = await heroService.BuildIntensifyRetAsync(
+            new TRequest("hero.HeroIntensify", args), profileId, CancellationToken.None);
+        Assert(result.Changed && result.ConsumedHeroIds.SequenceEqual([20U]),
+            "valid hero intensify did not consume its material hero");
+
+        PlayerAccount saved = await repo.LoadAccountAsync(profileId)
+            ?? throw new InvalidDataException("intensified account disappeared");
+        Assert(saved.Dock.Heroes.Select(hero => hero.HeroId).SequenceEqual([10U, 30U, 40U]),
+            "hero intensify removed the wrong dock entry");
+        Hero target = saved.Dock.Heroes.Single(hero => hero.HeroId == 10);
+        Dictionary<int, AttrIntensify> attrs = target.Intensify!.ToDictionary(value => value.AttrType);
+        Assert(attrs[8] == new AttrIntensify(8, 24, 0) &&
+               attrs[9] == new AttrIntensify(9, 1, 3375) &&
+               attrs[10] == new AttrIntensify(10, 8, 0) &&
+               attrs[11] == new AttrIntensify(11, 1, 3375) &&
+               attrs[12] == new AttrIntensify(12, 3, 564),
+            "hero intensify calculated wrong capped levels or remainder experience");
+        Assert(saved.Character.Diamond == 95,
+            "super intensify deducted the wrong diamond cost");
+        Assert(saved.Equip!.Items.Single(equip => equip.EquipId == 101).HeroId == 0,
+            "hero intensify left consumed material equipment bound");
     }
     finally
     {
