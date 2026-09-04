@@ -753,9 +753,9 @@ static Task EquipRenovationSkillTest()
     Assert(ProtocolEncoder.BuildBattleEquipSkills(config, new EquipItem(1, 30044, Star: 0)).Count == 0,
         "renovation skill unlocked before equipment star level");
     IReadOnlyList<(int SkillId, int Level)> skills = ProtocolEncoder.BuildBattleEquipSkills(
-        config, new EquipItem(1, 30044, Star: 1));
-    Assert(skills.SequenceEqual([(50001, 1)]),
-        "battle equipment payload omitted RenovateSkill after star upgrade");
+        config, new EquipItem(1, 30044, Star: 4));
+    Assert(skills.SequenceEqual([(50001, 4)]),
+        "renovation skill level did not increase with equipment star upgrades");
     return Task.CompletedTask;
 }
 
