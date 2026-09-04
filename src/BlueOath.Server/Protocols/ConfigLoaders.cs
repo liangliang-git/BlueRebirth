@@ -780,6 +780,29 @@ internal static class EquipLoader
         => _renovateLevels.TryGetValue(level, out var cfg) ? cfg : null;
 }
 
+internal static class PSkillGroupLoader
+{
+    private static readonly Dictionary<int, ConfigPskillDictGroup> _skills = new();
+    private static bool _loaded;
+
+    public static void Load(string configDir)
+    {
+        if (_loaded) return;
+        try
+        {
+            _skills.Clear();
+            foreach (var (id, cfg) in ConfigDbLoader.LoadAll<ConfigPskillDictGroup>(
+                         configDir, "config_pskill_dict_group.db"))
+                _skills[id] = cfg;
+        }
+        catch { }
+        _loaded = true;
+    }
+
+    public static ConfigPskillDictGroup? Get(int id)
+        => _skills.TryGetValue(id, out ConfigPskillDictGroup? config) ? config : null;
+}
+
 internal static class AffectionItemLoader
 {
     private static readonly Dictionary<int, ConfigAffectionItem> _items = new();

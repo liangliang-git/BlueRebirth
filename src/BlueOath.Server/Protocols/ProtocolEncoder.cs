@@ -53,7 +53,15 @@ internal static class ProtocolEncoder
         return config.RenovateSkill
             .Where(skillId => skillId > 0)
             .Distinct()
-            .Select(skillId => (checked((int)skillId), 1))
+            .Select(skillId =>
+            {
+                int id = checked((int)skillId);
+                long configuredMax = PSkillGroupLoader.Get(id)?.MaxLevel ?? instance.Star;
+                int maxLevel = configuredMax > 0
+                    ? checked((int)Math.Min(configuredMax, int.MaxValue))
+                    : instance.Star;
+                return (id, Math.Min(instance.Star, maxLevel));
+            })
             .ToList();
     }
 

@@ -85,6 +85,7 @@ internal sealed class GameServices
         ShipMainLoader.Load(configDir);
         AssistShipLoader.Load(configDir);
         EquipLoader.Load(configDir, equipmentMods.Equipment);
+        PSkillGroupLoader.Load(configDir);
         ExpandItemLoader.Load(configDir);
         AffectionItemLoader.Load(configDir);
         ShipHandbookLoader.Load(configDir);
