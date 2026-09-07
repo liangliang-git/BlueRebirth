@@ -215,8 +215,8 @@ pub(super) fn handle_study_typed(
         "study.EndStudyPSkill" => {
             let hero_id = decode_varint_u64_field(request_args, 1);
             let skill_id = decode_varint_u64_field(request_args, 2);
-            finish_study_typed(account, hero_id, skill_id, now, false)
-                .map(|payload| {
+            match finish_study_typed(account, hero_id, skill_id, now, false) {
+                Ok(payload) => {
                     append_method_push(
                         post_pushes,
                         "hero.UpdateHeroBagData",
@@ -228,10 +228,9 @@ pub(super) fn handle_study_typed(
                         study_info_payload_from_typed(account, now),
                     );
                     HandlerResult::Reply(Response::raw(method, payload))
-                })
-                .unwrap_or_else(|| {
-                    HandlerResult::Error(GameError::InvalidRequest("study is not finished"))
-                })
+                }
+                Err(error) => HandlerResult::Error(error),
+            }
         }
         "study.SpeedUpStudy" => {
             let hero_id = decode_varint_u64_field(request_args, 1);
@@ -263,8 +262,8 @@ pub(super) fn handle_study_typed(
             for (item_id, count) in items {
                 let _ = consume_typed_item(account, item_id, count);
             }
-            finish_study_typed(account, hero_id, skill_id, now, true)
-                .map(|payload| {
+            match finish_study_typed(account, hero_id, skill_id, now, true) {
+                Ok(payload) => {
                     append_method_push(
                         post_pushes,
                         "hero.UpdateHeroBagData",
@@ -276,10 +275,9 @@ pub(super) fn handle_study_typed(
                         study_info_payload_from_typed(account, now),
                     );
                     HandlerResult::Reply(Response::raw(method, payload))
-                })
-                .unwrap_or_else(|| {
-                    HandlerResult::Error(GameError::InvalidState("study progress is missing"))
-                })
+                }
+                Err(error) => HandlerResult::Error(error),
+            }
         }
         _ => HandlerResult::Empty,
     }
@@ -315,17 +313,26 @@ fn finish_study_typed(
     skill_id: u64,
     now: u32,
     force: bool,
-) -> Option<Vec<u8>> {
+) -> Result<Vec<u8>, GameError> {
     let index = account
         .study
         .progress
         .iter()
-        .position(|progress| progress.hero_id == hero_id && progress.skill_id == skill_id)?;
+        .position(|progress| progress.hero_id == hero_id && progress.skill_id == skill_id)
+        .ok_or(GameError::InvalidState("study progress is missing"))?;
     if !force && account.study.progress[index].end_time > u64::from(now) {
-        return None;
+        return Err(GameError::InvalidRequest("study is not finished"));
+    }
+    let hero_key = hero_key(hero_id);
+    if !account.dock.heroes.contains_key(&hero_key) {
+        return Err(GameError::NotFound("study hero"));
     }
     let progress = account.study.progress.remove(index);
-    let hero = account.dock.heroes.get_mut(&hero_key(hero_id))?;
+    let hero = account
+        .dock
+        .heroes
+        .get_mut(&hero_key)
+        .expect("study hero validated before progress removal");
     let before = hero.pskills.get(&skill_id).copied().unwrap_or_default();
     let after = before.saturating_add(1).max(1);
     hero.pskills.insert(skill_id, after);
@@ -335,7 +342,7 @@ fn finish_study_typed(
     append_varint_field(&mut output, 3, u64::from(before));
     append_varint_field(&mut output, 4, u64::from(after));
     append_varint_field(&mut output, 5, progress.textbook_id);
-    Some(output)
+    Ok(output)
 }
 
 fn study_info_payload_from_typed(account: &AccountState, _now: u32) -> Vec<u8> {
