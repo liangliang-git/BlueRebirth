@@ -3292,3 +3292,37 @@ fn write_varint(output: &mut Vec<u8>, mut value: u64) {
     }
     output.push(value as u8);
 }
+
+#[cfg(test)]
+mod request_decode_tests {
+    use super::{CopyMiniGamePassRequest, CopyStarRewardRequest, Decode, SupportCompleteRequest};
+
+    fn varint_field(field: u32, value: u64) -> Vec<u8> {
+        let mut payload = Vec::new();
+        super::write_varint_field(&mut payload, field, value);
+        payload
+    }
+
+    #[test]
+    fn copy_star_reward_preserves_repeated_indexes() {
+        let mut payload = varint_field(1, 30001);
+        payload.extend(varint_field(3, 1));
+        payload.extend(varint_field(3, 2));
+        let request = CopyStarRewardRequest::decode(&payload).expect("valid star reward request");
+        assert_eq!(request.chapter_id, 30001);
+        assert_eq!(request.indexes, vec![1, 2]);
+    }
+
+    #[test]
+    fn mini_game_pass_requires_success_marker() {
+        let payload = varint_field(1, 1001);
+        assert!(CopyMiniGamePassRequest::decode(&payload).is_err());
+    }
+
+    #[test]
+    fn support_completion_rejects_zero_identifier() {
+        let mut payload = varint_field(1, 0);
+        payload.extend(varint_field(2, 1));
+        assert!(SupportCompleteRequest::decode(&payload).is_err());
+    }
+}
