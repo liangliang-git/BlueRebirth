@@ -871,7 +871,7 @@ impl ProfileStore {
         }
         account.sea.difficulty = connection
             .query_row(
-                "SELECT difficulty FROM sea_progress WHERE profile_id = ?1",
+                "SELECT difficulty FROM sea_difficulty WHERE profile_id = ?1",
                 params![profile_id.as_str()],
                 |row| row.get::<_, i64>(0),
             )
@@ -2450,7 +2450,7 @@ impl ProfileStore {
         }
         if account.sea.difficulty > 0 {
             transaction.execute(
-                "INSERT INTO sea_progress(profile_id, difficulty) VALUES (?1, ?2)",
+                "INSERT INTO sea_difficulty(profile_id, difficulty) VALUES (?1, ?2)",
                 params![
                     profile.id.as_str(),
                     typed_i64(account.sea.difficulty, "sea difficulty")?,
@@ -3384,7 +3384,7 @@ fn clear_normalized_account(
         "copy_record_heroes",
         "copy_records",
         "copy_progress",
-        "sea_progress",
+        "sea_difficulty",
         "sea_progress",
         "tower_progress",
         "activity_progress",
@@ -3518,6 +3518,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0020_guild_box_typed_state.sql"),
     include_str!("../../../migrations/0021_copy_records_typed_state.sql"),
     include_str!("../../../migrations/0022_sea_progress_typed_state.sql"),
+    include_str!("../../../migrations/0023_sea_difficulty_typed_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {
