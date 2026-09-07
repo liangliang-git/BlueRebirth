@@ -40,15 +40,16 @@ use super::{
     ship_attributes_for_hero, ship_attributes_for_template, shop_costs_from_value,
     shop_info_payload, start_construction, start_study_state, start_support_state,
     story_memory_payload, study_info_payload, study_skill_state, sync_achievement_points,
-    task_completed, task_info_payload, task_info_payload_from_typed_account, update_bathroom_state,
-    update_building_assignments, update_mop_up_state, validate_battle_attack, BattleCatalog,
-    BattleCopy, BattleEnemy, BattleFleetReward, BuildShipCatalog, BuildingCatalog, ChapterCatalog,
-    CommanderLevelCatalog, EquipCatalog, EquipLevelbreakRule, EquipNewTestCatalog, EquipNum,
-    EquipRenovateRule, HeroBreakdownCatalog, HeroLevelCatalog, HeroSkillUpgradeCatalog,
-    MailTemplate, ServerConfig, ServerState, ShipAdvanceCatalog, ShipBreakCatalog,
-    ShipRemouldCatalog, ShipStat, ShipStatCatalog, ShopCatalog, ShopCost, ShopGood, ShopReward,
-    SupportCatalog, SupportFleetItem, TalentCatalog, TalentNode, TaskCatalog, TaskDefinition,
-    UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
+    sync_typed_battle_state, task_completed, task_info_payload,
+    task_info_payload_from_typed_account, update_bathroom_state, update_building_assignments,
+    update_mop_up_state, validate_battle_attack, BattleCatalog, BattleCopy, BattleEnemy,
+    BattleFleetReward, BuildShipCatalog, BuildingCatalog, ChapterCatalog, CommanderLevelCatalog,
+    EquipCatalog, EquipLevelbreakRule, EquipNewTestCatalog, EquipNum, EquipRenovateRule,
+    HeroBreakdownCatalog, HeroLevelCatalog, HeroSkillUpgradeCatalog, MailTemplate, ServerConfig,
+    ServerState, ShipAdvanceCatalog, ShipBreakCatalog, ShipRemouldCatalog, ShipStat,
+    ShipStatCatalog, ShopCatalog, ShopCost, ShopGood, ShopReward, SupportCatalog, SupportFleetItem,
+    TalentCatalog, TalentNode, TaskCatalog, TaskDefinition, UserInfoCodec, DEFAULT_GUILD_ID,
+    GUILD_MEMBER,
 };
 use blueoath_domain::{FleetId, FleetRecord, HeroId, NewAccountFactory, ProfileId, TemplateId};
 use blueoath_protocol::{
@@ -118,6 +119,96 @@ async fn typed_user_routes_update_account_state_without_json_account() {
     .unwrap();
     let _ = NetSocketFrameCodec::read(&mut client).await.unwrap();
     assert_eq!(account.character.head, 1021052);
+}
+
+#[test]
+fn typed_battle_state_tracks_start_partial_pass_and_final_victory() {
+    let mut account = NewAccountFactory::create(ProfileId::new("typed-battle").unwrap(), "Battle");
+    let mut start_args = Vec::new();
+    append_varint_field(&mut start_args, 2, 10001);
+    let legacy_start = json!({
+        "battleSession": {
+            "copyId": 10001,
+            "remainingFleetIds": [1, 2]
+        }
+    });
+
+    sync_typed_battle_state(
+        Some(&mut account),
+        Some(&legacy_start),
+        "copy.StartBase",
+        &start_args,
+        100,
+    );
+    let active = account
+        .battle
+        .active
+        .as_ref()
+        .expect("typed battle started");
+    assert_eq!(active.copy_id.get(), 10001);
+    assert_eq!(active.current_fleet, 1);
+    assert_eq!(active.expires_at, 1900);
+
+    let mut partial_args = Vec::new();
+    append_varint_field(&mut partial_args, 8, 3);
+    sync_typed_battle_state(
+        Some(&mut account),
+        Some(&legacy_start),
+        "copy.PassBase",
+        &partial_args,
+        101,
+    );
+    assert_eq!(account.battle.active.as_ref().unwrap().current_fleet, 2);
+    assert!(account.battle.passed_copies.is_empty());
+
+    let legacy_finished = json!({ "battleSession": null });
+    sync_typed_battle_state(
+        Some(&mut account),
+        Some(&legacy_finished),
+        "copy.PassBase",
+        &partial_args,
+        102,
+    );
+    assert!(account.battle.active.is_none());
+    assert!(account
+        .battle
+        .passed_copies
+        .iter()
+        .any(|copy_id| copy_id.get() == 10001));
+}
+
+#[test]
+fn typed_battle_state_clears_active_session_on_defeat() {
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("typed-battle-loss").unwrap(), "Battle");
+    let mut start_args = Vec::new();
+    append_varint_field(&mut start_args, 2, 10001);
+    let legacy_start = json!({
+        "battleSession": {
+            "copyId": 10001,
+            "remainingFleetIds": [1]
+        }
+    });
+    sync_typed_battle_state(
+        Some(&mut account),
+        Some(&legacy_start),
+        "copy.StartBase",
+        &start_args,
+        100,
+    );
+
+    let mut defeat_args = Vec::new();
+    append_varint_field(&mut defeat_args, 8, 9);
+    let legacy_finished = json!({ "battleSession": null });
+    sync_typed_battle_state(
+        Some(&mut account),
+        Some(&legacy_finished),
+        "copy.PassBase",
+        &defeat_args,
+        101,
+    );
+    assert!(account.battle.active.is_none());
+    assert!(account.battle.passed_copies.is_empty());
 }
 
 #[test]

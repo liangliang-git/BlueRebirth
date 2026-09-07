@@ -1,4 +1,5 @@
-use blueoath_domain::AccountState;
+use blueoath_domain::{AccountState, ChapterId, CopyId, FleetId};
+use blueoath_game::BattleService;
 use blueoath_protocol::*;
 use blueoath_transport::NetSocketFrameCodec;
 use serde_json::{json, Value};
@@ -1220,7 +1221,17 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            let payload = result.into_payload();
+            if handler_error.is_none() {
+                sync_typed_battle_state(
+                    typed_account.as_deref_mut(),
+                    account.as_deref(),
+                    request.method.as_str(),
+                    request_args,
+                    current_unix_seconds(),
+                );
+            }
+            payload
         }
         _ if method.is_family(MethodFamily::TalentTree) => {
             let mut context = GameLoginRequestContext {
@@ -2031,4 +2042,76 @@ where
         NetSocketFrameCodec::write(stream, 0, &push).await?;
     }
     Ok(true)
+}
+
+pub(super) fn sync_typed_battle_state(
+    typed_account: Option<&mut AccountState>,
+    legacy_account: Option<&Value>,
+    method: &str,
+    request_args: &[u8],
+    now: u32,
+) {
+    let Some(typed_account) = typed_account else {
+        return;
+    };
+
+    match method {
+        "copy.StartBase" | "copy.PvpStartBase" => {
+            let Ok(request) = CopyStartRequest::decode(request_args) else {
+                return;
+            };
+            if request.copy_id <= 0 || typed_account.battle.active.is_some() {
+                return;
+            }
+            let session = legacy_account
+                .and_then(|account| account.get("battleSession"))
+                .and_then(Value::as_object)
+                .filter(|session| {
+                    session.get("copyId").and_then(Value::as_i64)
+                        == Some(i64::from(request.copy_id))
+                });
+            let fleet_id = session
+                .and_then(|session| session.get("remainingFleetIds"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_u64)
+                .find(|fleet_id| *fleet_id > 0)
+                .or_else(|| typed_account.fleet.fleets.keys().next().map(|id| id.get()));
+            let (Some(chapter_id), Some(copy_id), Some(fleet_id)) = (
+                ChapterId::new(request.copy_id as u64).ok(),
+                CopyId::new(request.copy_id as u64).ok(),
+                fleet_id.and_then(|id| FleetId::new(id).ok()),
+            ) else {
+                return;
+            };
+            if BattleService::start(typed_account, chapter_id, copy_id, fleet_id, u64::from(now))
+                .is_ok()
+            {
+                if let Some(active) = typed_account.battle.active.as_mut() {
+                    active.expires_at = u64::from(now).saturating_add(1_800);
+                }
+            }
+        }
+        "copy.PassBase" => {
+            let Some(active) = typed_account.battle.active.as_ref() else {
+                return;
+            };
+            let copy_id = active.copy_id;
+            let grade = decode_battle_pass_result(request_args).grade;
+            let victory = grade <= 0 || grade < 9;
+            let session_finished = legacy_account
+                .and_then(|account| account.get("battleSession"))
+                .is_none_or(Value::is_null);
+            if session_finished {
+                let _ = BattleService::settle(typed_account, copy_id, victory);
+            } else if victory {
+                if let Some(active) = typed_account.battle.active.as_mut() {
+                    active.current_fleet = active.current_fleet.saturating_add(1);
+                    active.revision = active.revision.saturating_add(1);
+                }
+            }
+        }
+        _ => {}
+    }
 }

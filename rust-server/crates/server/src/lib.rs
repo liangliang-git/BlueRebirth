@@ -82,6 +82,8 @@ use equip_state::*;
 pub use frame_service::process_frame;
 use frame_service::{prepare_local_request, storage_failure_response};
 use game_login::process_game_login_frame_payload_with_catalogs_typed_mut;
+#[cfg(test)]
+pub(crate) use game_login::sync_typed_battle_state;
 use guild_state::*;
 use hero_state::*;
 pub use local_protocol::dispatch;
