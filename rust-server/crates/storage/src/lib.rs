@@ -31,7 +31,25 @@ pub enum StorageError {
 pub struct StoredProfile {
     pub id: String,
     pub name: String,
-    pub state: Value,
+    pub state: StoredProfileState,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StoredProfileState {
+    pub level: i32,
+    pub fuel: i64,
+    pub coins: i64,
+    pub ships: Vec<StoredShip>,
+    pub formation_ship_ids: Vec<i32>,
+    pub completed_stages: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredShip {
+    pub id: i32,
+    pub name: String,
+    pub level: i32,
+    pub power: i32,
 }
 
 /// SQLite persistence compatible with the C# `profiles` table.
@@ -55,25 +73,54 @@ impl ProfileStore {
         let connection = self.connection()?;
         let row = connection
             .query_row(
-                "SELECT id, name, state_json FROM profiles WHERE id = ?1",
+                "SELECT id, name FROM profiles WHERE id = ?1",
                 params![profile_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                },
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
-        row.map(|(id, name, state_json)| {
-            Ok(StoredProfile {
-                id,
-                name,
-                state: serde_json::from_str(&state_json)?,
-            })
-        })
-        .transpose()
+        let Some((id, name)) = row else {
+            return Ok(None);
+        };
+        let state = connection
+            .query_row(
+                "SELECT level, fuel, coins, completed_stages
+                 FROM profile_runtime WHERE profile_id = ?1",
+                params![profile_id],
+                |row| {
+                    Ok(StoredProfileState {
+                        level: row.get(0)?,
+                        fuel: row.get(1)?,
+                        coins: row.get(2)?,
+                        completed_stages: row.get(3)?,
+                        ..StoredProfileState::default()
+                    })
+                },
+            )
+            .optional()?
+            .unwrap_or_default();
+        let mut state = state;
+        let mut statement = connection.prepare(
+            "SELECT ship_id, name, level, power
+             FROM profile_ships WHERE profile_id = ?1 ORDER BY ship_id",
+        )?;
+        state.ships = statement
+            .query_map(params![profile_id], |row| {
+                Ok(StoredShip {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    level: row.get(2)?,
+                    power: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut statement = connection.prepare(
+            "SELECT ship_id FROM profile_formation
+             WHERE profile_id = ?1 ORDER BY position",
+        )?;
+        state.formation_ship_ids = statement
+            .query_map(params![profile_id], |row| row.get::<_, i32>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Some(StoredProfile { id, name, state }))
     }
 
     pub fn load_account(&self, profile_id: &str) -> Result<Option<Value>, StorageError> {
@@ -451,21 +498,69 @@ impl ProfileStore {
         Ok(Some(account))
     }
 
-    pub fn save(&self, profile_id: &str, name: &str, state: &Value) -> Result<(), StorageError> {
+    pub fn save(
+        &self,
+        profile_id: &str,
+        name: &str,
+        state: &StoredProfileState,
+    ) -> Result<(), StorageError> {
         if !is_valid_profile_id(profile_id) {
             return Err(StorageError::InvalidProfileId);
         }
-        let state_json = serde_json::to_string(state)?;
-        let connection = self.connection()?;
-        connection.execute(
-            "INSERT INTO profiles(id, name, state_json, updated_utc)
-             VALUES (?1, ?2, ?3, ?4)
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO profiles(id, name, updated_utc)
+             VALUES (?1, ?2, ?3)
              ON CONFLICT(id) DO UPDATE SET
                name = excluded.name,
-               state_json = excluded.state_json,
                updated_utc = excluded.updated_utc",
-            params![profile_id, name, state_json, timestamp()],
+            params![profile_id, name, timestamp()],
         )?;
+        transaction.execute(
+            "DELETE FROM profile_formation WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        transaction.execute(
+            "DELETE FROM profile_ships WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        transaction.execute(
+            "DELETE FROM profile_runtime WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        transaction.execute(
+            "INSERT INTO profile_runtime(profile_id, level, fuel, coins, completed_stages)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                profile_id,
+                state.level,
+                state.fuel,
+                state.coins,
+                state.completed_stages,
+            ],
+        )?;
+        for ship in &state.ships {
+            if ship.id <= 0 {
+                continue;
+            }
+            transaction.execute(
+                "INSERT INTO profile_ships(profile_id, ship_id, name, level, power)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![profile_id, ship.id, ship.name, ship.level, ship.power,],
+            )?;
+        }
+        for (position, ship_id) in state.formation_ship_ids.iter().enumerate() {
+            if *ship_id <= 0 {
+                continue;
+            }
+            transaction.execute(
+                "INSERT INTO profile_formation(profile_id, position, ship_id)
+                     VALUES (?1, ?2, ?3)",
+                params![profile_id, position as i64, ship_id],
+            )?;
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -597,8 +692,8 @@ impl ProfileStore {
         })?;
 
         transaction.execute(
-            "INSERT INTO profiles(id, name, state_json, updated_utc)
-             VALUES (?1, ?2, '{}', ?3)
+            "INSERT INTO profiles(id, name, updated_utc)
+             VALUES (?1, ?2, ?3)
              ON CONFLICT(id) DO UPDATE SET
                name = excluded.name,
                updated_utc = excluded.updated_utc",
@@ -939,8 +1034,8 @@ fn project_normalized_core(
         .filter(|name| !name.is_empty())
         .unwrap_or(profile_id);
     transaction.execute(
-        "INSERT INTO profiles(id, name, state_json, updated_utc)
-         VALUES (?1, ?2, '{}', ?3)
+        "INSERT INTO profiles(id, name, updated_utc)
+         VALUES (?1, ?2, ?3)
          ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_utc = excluded.updated_utc",
         params![profile_id, profile_name, timestamp()],
     )?;
@@ -1454,6 +1549,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0004_core_account.sql"),
     include_str!("../../../migrations/0005_core_indexes.sql"),
     include_str!("../../../migrations/0006_progress_social_activity.sql"),
+    include_str!("../../../migrations/0007_normalized_profile_runtime.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

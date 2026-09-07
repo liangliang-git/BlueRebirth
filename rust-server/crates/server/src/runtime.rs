@@ -74,12 +74,19 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
     let profile_name = config.profile_name.clone();
     let version = config.version.clone();
     let mut initial_state = match store.load(&profile_id)? {
-        Some(profile) => {
-            ServerState::from_snapshot(profile_id.clone(), profile.name, version, profile.state)?
-        }
+        Some(profile) => ServerState::from_stored_profile(
+            profile_id.clone(),
+            profile.name,
+            version,
+            profile.state,
+        ),
         None => {
             let state = ServerState::new(profile_id.clone(), profile_name, version);
-            store.save(&state.profile_id, &state.name, &state.snapshot())?;
+            store.save(
+                &state.profile_id,
+                &state.name,
+                &state.stored_profile_state(),
+            )?;
             state
         }
     };
@@ -870,9 +877,9 @@ async fn handle_connection(
             let store_task = store.clone();
             let profile_id = candidate.profile_id.clone();
             let profile_name = candidate.name.clone();
-            let state_json = candidate.snapshot();
+            let stored_state = candidate.stored_profile_state();
             let save_result = tokio::task::spawn_blocking(move || {
-                store_task.save(&profile_id, &profile_name, &state_json)
+                store_task.save(&profile_id, &profile_name, &stored_state)
             })
             .await
             .map_err(|error| ServerError::StorageTask(error.to_string()))?

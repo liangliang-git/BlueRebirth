@@ -1,13 +1,11 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use blueoath_storage::ProfileStore;
+use blueoath_storage::{ProfileStore, StoredProfileState, StoredShip};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
 use tokio::sync::broadcast;
-
-use super::ServerError;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ServerConfigError {
@@ -169,49 +167,51 @@ impl ServerState {
         })
     }
 
-    pub(crate) fn from_snapshot(
+    pub(crate) fn from_stored_profile(
         profile_id: String,
-        fallback_name: String,
+        name: String,
         version: String,
-        snapshot: Value,
-    ) -> Result<Self, ServerError> {
-        #[derive(Deserialize)]
-        struct PersistedState {
-            #[serde(default)]
-            name: Option<String>,
-            level: i32,
-            fuel: i64,
-            coins: i64,
-            ships: Vec<Ship>,
-            formation: Formation,
-            #[serde(rename = "completedStages")]
-            completed_stages: i32,
+        stored: StoredProfileState,
+    ) -> Self {
+        let mut state = Self::new(profile_id, name, version);
+        state.level = stored.level;
+        state.fuel = stored.fuel;
+        state.coins = stored.coins;
+        state.completed_stages = stored.completed_stages;
+        state.ships = stored
+            .ships
+            .into_iter()
+            .map(|ship| Ship {
+                id: ship.id,
+                name: ship.name,
+                level: ship.level,
+                power: ship.power,
+            })
+            .collect();
+        state.formation = Formation {
+            ship_ids: stored.formation_ship_ids,
+        };
+        state
+    }
+
+    pub(crate) fn stored_profile_state(&self) -> StoredProfileState {
+        StoredProfileState {
+            level: self.level,
+            fuel: self.fuel,
+            coins: self.coins,
+            ships: self
+                .ships
+                .iter()
+                .map(|ship| StoredShip {
+                    id: ship.id,
+                    name: ship.name.clone(),
+                    level: ship.level,
+                    power: ship.power,
+                })
+                .collect(),
+            formation_ship_ids: self.formation.ship_ids.clone(),
+            completed_stages: self.completed_stages,
         }
-        let persisted: PersistedState = serde_json::from_value(snapshot).map_err(|error| {
-            ServerError::InvalidMessage(format!("invalid persisted state: {error}"))
-        })?;
-        Ok(Self {
-            profile_id,
-            name: persisted.name.unwrap_or(fallback_name),
-            version,
-            battle_port: 7080,
-            coins: persisted.coins,
-            fuel: persisted.fuel,
-            level: persisted.level,
-            ships: persisted.ships,
-            formation: persisted.formation,
-            completed_stages: persisted.completed_stages,
-            drop_multiplier: 1.0,
-            ship_exp_multiplier: 1.0,
-            commander_exp_multiplier: 1.0,
-            ship_stat_multiplier: 1.0,
-            mood_recovery_multiplier: 1.0,
-            affection_multiplier: 1.0,
-            building_oil_multiplier: 1.0,
-            building_gold_multiplier: 1.0,
-            social_store: None,
-            shared_social: Arc::new(Mutex::new(SharedSocialState::default())),
-        })
     }
 }
 

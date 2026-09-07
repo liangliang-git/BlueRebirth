@@ -2,7 +2,7 @@ use blueoath_domain::{
     AccountRepository, AccountState, BattleSession, ChapterId, CopyId, EquipId, EquipmentState,
     FleetId, FleetRecord, HeroId, HeroState, ProfileId, ProfileState, TemplateId,
 };
-use blueoath_storage::{ProfileStore, StorageError};
+use blueoath_storage::{ProfileStore, StorageError, StoredProfileState, StoredShip};
 use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -17,28 +17,41 @@ fn store() -> (ProfileStore, std::path::PathBuf) {
     (ProfileStore::open(&root).unwrap(), root)
 }
 
+fn profile_state(coins: i64) -> StoredProfileState {
+    StoredProfileState {
+        level: 1,
+        fuel: 100,
+        coins,
+        ..StoredProfileState::default()
+    }
+}
+
 #[test]
 fn profiles_are_upserted_and_isolated() {
     let (store, root) = store();
-    store.save("one", "One", &json!({"coins": 10})).unwrap();
-    store.save("two", "Two", &json!({"coins": 20})).unwrap();
+    store.save("one", "One", &profile_state(10)).unwrap();
+    store.save("two", "Two", &profile_state(20)).unwrap();
 
-    assert_eq!(store.load("one").unwrap().unwrap().state["coins"], 10);
-    assert_eq!(store.load("two").unwrap().unwrap().state["coins"], 20);
+    assert_eq!(store.load("one").unwrap().unwrap().state.coins, 10);
+    assert_eq!(store.load("two").unwrap().unwrap().state.coins, 20);
     assert_eq!(store.list().unwrap(), vec!["one", "two"]);
 
-    store.save("one", "Renamed", &json!({"coins": 11})).unwrap();
+    store.save("one", "Renamed", &profile_state(11)).unwrap();
     let renamed = store.load("one").unwrap().unwrap();
     assert_eq!(renamed.name, "Renamed");
-    assert_eq!(renamed.state["coins"], 11);
+    assert_eq!(renamed.state.coins, 11);
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
 fn reset_removes_only_selected_profile() {
     let (store, root) = store();
-    store.save("one", "One", &json!({})).unwrap();
-    store.save("two", "Two", &json!({})).unwrap();
+    store
+        .save("one", "One", &StoredProfileState::default())
+        .unwrap();
+    store
+        .save("two", "Two", &StoredProfileState::default())
+        .unwrap();
     store.reset("one").unwrap();
 
     assert!(store.load("one").unwrap().is_none());
@@ -49,7 +62,9 @@ fn reset_removes_only_selected_profile() {
 #[test]
 fn invalid_profile_id_is_rejected_before_database_write() {
     let (store, root) = store();
-    let error = store.save("bad/id", "Bad", &json!({})).unwrap_err();
+    let error = store
+        .save("bad/id", "Bad", &StoredProfileState::default())
+        .unwrap_err();
 
     assert!(matches!(error, StorageError::InvalidProfileId));
     assert!(store.list().unwrap().is_empty());
@@ -59,7 +74,9 @@ fn invalid_profile_id_is_rejected_before_database_write() {
 #[test]
 fn dot_profile_id_is_accepted_like_csharp_server() {
     let (store, root) = store();
-    store.save("jp.v1", "JP", &json!({})).unwrap();
+    store
+        .save("jp.v1", "JP", &StoredProfileState::default())
+        .unwrap();
     assert!(store.load("jp.v1").unwrap().is_some());
     let _ = std::fs::remove_dir_all(root);
 }
@@ -67,7 +84,9 @@ fn dot_profile_id_is_accepted_like_csharp_server() {
 #[test]
 fn updated_timestamp_uses_iso8601_utc_format() {
     let (store, root) = store();
-    store.save("one", "One", &json!({})).unwrap();
+    store
+        .save("one", "One", &StoredProfileState::default())
+        .unwrap();
 
     let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
     let timestamp: String = connection
@@ -78,6 +97,39 @@ fn updated_timestamp_uses_iso8601_utc_format() {
         )
         .unwrap();
     assert!(timestamp.contains('T') && timestamp.ends_with('Z'));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn normalized_profile_runtime_round_trips_without_json_state_column() {
+    let (store, root) = store();
+    let state = StoredProfileState {
+        level: 4,
+        fuel: 80,
+        coins: 125,
+        ships: vec![StoredShip {
+            id: 1001,
+            name: "Starter".to_owned(),
+            level: 3,
+            power: 220,
+        }],
+        formation_ship_ids: vec![1001],
+        completed_stages: 7,
+    };
+    store.save("typed-profile", "Captain", &state).unwrap();
+
+    let loaded = store.load("typed-profile").unwrap().unwrap();
+    assert_eq!(loaded.state, state);
+
+    let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
+    let legacy_columns: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('profiles') WHERE name = 'state_json'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(legacy_columns, 0);
     let _ = std::fs::remove_dir_all(root);
 }
 
