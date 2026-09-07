@@ -260,6 +260,164 @@ pub(super) fn battle_start_payload_with_fleet_groups_with_stats(
     output
 }
 
+pub(super) fn battle_start_payload_from_typed_account(
+    account: &blueoath_domain::AccountState,
+    copy_id: i32,
+    requested_hero_groups: &[Vec<i32>],
+    battle_catalog: Option<&BattleCatalog>,
+    ship_stat_catalog: Option<&ShipStatCatalog>,
+    ship_stat_multiplier: f64,
+    options: BattleStartOptions,
+) -> Vec<u8> {
+    let groups = if requested_hero_groups.is_empty() {
+        vec![account
+            .fleet
+            .fleets
+            .values()
+            .next()
+            .map(|fleet| {
+                fleet
+                    .members
+                    .iter()
+                    .filter_map(|id| i32::try_from(id.get()).ok())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()]
+    } else {
+        requested_hero_groups.to_vec()
+    };
+    let mut players = Vec::new();
+    let mut extra_player_lists = Vec::new();
+    for (fleet_index, requested_ids) in groups.iter().enumerate() {
+        let selected = requested_ids
+            .iter()
+            .filter_map(|id| u64::try_from(*id).ok())
+            .filter_map(|id| {
+                account
+                    .dock
+                    .heroes
+                    .values()
+                    .find(|hero| hero.id.get() == id)
+            })
+            .take(6)
+            .collect::<Vec<_>>();
+        let selected = if selected.is_empty() {
+            account
+                .fleet
+                .fleets
+                .values()
+                .next()
+                .map(|fleet| {
+                    fleet
+                        .members
+                        .iter()
+                        .filter_map(|id| account.dock.heroes.get(id))
+                        .take(6)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        } else {
+            selected
+        };
+        let mut fleet_payload = Vec::new();
+        append_varint_field(
+            &mut fleet_payload,
+            1,
+            (fleet_index as u64).saturating_add(1),
+        );
+        append_varint_field(&mut fleet_payload, 2, 2);
+        append_varint_field(&mut fleet_payload, 3, fleet_index as u64);
+        for (position, hero) in selected.iter().enumerate() {
+            let template_id = hero.template_id.get();
+            let mut ship = Vec::new();
+            append_varint_field(&mut ship, 1, hero.id.get());
+            append_varint_field(&mut ship, 2, template_id);
+            append_varint_field(&mut ship, 3, u64::from(hero.level.max(1)));
+            append_varint_field(&mut ship, 4, position as u64);
+            for (attr_id, value) in ship_attributes_for_hero(
+                None,
+                i32::try_from(template_id).unwrap_or_default(),
+                i64::from(hero.level.max(1)),
+                ship_stat_catalog,
+                ship_stat_multiplier,
+            ) {
+                let mut attr = Vec::new();
+                append_varint_field(&mut attr, 1, attr_id as u64);
+                append_varint_field(&mut attr, 2, value.max(0) as u64);
+                append_message_field(&mut ship, 5, &attr);
+            }
+            append_varint_field(&mut ship, 6, hero.hp.max(1));
+            append_varint_field(&mut ship, 11, 3);
+            let mut skill = Vec::new();
+            append_varint_field(&mut skill, 1, 41210);
+            append_varint_field(&mut skill, 2, 1);
+            append_message_field(&mut ship, 8, &skill);
+            append_message_field(&mut fleet_payload, 4, &ship);
+            append_varint_field(&mut fleet_payload, 8, hero.id.get());
+        }
+        append_varint_field(&mut fleet_payload, 5, 0);
+        append_varint_field(&mut fleet_payload, 7, 0);
+        append_varint_field(&mut fleet_payload, 9, 1);
+        let player = encode_battle_player(
+            &fleet_payload,
+            fleet_index,
+            account.character.uid.max(1),
+            u64::from(account.character.level.max(1)),
+            account.character.name.as_bytes(),
+        );
+        if fleet_index == 0 {
+            append_message_field(&mut players, 1, &player);
+        } else {
+            let mut list = Vec::new();
+            append_message_field(&mut list, 1, &player);
+            extra_player_lists.push(list);
+        }
+    }
+
+    let mut output = Vec::new();
+    append_message_field(&mut output, 1, &players);
+    for list in extra_player_lists {
+        append_message_field(&mut output, 15, &list);
+    }
+    append_varint_field(&mut output, 2, u64::from(current_unix_seconds()));
+    let copy_info = battle_catalog.and_then(|catalog| catalog.copies.get(&copy_id));
+    append_varint_field(
+        &mut output,
+        3,
+        copy_info
+            .map(|copy| copy.config_id)
+            .unwrap_or(copy_id.max(1))
+            .max(1) as u64,
+    );
+    for fleet_id in battle_session_fleet_ids(copy_id, battle_catalog) {
+        append_varint_field(&mut output, 5, fleet_id.max(1) as u64);
+    }
+    append_varint_field(&mut output, 6, copy_id.max(1) as u64);
+    append_varint_field(
+        &mut output,
+        7,
+        copy_info.map(|copy| copy.copy_type).unwrap_or(1).max(1) as u64,
+    );
+    append_varint_field(
+        &mut output,
+        8,
+        u64::from(
+            account
+                .battle
+                .passed_copies
+                .contains(&blueoath_domain::CopyId::new(copy_id.max(1) as u64).unwrap()),
+        ),
+    );
+    append_varint_field(&mut output, 10, u64::from(options.is_running_fight));
+    append_bytes_field(&mut output, 16, b"1111111111111111111111111111111111111");
+    append_varint_field(&mut output, 18, options.battle_mode.max(0) as u64);
+    for mission_id in [101, 102, 103] {
+        append_varint_field(&mut output, 23, mission_id);
+    }
+    append_varint_field(&mut output, 13, 0);
+    output
+}
+
 fn select_battle_heroes<'a>(all_heroes: &'a [Value], requested_ids: &[i32]) -> Vec<&'a Value> {
     if requested_ids.is_empty() {
         return all_heroes.iter().take(6).collect();

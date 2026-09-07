@@ -1505,8 +1505,13 @@ where
         {
             let mut typed_handled = false;
             let result = if let Some(typed) = typed_account.as_mut() {
-                let result =
-                    battle_handler::handle_typed(typed, request.method.as_str(), request_args);
+                let result = battle_handler::handle_typed_with_catalog(
+                    typed,
+                    request.method.as_str(),
+                    request_args,
+                    battle_catalog,
+                    state.ship_stat_multiplier,
+                );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     typed_handled = true;
                     result
@@ -2394,6 +2399,9 @@ fn legacy_only_method(method: &str) -> bool {
         method,
         "copy.AttackBase"
             | "copy.GetCopy"
+            | "copy.PassBase"
+            | "copy.PvpStartBase"
+            | "copy.StartBase"
             | "dailycopy.GetData"
             | "dailycopy.SelectEx"
             | "dailycopy.UpdateDailyCopyData"

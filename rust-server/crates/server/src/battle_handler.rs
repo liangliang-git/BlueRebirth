@@ -4,36 +4,174 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
+#[cfg(test)]
 pub(super) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
 ) -> HandlerResult {
-    if method != "copy.AttackBase" {
-        return HandlerResult::Empty;
+    handle_typed_with_catalog(account, method, request_args, None, 1.0)
+}
+
+pub(super) fn handle_typed_with_catalog(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    battle_catalog: Option<&BattleCatalog>,
+    ship_stat_multiplier: f64,
+) -> HandlerResult {
+    match method {
+        "copy.StartBase" | "copy.PvpStartBase" => {
+            let Ok(request) = CopyStartRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "copy start request is invalid",
+                ));
+            };
+            let Some(copy_id) = blueoath_domain::CopyId::new(request.copy_id.max(1) as u64).ok()
+            else {
+                return HandlerResult::Error(GameError::InvalidRequest("copy id is invalid"));
+            };
+            let Some((fleet_id, fleet)) = account.fleet.fleets.iter().next() else {
+                return HandlerResult::Error(GameError::InvalidState("fleet is not configured"));
+            };
+            let fleet_id = *fleet_id;
+            let fleet_members = fleet.members.clone();
+            let hero_ids = decode_start_hero_groups(request_args)
+                .first()
+                .cloned()
+                .filter(|ids| !ids.is_empty())
+                .unwrap_or_else(|| {
+                    fleet_members
+                        .iter()
+                        .filter_map(|id| i32::try_from(id.get()).ok())
+                        .collect()
+                });
+            let hero_ids = hero_ids
+                .into_iter()
+                .filter_map(|id| u64::try_from(id).ok())
+                .filter_map(|id| {
+                    account
+                        .dock
+                        .heroes
+                        .keys()
+                        .find(|hero| hero.get() == id)
+                        .copied()
+                })
+                .take(6)
+                .collect::<Vec<_>>();
+            if hero_ids.is_empty() {
+                return HandlerResult::Error(GameError::InvalidState("fleet has no heroes"));
+            }
+            if let Some(catalog) = battle_catalog {
+                if !catalog.copies.contains_key(&request.copy_id)
+                    || !consume_battle_supply_typed(
+                        account,
+                        Some(catalog),
+                        request.copy_id,
+                        &hero_ids.iter().map(|id| id.get()).collect::<Vec<_>>(),
+                        1,
+                    )
+                {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "battle copy or supply is invalid",
+                    ));
+                }
+            }
+            if BattleService::start(
+                account,
+                blueoath_domain::ChapterId::new(request.copy_id.max(1) as u64).unwrap(),
+                copy_id,
+                fleet_id,
+                u64::from(current_unix_seconds()),
+            )
+            .is_err()
+            {
+                return HandlerResult::Error(GameError::InvalidState("battle cannot start"));
+            }
+            if let Some(active) = account.battle.active.as_mut() {
+                active.expires_at = u64::from(current_unix_seconds()).saturating_add(1_800);
+                active.hero_ids = hero_ids;
+                active.remaining_fleet_ids =
+                    battle_session_fleet_ids(request.copy_id, battle_catalog)
+                        .into_iter()
+                        .filter_map(|id| u32::try_from(id).ok())
+                        .collect();
+            }
+            HandlerResult::Reply(Response::raw(
+                method,
+                battle_start_payload_from_typed_account(
+                    account,
+                    request.copy_id,
+                    &decode_start_hero_groups(request_args),
+                    battle_catalog,
+                    SHIP_STAT_CATALOG.get(),
+                    ship_stat_multiplier,
+                    BattleStartOptions {
+                        is_running_fight: request.is_running_fight,
+                        battle_mode: request.battle_mode,
+                        anim_mode: request.anim_mode,
+                        match_type: request.match_type,
+                    },
+                ),
+            ))
+        }
+        "copy.PassBase" => {
+            let Some(active) = account.battle.active.as_ref() else {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "battle session is not active",
+                ));
+            };
+            let copy_id = active.copy_id;
+            let result = decode_battle_pass_result(request_args);
+            let grade = if result.grade > 0 { result.grade } else { 3 };
+            let first_pass = BattleService::settle(account, copy_id, grade < 9)
+                .map_err(|_| GameError::InvalidState("battle settlement is invalid"));
+            match first_pass {
+                Ok(first_pass) => HandlerResult::Reply(Response::raw(
+                    method,
+                    battle_pass_payload_with_rewards(
+                        i32::try_from(copy_id.get()).unwrap_or_default(),
+                        first_pass,
+                        grade,
+                        result.battle_time,
+                        &[],
+                    ),
+                )),
+                Err(error) => HandlerResult::Error(error),
+            }
+        }
+        _ => {
+            if method != "copy.AttackBase" {
+                return HandlerResult::Empty;
+            }
+            let Ok(request) = CopyAttackRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "copy attack request is invalid",
+                ));
+            };
+            let Some(active) = account.battle.active.as_mut() else {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "battle session is not active",
+                ));
+            };
+            if active.copy_id.get() != request.copy_id
+                || request
+                    .hero_ids
+                    .iter()
+                    .any(|hero_id| !active.hero_ids.iter().any(|id| id.get() == *hero_id))
+            {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "battle attack does not match active session",
+                ));
+            }
+            active.attack_count = active.attack_count.saturating_add(1);
+            active.revision = active.revision.saturating_add(1);
+            HandlerResult::Reply(Response::raw(
+                method,
+                battle_attack_payload_with_damage(request_args, 0),
+            ))
+        }
     }
-    let Ok(request) = CopyAttackRequest::decode(request_args) else {
-        return HandlerResult::Error(GameError::InvalidRequest("copy attack request is invalid"));
-    };
-    let Some(active) = account.battle.active.as_mut() else {
-        return HandlerResult::Error(GameError::InvalidState("battle session is not active"));
-    };
-    if active.copy_id.get() != request.copy_id
-        || request
-            .hero_ids
-            .iter()
-            .any(|hero_id| !active.hero_ids.iter().any(|id| id.get() == *hero_id))
-    {
-        return HandlerResult::Error(GameError::InvalidRequest(
-            "battle attack does not match active session",
-        ));
-    }
-    active.attack_count = active.attack_count.saturating_add(1);
-    active.revision = active.revision.saturating_add(1);
-    HandlerResult::Reply(Response::raw(
-        method,
-        battle_attack_payload_with_damage(request_args, 0),
-    ))
 }
 
 pub(super) fn handle<'state, 'account, 'scratch>(
@@ -965,5 +1103,38 @@ mod tests {
         let active = account.battle.active.as_ref().unwrap();
         assert_eq!(active.attack_count, 1);
         assert_eq!(active.revision, 1);
+    }
+
+    #[test]
+    fn typed_start_and_pass_complete_battle_lifecycle() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("battle-flow").unwrap(), "Battle");
+        let fleet_id = FleetId::new(1).unwrap();
+        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
+        account
+            .fleet
+            .fleets
+            .entry(fleet_id)
+            .or_default()
+            .members
+            .push(hero_id);
+
+        let mut start = Vec::new();
+        append_varint_field(&mut start, 2, 9);
+        assert!(matches!(
+            handle_typed(&mut account, "copy.StartBase", &start),
+            HandlerResult::Reply(_)
+        ));
+        assert!(account.battle.active.is_some());
+
+        assert!(matches!(
+            handle_typed(&mut account, "copy.PassBase", &[]),
+            HandlerResult::Reply(_)
+        ));
+        assert!(account.battle.active.is_none());
+        assert!(account
+            .battle
+            .passed_copies
+            .contains(&CopyId::new(9).unwrap()));
     }
 }
