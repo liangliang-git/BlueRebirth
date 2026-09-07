@@ -362,6 +362,46 @@ fn typed_building_projection_reads_normalized_building_rows() {
 }
 
 #[test]
+fn typed_building_mutations_update_normalized_state() {
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("typed-building-write").unwrap(), "Base");
+    let mut pushes = Vec::new();
+    let mut add_args = Vec::new();
+    append_varint_field(&mut add_args, 1, 77);
+    append_varint_field(&mut add_args, 2, 9);
+    let result = super::handle_typed_building(
+        &mut account,
+        "building.AddBuilding",
+        &add_args,
+        123,
+        &mut pushes,
+    );
+    assert!(matches!(
+        result,
+        super::common::response::HandlerResult::Reply(_)
+    ));
+    assert_eq!(account.buildings.levels.get(&3), Some(&1));
+    assert_eq!(account.buildings.template_ids.get(&3), Some(&77));
+    assert_eq!(account.buildings.land_indices.get(&3), Some(&9));
+    assert_eq!(pushes.len(), 1);
+
+    let mut level_args = Vec::new();
+    append_varint_field(&mut level_args, 1, 3);
+    let result = super::handle_typed_building(
+        &mut account,
+        "building.UpgradeBuilding",
+        &level_args,
+        124,
+        &mut pushes,
+    );
+    assert!(matches!(
+        result,
+        super::common::response::HandlerResult::PushOnly
+    ));
+    assert_eq!(account.buildings.levels.get(&3), Some(&2));
+}
+
+#[test]
 fn typed_daily_copy_projection_resets_stale_challenge_counts() {
     let mut account = NewAccountFactory::create(ProfileId::new("typed-daily").unwrap(), "Daily");
     account.daily_copy.reset_day = 0;

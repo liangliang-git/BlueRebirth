@@ -26,7 +26,7 @@ mod battle_handler;
 #[path = "boss_handler.rs"]
 mod boss_handler;
 #[path = "building_handler.rs"]
-mod building_handler;
+pub(super) mod building_handler;
 #[path = "buildship_handler.rs"]
 mod buildship_handler;
 #[path = "chat_handler.rs"]
@@ -237,7 +237,7 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::Hero) => {
-            let result = if let Some(typed) = typed_account.as_ref() {
+            let result = if let Some(typed) = typed_account.as_mut() {
                 let result = hero_handler::handle_typed(typed, request.method.as_str());
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result
@@ -1077,11 +1077,13 @@ where
             || method.is_family(MethodFamily::BuildNotes)
             || method.is_family(MethodFamily::Discuss) =>
         {
-            let result = if let Some(typed) = typed_account.as_ref() {
+            let result = if let Some(typed) = typed_account.as_mut() {
                 let result = building_handler::handle_typed(
                     typed,
                     request.method.as_str(),
+                    request_args,
                     current_unix_seconds(),
+                    &mut pre_pushes,
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result

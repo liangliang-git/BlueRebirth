@@ -4,18 +4,133 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
-pub(super) fn handle_typed(
-    account: &blueoath_domain::AccountState,
+pub(crate) fn handle_typed(
+    account: &mut blueoath_domain::AccountState,
     method: &str,
+    request_args: &[u8],
     now: u32,
+    pre_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
     match method {
         "building.UpdateBuildingInfo" => HandlerResult::Reply(Response::raw(
             method,
             UserBuildingInfoCodec::encode(&building_info_from_typed_account(account, now)),
         )),
+        "building.AddBuilding" => {
+            let template_id = decode_varint_field(request_args, 1);
+            let land_index = decode_varint_field(request_args, 2);
+            let Some(building_id) = add_typed_building(account, template_id, land_index) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "building placement is invalid",
+                ));
+            };
+            append_typed_building_refresh(pre_pushes, account, now);
+            let mut payload = Vec::new();
+            append_varint_field(&mut payload, 1, building_id);
+            HandlerResult::Reply(Response::raw(method, payload))
+        }
+        "building.UpgradeBuilding" | "building.DegradeBuilding" => {
+            let building_id = decode_varint_field(request_args, 1);
+            let delta = if method == "building.UpgradeBuilding" {
+                1
+            } else {
+                -1
+            };
+            if !change_typed_building_level(account, building_id, delta) {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "building level change is invalid",
+                ));
+            }
+            append_typed_building_refresh(pre_pushes, account, now);
+            HandlerResult::PushOnly
+        }
+        "building.FinishBuilding" | "building.UseStrengthSpeedup" => {
+            let building_id = decode_varint_field(request_args, 1);
+            let Some(building_id) = u64::try_from(building_id).ok() else {
+                return HandlerResult::Error(GameError::InvalidRequest("building id is invalid"));
+            };
+            if !account.buildings.levels.contains_key(&building_id) {
+                return HandlerResult::Error(GameError::InvalidRequest("building was not found"));
+            }
+            append_typed_building_refresh(pre_pushes, account, now);
+            HandlerResult::PushOnly
+        }
+        "building.UpdateHeroAddition" => {
+            append_typed_building_refresh(pre_pushes, account, now);
+            HandlerResult::PushOnly
+        }
         _ => HandlerResult::Empty,
     }
+}
+
+fn add_typed_building(
+    account: &mut blueoath_domain::AccountState,
+    template_id: i32,
+    land_index: i32,
+) -> Option<u64> {
+    if template_id <= 0 || land_index <= 0 {
+        return None;
+    }
+    if account
+        .buildings
+        .land_indices
+        .values()
+        .any(|index| i32::try_from(*index).ok() == Some(land_index))
+    {
+        return None;
+    }
+    let building_id = account
+        .buildings
+        .levels
+        .keys()
+        .copied()
+        .max()
+        .unwrap_or_default()
+        .saturating_add(1);
+    account.buildings.levels.insert(building_id, 1);
+    account
+        .buildings
+        .template_ids
+        .insert(building_id, u64::try_from(template_id).ok()?);
+    account
+        .buildings
+        .land_indices
+        .insert(building_id, u32::try_from(land_index).ok()?);
+    Some(building_id)
+}
+
+fn change_typed_building_level(
+    account: &mut blueoath_domain::AccountState,
+    building_id: i32,
+    delta: i32,
+) -> bool {
+    if building_id <= 0 || delta == 0 {
+        return false;
+    }
+    let Some(building_id) = u64::try_from(building_id).ok() else {
+        return false;
+    };
+    let Some(level) = account.buildings.levels.get_mut(&building_id) else {
+        return false;
+    };
+    let next = i64::from(*level).saturating_add(i64::from(delta));
+    if next <= 0 {
+        return false;
+    }
+    *level = u32::try_from(next).unwrap_or(u32::MAX);
+    true
+}
+
+fn append_typed_building_refresh(
+    pushes: &mut Vec<Vec<u8>>,
+    account: &blueoath_domain::AccountState,
+    now: u32,
+) {
+    append_method_push(
+        pushes,
+        "building.UpdateBuildingInfo",
+        UserBuildingInfoCodec::encode(&building_info_from_typed_account(account, now)),
+    );
 }
 
 pub(super) fn handle<'state, 'account, 'scratch>(
