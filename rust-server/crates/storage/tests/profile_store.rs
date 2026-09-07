@@ -210,6 +210,14 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
         )
         .unwrap();
     assert_eq!(version, 17);
+    let accounts_table: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(accounts_table, 0);
     assert_eq!(state_json_columns, 0);
     for column in ["class_id", "create_time", "message"] {
         let count: i64 = connection
