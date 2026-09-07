@@ -251,6 +251,95 @@ pub(super) fn handle_typed(
             );
             HandlerResult::Reply(Response::raw(method, encode_retire_hero_response(&rewards)))
         }
+        "hero.ChangeEquip" => {
+            let hero_id = decode_varint_u64_field(request_args, 1);
+            let slot = decode_varint_u64_field(request_args, 2);
+            let equip_id = decode_varint_u64_field(request_args, 3);
+            let equip_type = decode_varint_u64_field(request_args, 4).max(1);
+            if equip_type != 1 || !(1..=6).contains(&slot) {
+                return HandlerResult::Empty;
+            }
+            let Some(hero_id) = blueoath_domain::HeroId::new(hero_id).ok() else {
+                return HandlerResult::Error(GameError::InvalidRequest("hero id is invalid"));
+            };
+            let Some(hero) = account.dock.heroes.get(&hero_id) else {
+                return HandlerResult::Error(GameError::InvalidRequest("hero was not found"));
+            };
+            let Some(slot_index) = usize::try_from(slot - 1).ok() else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "equipment slot is invalid",
+                ));
+            };
+            let old_equip_id = hero.equip_slots.get(slot_index).copied().flatten();
+            let new_equip_id = if equip_id == 0 {
+                None
+            } else {
+                let Some(equip_id) = blueoath_domain::EquipId::new(equip_id).ok() else {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "equipment id is invalid",
+                    ));
+                };
+                Some(equip_id)
+            };
+            if new_equip_id == old_equip_id {
+                return HandlerResult::PushOnly;
+            }
+            if let Some(new_equip_id) = new_equip_id {
+                let Some(equipment) = account.dock.equipments.get(&new_equip_id) else {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "equipment was not found",
+                    ));
+                };
+                if equipment.hero_id.is_some_and(|owner| owner != hero_id)
+                    || account.dock.heroes.values().any(|candidate| {
+                        candidate.id != hero_id
+                            && candidate
+                                .equip_slots
+                                .iter()
+                                .flatten()
+                                .any(|id| *id == new_equip_id)
+                    })
+                {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "equipment belongs to another hero",
+                    ));
+                }
+            }
+            if let Some(old_equip_id) = old_equip_id {
+                if let Some(equipment) = account.dock.equipments.get_mut(&old_equip_id) {
+                    equipment.hero_id = None;
+                }
+            }
+            if let Some(new_equip_id) = new_equip_id {
+                if let Some(equipment) = account.dock.equipments.get_mut(&new_equip_id) {
+                    equipment.hero_id = Some(hero_id);
+                }
+                if let Some(hero) = account.dock.heroes.get_mut(&hero_id) {
+                    for equipped in &mut hero.equip_slots {
+                        if *equipped == Some(new_equip_id) {
+                            *equipped = None;
+                        }
+                    }
+                }
+            }
+            if let Some(hero) = account.dock.heroes.get_mut(&hero_id) {
+                if hero.equip_slots.len() <= slot_index {
+                    hero.equip_slots.resize(slot_index + 1, None);
+                }
+                hero.equip_slots[slot_index] = new_equip_id;
+            }
+            append_method_push(
+                pre_pushes,
+                "hero.UpdateHeroBagData",
+                HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "equip.UpdateEquipBagData",
+                EquipListCodec::encode(&equip_list_from_typed_account(account)),
+            );
+            HandlerResult::PushOnly
+        }
         "hero.AddExp" => {
             let Some(hero_level_catalog) = hero_level_catalog else {
                 return HandlerResult::Empty;
@@ -1259,5 +1348,49 @@ mod tests {
             before_gold + 3
         );
         assert_eq!(pushes.len(), 4);
+    }
+
+    #[test]
+    fn typed_hero_change_equip_moves_standard_slot_atomically() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("hero-equip-typed").unwrap(),
+            "Captain",
+        );
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, 1);
+        append_varint_field(&mut args, 2, 2);
+        append_varint_field(&mut args, 3, 1);
+        append_varint_field(&mut args, 4, 1);
+        let mut pushes = Vec::new();
+
+        let result = handle_typed(
+            &mut account,
+            "hero.ChangeEquip",
+            &args,
+            &mut pushes,
+            HeroTypedCatalogs::empty(),
+        );
+
+        let hero = account
+            .dock
+            .heroes
+            .get(&blueoath_domain::HeroId::new(1).unwrap())
+            .unwrap();
+        assert!(matches!(result, HandlerResult::PushOnly));
+        assert_eq!(hero.equip_slots[0], None);
+        assert_eq!(
+            hero.equip_slots[1],
+            Some(blueoath_domain::EquipId::new(1).unwrap())
+        );
+        assert_eq!(
+            account
+                .dock
+                .equipments
+                .get(&blueoath_domain::EquipId::new(1).unwrap())
+                .unwrap()
+                .hero_id,
+            Some(blueoath_domain::HeroId::new(1).unwrap())
+        );
+        assert_eq!(pushes.len(), 2);
     }
 }
