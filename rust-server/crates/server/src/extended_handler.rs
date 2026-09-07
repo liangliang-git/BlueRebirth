@@ -1,5 +1,5 @@
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 pub(super) fn handle_typed_battlepass(
@@ -7,7 +7,7 @@ pub(super) fn handle_typed_battlepass(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let catalog = gameplay_catalog();
     let activity = GameMethod::parse(method).is_family(MethodFamily::ActivityBattlePass);
@@ -84,7 +84,7 @@ pub(super) fn handle_typed_battlepass(
                 .map(|(level, pass_type, _)| (*level, *pass_type))
                 .collect::<Vec<_>>();
             if !claimed.is_empty() {
-                append_typed_account_refresh_pushes(state, account, pre_pushes);
+                append_typed_account_refresh_pushes(state, account, effects);
             }
             reply(method, encode_battlepass_reward_response(&claimed))
         }
@@ -96,15 +96,14 @@ pub(super) fn handle_typed_battlepass(
             pass.last_refresh_task_id = request.task_id.max(0) as u64;
             pass.refresh_count = pass.refresh_count.saturating_add(1);
             let payload = typed_battlepass_info_payload(account, catalog, activity);
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 if activity {
                     "activitybattlepass.UpdateBattlePassInfo"
                 } else {
                     "battlepass.UpdateBattlePassInfo"
                 },
                 payload,
-            );
+            ));
             HandlerResult::PushOnly
         }
         "battlepass.BuyPassType" | "activitybattlepass.BuyPassType" => {
@@ -112,7 +111,7 @@ pub(super) fn handle_typed_battlepass(
                 return invalid("battle pass type request is invalid");
             };
             typed_battlepass_mut(account, activity).pass_type = request.pass_type as u32;
-            append_typed_battlepass_info_push(account, catalog, activity, pre_pushes);
+            append_typed_battlepass_info_push(account, catalog, activity, effects);
             HandlerResult::PushOnly
         }
         "battlepass.BuyPassLevel" | "activitybattlepass.BuyPassLevel" => {
@@ -135,7 +134,7 @@ pub(super) fn handle_typed_battlepass(
             }
             let pass = typed_battlepass_mut(account, activity);
             pass.pass_level = pass.pass_level.max(1).saturating_add(levels as u32).max(1);
-            append_typed_battlepass_info_push(account, catalog, activity, pre_pushes);
+            append_typed_battlepass_info_push(account, catalog, activity, effects);
             HandlerResult::PushOnly
         }
         "battlepass.RecieveTaskReward" | "activitybattlepass.RecieveTaskReward" => {
@@ -157,8 +156,8 @@ pub(super) fn handle_typed_battlepass(
                 }
             }
             pass.last_task_id = task_id;
-            append_typed_battlepass_info_push(account, catalog, activity, pre_pushes);
-            append_typed_account_refresh_pushes(state, account, pre_pushes);
+            append_typed_battlepass_info_push(account, catalog, activity, effects);
+            append_typed_account_refresh_pushes(state, account, effects);
             HandlerResult::PushOnly
         }
         _ => HandlerResult::Empty,
@@ -191,34 +190,31 @@ fn append_typed_battlepass_info_push(
     account: &blueoath_domain::AccountState,
     catalog: &GameplayCatalog,
     activity: bool,
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) {
-    append_method_push(
-        pre_pushes,
+    effects.push_pre(Response::raw(
         if activity {
             "activitybattlepass.UpdateBattlePassInfo"
         } else {
             "battlepass.UpdateBattlePassInfo"
         },
         typed_battlepass_info_payload(account, catalog, activity),
-    );
+    ));
 }
 
 fn append_typed_account_refresh_pushes(
     state: &ServerState,
     account: &blueoath_domain::AccountState,
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) {
-    append_method_push(
-        pre_pushes,
+    effects.push_pre(Response::raw(
         "user.UpdateUserInfo",
         UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-    );
-    append_method_push(
-        pre_pushes,
+    ));
+    effects.push_pre(Response::raw(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-    );
+    ));
 }
 
 fn typed_battlepass_info_payload(
@@ -263,7 +259,7 @@ pub(super) fn handle_typed_exchange(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let catalog = gameplay_catalog();
     match method {
@@ -321,16 +317,14 @@ pub(super) fn handle_typed_exchange(
                 .entry(id.max(0) as u64)
                 .and_modify(|count| *count = count.saturating_add(1))
                 .or_insert(1);
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "user.UpdateUserInfo",
                 UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
+            ));
             reply("exchange.Exchange", encode_rewards_list(&typed_rewards))
         }
         _ => HandlerResult::Empty,
@@ -342,7 +336,7 @@ pub(super) fn handle_typed_food_compose(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let catalog = gameplay_catalog();
     match method {
@@ -409,16 +403,14 @@ pub(super) fn handle_typed_food_compose(
                 .entry(recipe_key)
                 .and_modify(|count| *count = count.saturating_add(1))
                 .or_insert(1);
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "user.UpdateUserInfo",
                 UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
+            ));
             reply(
                 "foodCompose.FoodCompose",
                 food_reward_payload(recipe_id, &rewards),
@@ -433,7 +425,7 @@ pub(super) fn handle_typed_world_event(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let catalog = gameplay_catalog();
     match method {
@@ -490,16 +482,14 @@ pub(super) fn handle_typed_world_event(
                 .entry(event_id as u64)
                 .or_default()
                 .insert(stage_id);
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "user.UpdateUserInfo",
                 UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
+            ));
             reply(method, encode_rewards_list(&rewards))
         }
         _ => HandlerResult::Empty,
@@ -710,17 +700,17 @@ mod tests {
     fn typed_battlepass_task_claim_updates_state_and_pushes() {
         let mut account = AccountState::default();
         let state = ServerState::new("battle-pass", "Captain", "test");
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
         let result = handle_typed_battlepass(
             &state,
             &mut account,
             "battlepass.RecieveTaskReward",
             &[0x08, 101],
-            &mut pushes,
+            &mut effects,
         );
         assert!(matches!(result, HandlerResult::PushOnly));
         assert!(account.battle_pass.claimed_tasks.contains(&101));
         assert_eq!(account.battle_pass.last_task_id, 101);
-        assert_eq!(pushes.len(), 3);
+        assert_eq!(effects.into_parts().0.len(), 3);
     }
 }

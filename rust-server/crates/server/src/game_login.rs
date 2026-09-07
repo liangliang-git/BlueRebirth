@@ -1161,12 +1161,19 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::Exchange) && typed_account.is_some() => {
+            let mut exchange_effects = ResponseEffects::default();
             let result = extended_handler::handle_typed_exchange(
                 state,
                 typed_account.as_mut().expect("typed exchange account"),
                 request.method.as_str(),
                 request_args,
+                &mut exchange_effects,
+            );
+            apply_response_effects(
+                exchange_effects,
                 &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
             );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -1174,12 +1181,19 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::FoodCompose) && typed_account.is_some() => {
+            let mut food_effects = ResponseEffects::default();
             let result = extended_handler::handle_typed_food_compose(
                 state,
                 typed_account.as_mut().expect("typed food compose account"),
                 request.method.as_str(),
                 request_args,
+                &mut food_effects,
+            );
+            apply_response_effects(
+                food_effects,
                 &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
             );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -1187,12 +1201,19 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::WorldEvent) && typed_account.is_some() => {
+            let mut world_event_effects = ResponseEffects::default();
             let result = extended_handler::handle_typed_world_event(
                 state,
                 typed_account.as_mut().expect("typed world event account"),
                 request.method.as_str(),
                 request_args,
+                &mut world_event_effects,
+            );
+            apply_response_effects(
+                world_event_effects,
                 &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
             );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -1203,12 +1224,19 @@ where
             || method.is_family(MethodFamily::ActivityBattlePass))
             && typed_account.is_some() =>
         {
+            let mut battlepass_effects = ResponseEffects::default();
             let result = extended_handler::handle_typed_battlepass(
                 state,
                 typed_account.as_mut().expect("typed battle pass account"),
                 request.method.as_str(),
                 request_args,
+                &mut battlepass_effects,
+            );
+            apply_response_effects(
+                battlepass_effects,
                 &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
             );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
