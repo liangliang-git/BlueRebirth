@@ -212,33 +212,6 @@ impl ServerState {
         })
     }
 
-    pub(crate) fn from_stored_profile(
-        profile_id: String,
-        name: String,
-        version: String,
-        stored: StoredProfileState,
-    ) -> Self {
-        let mut state = Self::new(profile_id, name, version);
-        state.level = stored.level;
-        state.fuel = stored.fuel;
-        state.coins = stored.coins;
-        state.completed_stages = stored.completed_stages;
-        state.ships = stored
-            .ships
-            .into_iter()
-            .map(|ship| Ship {
-                id: ship.id,
-                name: ship.name,
-                level: ship.level,
-                power: ship.power,
-            })
-            .collect();
-        state.formation = Formation {
-            ship_ids: stored.formation_ship_ids,
-        };
-        state
-    }
-
     pub(crate) fn stored_profile_state(&self) -> StoredProfileState {
         StoredProfileState {
             level: self.level,

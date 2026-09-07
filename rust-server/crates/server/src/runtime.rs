@@ -109,23 +109,13 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
     let profile_id = config.profile_id.clone();
     let profile_name = config.profile_name.clone();
     let version = config.version.clone();
-    let mut initial_state = match store.load(&profile_id)? {
-        Some(profile) => ServerState::from_stored_profile(
-            profile_id.clone(),
-            profile.name,
-            version,
-            profile.state,
-        ),
-        None => {
-            let state = ServerState::new(profile_id.clone(), profile_name, version);
-            store.save(
-                &state.profile_id,
-                &state.name,
-                &state.stored_profile_state(),
-            )?;
-            state
-        }
-    };
+    let typed_account = load_or_create_typed_account(&store, &profile_id, &profile_name)?;
+    let initial_name = typed_account
+        .profile
+        .as_ref()
+        .map(|profile| profile.name.clone())
+        .unwrap_or(profile_name);
+    let mut initial_state = ServerState::new(profile_id.clone(), initial_name, version);
     initial_state.battle_port = address.port();
     // Runtime tuning is server-owned; persisted player snapshots keep only gameplay state.
     initial_state.drop_multiplier = normalize_multiplier(config.drop_multiplier);
@@ -137,7 +127,6 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
     initial_state.building_oil_multiplier = normalize_multiplier(config.building_oil_multiplier);
     initial_state.building_gold_multiplier = normalize_multiplier(config.building_gold_multiplier);
     initial_state.social_store = Some(store.clone());
-    let _ = load_or_create_typed_account(&store, &profile_id, &initial_state.name)?;
     let state = Arc::new(Mutex::new(initial_state));
     let persist_lock = Arc::new(tokio::sync::Mutex::new(()));
     println!(
