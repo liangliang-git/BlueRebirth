@@ -11,7 +11,10 @@ pub(super) fn handle_bathroom_typed(
     mood_recovery_multiplier: f64,
     post_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
-    let requested_hero_id = decode_varint_u64_field(request_args, 1);
+    let Ok(request) = BathroomRequest::decode(request_args) else {
+        return HandlerResult::Error(GameError::InvalidRequest("bathroom request is invalid"));
+    };
+    let requested_hero_id = request.hero_id;
     let before = account
         .bathroom
         .heroes
@@ -22,7 +25,7 @@ pub(super) fn handle_bathroom_typed(
     let response = match method {
         "bathroom.GetBathroomInfo" => bathroom_info_payload_from_typed(account),
         "bathroom.BathStart" => {
-            let position = decode_varint_u64_field(request_args, 2);
+            let position = request.position;
             if requested_hero_id == 0
                 || !account
                     .dock
@@ -80,7 +83,7 @@ pub(super) fn handle_bathroom_typed(
             )
         }
         "bathroom.BathAuto" => {
-            let is_auto = decode_varint_u64_field(request_args, 2) != 0;
+            let is_auto = request.is_auto;
             if let Some(hero) = account
                 .bathroom
                 .heroes
@@ -97,12 +100,14 @@ pub(super) fn handle_bathroom_typed(
         }
         "bathroom.BathStartAll" => {
             let mut output = Vec::new();
-            for nested in decode_repeated_message_field(request_args, 1) {
-                let hero_id = decode_varint_u64_field(&nested, 1);
-                let position = decode_varint_u64_field(&nested, 2);
-                if hero_id == 0 {
-                    continue;
-                }
+            let Ok(request) = BathroomStartAllRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "bathroom batch request is invalid",
+                ));
+            };
+            for entry in request.entries {
+                let hero_id = entry.hero_id;
+                let position = entry.position;
                 start_bathroom_hero(
                     account,
                     hero_id,
@@ -150,9 +155,14 @@ pub(super) fn handle_study_typed(
             study_info_payload_from_typed(account, now),
         )),
         "study.StartStudyPSkill" => {
-            let hero_id = decode_varint_u64_field(request_args, 1);
-            let skill_id = decode_varint_u64_field(request_args, 2);
-            let textbook_id = decode_varint_u64_field(request_args, 3);
+            let Ok(request) = StudyStartRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "study start request is invalid",
+                ));
+            };
+            let hero_id = request.hero_id;
+            let skill_id = request.skill_id;
+            let textbook_id = request.textbook_id;
             let valid = hero_id > 0
                 && skill_id > 0
                 && textbook_id > 0
@@ -193,8 +203,13 @@ pub(super) fn handle_study_typed(
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "study.CancelStudyPSkill" => {
-            let hero_id = decode_varint_u64_field(request_args, 1);
-            let requested_skill_id = decode_varint_u64_field(request_args, 2);
+            let Ok(request) = StudyProgressRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "study progress request is invalid",
+                ));
+            };
+            let hero_id = request.hero_id;
+            let requested_skill_id = request.skill_id;
             let index = account.study.progress.iter().position(|progress| {
                 progress.hero_id == hero_id
                     && (requested_skill_id == 0 || progress.skill_id == requested_skill_id)
@@ -213,8 +228,13 @@ pub(super) fn handle_study_typed(
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "study.EndStudyPSkill" => {
-            let hero_id = decode_varint_u64_field(request_args, 1);
-            let skill_id = decode_varint_u64_field(request_args, 2);
+            let Ok(request) = StudyProgressRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "study progress request is invalid",
+                ));
+            };
+            let hero_id = request.hero_id;
+            let skill_id = request.skill_id;
             match finish_study_typed(account, hero_id, skill_id, now, false) {
                 Ok(payload) => {
                     append_method_push(
@@ -233,17 +253,17 @@ pub(super) fn handle_study_typed(
             }
         }
         "study.SpeedUpStudy" => {
-            let hero_id = decode_varint_u64_field(request_args, 1);
-            let skill_id = decode_varint_u64_field(request_args, 2);
-            let items = decode_repeated_message_field(request_args, 3)
+            let Ok(request) = StudySpeedupRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "study speedup request is invalid",
+                ));
+            };
+            let hero_id = request.hero_id;
+            let skill_id = request.skill_id;
+            let items = request
+                .items
                 .into_iter()
-                .map(|item| {
-                    (
-                        decode_varint_u64_field(&item, 1),
-                        decode_varint_u64_field(&item, 2),
-                    )
-                })
-                .filter(|(item_id, count)| *item_id > 0 && *count > 0)
+                .map(|item| (item.item_id, item.count))
                 .collect::<Vec<_>>();
             if items.is_empty()
                 || !account

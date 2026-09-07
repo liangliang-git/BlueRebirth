@@ -1,27 +1,28 @@
 use blueoath_protocol::{
     ActivityCodeExchangeRequest, ActivityExchangeRewardRequest, ActivityExtractDrawRequest,
     ActivityFormulaRequest, ActivityItemIdRequest, ActivityRewardIndexRequest,
-    ActivitySelectShipRequest, ActivitySelectTeamRequest, AlchemyRequest, BattleAutoMessageRequest,
-    BattlePassLevelRequest, BattlePassRefreshRequest, BattlePassRewardRequest,
-    BattlePassTaskRewardRequest, BattlePassTypeRequest, BigActivityRankRequest,
-    BirthdayFeedRequest, BuildShipRequest, BuildShipRewardRequest, ChangeNameRequest,
-    ChangeWorldChannelRequest, ChristmasBuyBlindBoxRequest, ChristmasBuyItemRequest,
-    CoopChangeChapterRequest, CoopCreateRoomRequest, CoopKickRequest, CoopMatchTypeRequest,
-    CoopPasswordRequest, CoopRoomHeroesRequest, CoopRoomIdRequest, CopyAttackRequest,
-    CopyIdRequest, CopyPassRequest, CopyRecordRequest, CopyRewardCountRequest, CopyStartRequest,
-    DailyCopyEnterRequest, DailyCopySelectExRequest, Decode, DiscussRequest, ExchangeRequest,
-    FashionPurchaseRequest, FoodComposeRequest, FriendSearchRequest, FriendTargetRequest,
-    GetBarrageByIdRequest, GuildActivityPresentRequest, GuildBoxAnonymousRequest,
-    GuildBoxIdRequest, GuildCreateRequest, GuildIdRequest, GuildListRequest, GuildModifyRequest,
-    GuildOfferRequest, GuildSearchRequest, GuildTaskDonateRequest, GuildTaskIdRequest,
-    GuildTaskMemberRequest, GuildWarBaseRequest, GuildWarScoreRequest, HeroAwakenFinishRequest,
-    HeroAwakenRewardRequest, HeroChangeEquipRequest, InviteRecordVersionRequest,
-    InviteStateTypeRequest, OutpostBuildingRequest, OutpostSetHeroRequest, PaperCutRequest,
-    ProtocolError, SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest,
-    SetHeadFrameRequest, SetHeadRequest, SetMessageRequest, SetSecretaryRequest,
-    ShipTaskCurrentShipRequest, ShipTaskRewardRequest, SignDayRequest, SportsMeetPointsRequest,
-    TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest, ValentineRewardRequest,
-    WorldEventStageRequest,
+    ActivitySelectShipRequest, ActivitySelectTeamRequest, AlchemyRequest, BathroomRequest,
+    BathroomStartAllRequest, BathroomStartEntry, BattleAutoMessageRequest, BattlePassLevelRequest,
+    BattlePassRefreshRequest, BattlePassRewardRequest, BattlePassTaskRewardRequest,
+    BattlePassTypeRequest, BigActivityRankRequest, BirthdayFeedRequest, BuildShipRequest,
+    BuildShipRewardRequest, ChangeNameRequest, ChangeWorldChannelRequest,
+    ChristmasBuyBlindBoxRequest, ChristmasBuyItemRequest, CoopChangeChapterRequest,
+    CoopCreateRoomRequest, CoopKickRequest, CoopMatchTypeRequest, CoopPasswordRequest,
+    CoopRoomHeroesRequest, CoopRoomIdRequest, CopyAttackRequest, CopyIdRequest, CopyPassRequest,
+    CopyRecordRequest, CopyRewardCountRequest, CopyStartRequest, DailyCopyEnterRequest,
+    DailyCopySelectExRequest, Decode, DiscussRequest, ExchangeRequest, FashionPurchaseRequest,
+    FoodComposeRequest, FriendSearchRequest, FriendTargetRequest, GetBarrageByIdRequest,
+    GuildActivityPresentRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildCreateRequest,
+    GuildIdRequest, GuildListRequest, GuildModifyRequest, GuildOfferRequest, GuildSearchRequest,
+    GuildTaskDonateRequest, GuildTaskIdRequest, GuildTaskMemberRequest, GuildWarBaseRequest,
+    GuildWarScoreRequest, HeroAwakenFinishRequest, HeroAwakenRewardRequest, HeroChangeEquipRequest,
+    InviteRecordVersionRequest, InviteStateTypeRequest, OutpostBuildingRequest,
+    OutpostSetHeroRequest, PaperCutRequest, ProtocolError, SeaDifficultyRequest,
+    SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
+    SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest, SignDayRequest,
+    SportsMeetPointsRequest, StudyProgressRequest, StudySpeedupItem, StudySpeedupRequest,
+    StudyStartRequest, TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
+    ValentineRewardRequest, WorldEventStageRequest,
 };
 
 #[test]
@@ -646,4 +647,51 @@ fn rejects_invalid_typed_chat_requests() {
             "ship task reward request is invalid"
         ))
     ));
+}
+
+#[test]
+fn decodes_typed_progression_requests() {
+    assert_eq!(
+        BathroomRequest::decode(&[0x08, 1, 0x10, 2, 0x18, 1]).unwrap(),
+        BathroomRequest {
+            hero_id: 1,
+            position: 2,
+            is_auto: true,
+        }
+    );
+    assert_eq!(
+        BathroomStartAllRequest::decode(&[0x0a, 4, 0x08, 1, 0x10, 2]).unwrap(),
+        BathroomStartAllRequest {
+            entries: vec![BathroomStartEntry {
+                hero_id: 1,
+                position: 2,
+            }],
+        }
+    );
+    assert_eq!(
+        StudyStartRequest::decode(&[0x08, 1, 0x10, 2, 0x18, 3]).unwrap(),
+        StudyStartRequest {
+            hero_id: 1,
+            skill_id: 2,
+            textbook_id: 3,
+        }
+    );
+    assert_eq!(
+        StudyProgressRequest::decode(&[0x08, 1, 0x10, 2]).unwrap(),
+        StudyProgressRequest {
+            hero_id: 1,
+            skill_id: 2,
+        }
+    );
+    assert_eq!(
+        StudySpeedupRequest::decode(&[0x08, 1, 0x10, 2, 0x1a, 4, 0x08, 3, 0x10, 4]).unwrap(),
+        StudySpeedupRequest {
+            hero_id: 1,
+            skill_id: 2,
+            items: vec![StudySpeedupItem {
+                item_id: 3,
+                count: 4,
+            }],
+        }
+    );
 }

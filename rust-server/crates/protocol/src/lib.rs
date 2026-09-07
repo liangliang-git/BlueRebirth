@@ -2794,6 +2794,133 @@ impl Decode for DiscussRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BathroomRequest {
+    pub hero_id: u64,
+    pub position: u64,
+    pub is_auto: bool,
+}
+
+impl Decode for BathroomRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            hero_id: optional_u64(&fields, 1, "bathroom has duplicate hero id")?,
+            position: optional_u64(&fields, 2, "bathroom has duplicate position")?,
+            is_auto: optional_i32(&fields, 2, "bathroom has duplicate auto flag")? != 0,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BathroomStartEntry {
+    pub hero_id: u64,
+    pub position: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BathroomStartAllRequest {
+    pub entries: Vec<BathroomStartEntry>,
+}
+
+impl Decode for BathroomStartAllRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let mut entries = Vec::new();
+        for nested in decode_repeated_message_fields(payload, 1)? {
+            let fields = decode_varint_fields(&nested)?;
+            let hero_id = required_u64(&fields, 1, "bathroom is missing hero id")?;
+            let position = optional_u64(&fields, 2, "bathroom has duplicate position")?;
+            if hero_id == 0 {
+                return Err(ProtocolError::Invalid("bathroom hero is invalid"));
+            }
+            entries.push(BathroomStartEntry { hero_id, position });
+        }
+        if entries.len() > 99 {
+            return Err(ProtocolError::Invalid("bathroom has too many heroes"));
+        }
+        Ok(Self { entries })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StudyStartRequest {
+    pub hero_id: u64,
+    pub skill_id: u64,
+    pub textbook_id: u64,
+}
+
+impl Decode for StudyStartRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let hero_id = required_u64(&fields, 1, "study is missing hero id")?;
+        let skill_id = required_u64(&fields, 2, "study is missing skill id")?;
+        let textbook_id = required_u64(&fields, 3, "study is missing textbook id")?;
+        if hero_id == 0 || skill_id == 0 || textbook_id == 0 {
+            return Err(ProtocolError::Invalid("study start request is invalid"));
+        }
+        Ok(Self {
+            hero_id,
+            skill_id,
+            textbook_id,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StudyProgressRequest {
+    pub hero_id: u64,
+    pub skill_id: u64,
+}
+
+impl Decode for StudyProgressRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            hero_id: optional_u64(&fields, 1, "study has duplicate hero id")?,
+            skill_id: optional_u64(&fields, 2, "study has duplicate skill id")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StudySpeedupItem {
+    pub item_id: u64,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StudySpeedupRequest {
+    pub hero_id: u64,
+    pub skill_id: u64,
+    pub items: Vec<StudySpeedupItem>,
+}
+
+impl Decode for StudySpeedupRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let hero_id = required_u64(&fields, 1, "study is missing hero id")?;
+        let skill_id = required_u64(&fields, 2, "study is missing skill id")?;
+        let mut items = Vec::new();
+        for nested in decode_repeated_message_fields(payload, 3)? {
+            let fields = decode_varint_fields(&nested)?;
+            let item_id = required_u64(&fields, 1, "study speedup is missing item id")?;
+            let count = required_u64(&fields, 2, "study speedup is missing count")?;
+            if item_id == 0 || count == 0 {
+                return Err(ProtocolError::Invalid("study speedup item is invalid"));
+            }
+            items.push(StudySpeedupItem { item_id, count });
+        }
+        if hero_id == 0 || skill_id == 0 || items.is_empty() || items.len() > 99 {
+            return Err(ProtocolError::Invalid("study speedup request is invalid"));
+        }
+        Ok(Self {
+            hero_id,
+            skill_id,
+            items,
+        })
+    }
+}
+
 impl Decode for GuildTaskDonateRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
