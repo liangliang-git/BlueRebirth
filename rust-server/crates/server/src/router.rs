@@ -11,6 +11,7 @@ pub enum MethodFamily {
     ActivityTower,
     Adventure,
     Bathroom,
+    Bag,
     Battle,
     BattlePass,
     BigActivity,
@@ -21,6 +22,7 @@ pub enum MethodFamily {
     BuildShip,
     Chat,
     Copy,
+    CopyInfo,
     DailyCopy,
     Discuss,
     Equip,
@@ -30,6 +32,7 @@ pub enum MethodFamily {
     Exchange,
     FoodCompose,
     Friend,
+    Fashion,
     Guide,
     Guild,
     GuildBox,
@@ -42,8 +45,10 @@ pub enum MethodFamily {
     HeroAwaken,
     InteractionItem,
     InviteScore,
+    Illustrate,
     Jopen,
     Magazine,
+    Mail,
     MatchServer,
     Milestone,
     MopUp,
@@ -100,11 +105,7 @@ impl<'a> GameMethod<'a> {
     }
 
     pub fn is_known(self) -> bool {
-        self.family != MethodFamily::Unknown
-            || KNOWN_EXACT_METHODS.contains(&self.name)
-            || KNOWN_PREFIXES
-                .iter()
-                .any(|prefix| self.name.starts_with(prefix))
+        self.family != MethodFamily::Unknown || KNOWN_EXACT_METHODS.contains(&self.name)
     }
 }
 
@@ -127,6 +128,7 @@ fn family_for(name: &str) -> MethodFamily {
         ("activity.", MethodFamily::Activity),
         ("adventure.", MethodFamily::Adventure),
         ("bathroom.", MethodFamily::Bathroom),
+        ("bag.", MethodFamily::Bag),
         ("battlepass.", MethodFamily::BattlePass),
         ("battle.", MethodFamily::Battle),
         ("bigactivity.", MethodFamily::BigActivity),
@@ -137,6 +139,7 @@ fn family_for(name: &str) -> MethodFamily {
         ("build.", MethodFamily::Build),
         ("chat.", MethodFamily::Chat),
         ("copy.", MethodFamily::Copy),
+        ("copyinfo.", MethodFamily::CopyInfo),
         ("dailycopy.", MethodFamily::DailyCopy),
         ("discuss.", MethodFamily::Discuss),
         ("equipactivity.", MethodFamily::EquipActivity),
@@ -146,6 +149,7 @@ fn family_for(name: &str) -> MethodFamily {
         ("exchange.", MethodFamily::Exchange),
         ("foodCompose.", MethodFamily::FoodCompose),
         ("friend.", MethodFamily::Friend),
+        ("fashion.", MethodFamily::Fashion),
         ("guide.", MethodFamily::Guide),
         ("guildbigactivityrank.", MethodFamily::GuildBigActivity),
         ("guildbigactivity.", MethodFamily::GuildBigActivity),
@@ -160,8 +164,10 @@ fn family_for(name: &str) -> MethodFamily {
         ("hero.", MethodFamily::Hero),
         ("interactionitem.", MethodFamily::InteractionItem),
         ("invitescore.", MethodFamily::InviteScore),
+        ("illustrate.", MethodFamily::Illustrate),
         ("jopen.", MethodFamily::Jopen),
         ("magazine.", MethodFamily::Magazine),
+        ("mail.", MethodFamily::Mail),
         ("matchsvr_", MethodFamily::MatchServer),
         ("matchsvr.", MethodFamily::MatchServer),
         ("milestone.", MethodFamily::Milestone),
@@ -212,32 +218,9 @@ const KNOWN_EXACT_METHODS: &[&str] = &[
     "repair.RepairHero",
 ];
 
-const KNOWN_PREFIXES: &[&str] = &[
-    "illustrate.",
-    "bag.",
-    "fashion.",
-    "mail.",
-    "copyinfo.",
-    "recharge.",
-    "activitybirthday.",
-    "activitychristmasshop.",
-    "activitycodeexchange.",
-    "activityextract.",
-    "activityextractur.",
-    "activityfashion.",
-    "activitypapercut.",
-    "activitysecretcopy.",
-    "activitySSR.",
-    "activitySSRrolls.",
-    "activityvalentineloveletter.",
-    "activityVideo.",
-    "worldevent.",
-    "worldeventrank.",
-];
-
 #[cfg(test)]
 mod tests {
-    use super::{family_for, MethodFamily};
+    use super::{family_for, GameMethod, MethodFamily};
 
     #[test]
     fn prefers_longer_prefixes_before_shorter_prefixes() {
@@ -255,5 +238,20 @@ mod tests {
         assert_eq!(family_for("activitySSRrolls.Draw"), MethodFamily::Activity);
         assert_eq!(family_for("guildOfferUser.Get"), MethodFamily::GuildOffer);
         assert_eq!(family_for("worldeventrank.Rank"), MethodFamily::WorldEvent);
+    }
+
+    #[test]
+    fn known_prefixes_share_same_family_registry() {
+        for (name, family) in [
+            ("bag.GetBagInfo", MethodFamily::Bag),
+            ("copyinfo.GetCopyInfo", MethodFamily::CopyInfo),
+            ("fashion.GetFashion", MethodFamily::Fashion),
+            ("illustrate.GetInfo", MethodFamily::Illustrate),
+            ("mail.GetMailList", MethodFamily::Mail),
+        ] {
+            let method = GameMethod::parse(name);
+            assert_eq!(method.family(), family);
+            assert!(method.is_known());
+        }
     }
 }
