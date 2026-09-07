@@ -926,10 +926,21 @@ impl ProfileStore {
             ))
         })? {
             let (activity_id, progress_kind, value) = row?;
-            account.activities.progress.insert(
-                format!("{activity_id}\u{1f}{progress_kind}"),
-                non_negative_u64(value, "activity progress")?,
-            );
+            let value = non_negative_u64(value, "activity progress")?;
+            if activity_id == "inviteScore" {
+                match progress_kind.as_str() {
+                    "haveGotSSR" => account.invite_score.have_got_ssr = value,
+                    "haveGotFaishon" => account.invite_score.have_got_fashion = value,
+                    "haveFirstBattleWin" => account.invite_score.have_first_battle_win = value,
+                    "recordInviteScoreVersion" => account.invite_score.record_version = value,
+                    _ => {}
+                }
+            } else {
+                account
+                    .activities
+                    .progress
+                    .insert(format!("{activity_id}\u{1f}{progress_kind}"), value);
+            }
         }
 
         if let Some(values) = connection
@@ -1813,6 +1824,30 @@ impl ProfileStore {
                     activity_id,
                     progress_kind,
                     typed_i64(*value, "activity progress")?,
+                    timestamp(),
+                ],
+            )?;
+        }
+        for (progress_kind, value) in [
+            ("haveGotSSR", account.invite_score.have_got_ssr),
+            ("haveGotFaishon", account.invite_score.have_got_fashion),
+            (
+                "haveFirstBattleWin",
+                account.invite_score.have_first_battle_win,
+            ),
+            (
+                "recordInviteScoreVersion",
+                account.invite_score.record_version,
+            ),
+        ] {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'inviteScore', ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    progress_kind,
+                    typed_i64(value, "invite score")?,
                     timestamp(),
                 ],
             )?;

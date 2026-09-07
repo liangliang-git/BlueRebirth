@@ -401,6 +401,10 @@ fn typed_repository_transaction_commits_domain_mutation() {
         .activities
         .progress
         .insert("spring\u{1f}merits".to_owned(), 33);
+    account.invite_score.have_got_ssr = 1;
+    account.invite_score.have_got_fashion = 1;
+    account.invite_score.have_first_battle_win = 1;
+    account.invite_score.record_version = 7;
     account.battle.active = Some(BattleSession {
         chapter_id: ChapterId::new(3).unwrap(),
         copy_id: CopyId::new(300).unwrap(),
@@ -470,6 +474,10 @@ fn typed_repository_transaction_commits_domain_mutation() {
         loaded.activities.progress.get("spring\u{1f}merits"),
         Some(&33)
     );
+    assert_eq!(loaded.invite_score.have_got_ssr, 1);
+    assert_eq!(loaded.invite_score.have_got_fashion, 1);
+    assert_eq!(loaded.invite_score.have_first_battle_win, 1);
+    assert_eq!(loaded.invite_score.record_version, 7);
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())
