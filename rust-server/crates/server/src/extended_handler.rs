@@ -37,7 +37,10 @@ pub(super) fn handle_typed_battlepass(
                     .filter(|level| *level > 0 && *level <= pass_level)
                     .collect::<Vec<_>>()
             } else {
-                vec![decode_varint_field(request_args, 1)]
+                let Ok(request) = BattlePassRewardRequest::decode(request_args) else {
+                    return invalid("battle pass reward request is invalid");
+                };
+                vec![request.level]
             };
             let mut claims = Vec::<(i32, i32, Vec<ShopReward>)>::new();
             for level in targets {
@@ -88,8 +91,11 @@ pub(super) fn handle_typed_battlepass(
             reply(method, encode_battlepass_reward_response(&claimed))
         }
         "battlepass.RefreshRandomTask" | "activitybattlepass.RefreshRandomTask" => {
+            let Ok(request) = BattlePassRefreshRequest::decode(request_args) else {
+                return invalid("battle pass refresh request is invalid");
+            };
             let pass = typed_battlepass_mut(account, activity);
-            pass.last_refresh_task_id = decode_varint_field(request_args, 1).max(0) as u64;
+            pass.last_refresh_task_id = request.task_id.max(0) as u64;
             pass.refresh_count = pass.refresh_count.saturating_add(1);
             let payload = typed_battlepass_info_payload(account, catalog, activity);
             append_method_push(
@@ -104,13 +110,18 @@ pub(super) fn handle_typed_battlepass(
             HandlerResult::PushOnly
         }
         "battlepass.BuyPassType" | "activitybattlepass.BuyPassType" => {
-            typed_battlepass_mut(account, activity).pass_type =
-                decode_varint_field(request_args, 1).clamp(1, 2) as u32;
+            let Ok(request) = BattlePassTypeRequest::decode(request_args) else {
+                return invalid("battle pass type request is invalid");
+            };
+            typed_battlepass_mut(account, activity).pass_type = request.pass_type as u32;
             append_typed_battlepass_info_push(account, catalog, activity, pre_pushes);
             HandlerResult::PushOnly
         }
         "battlepass.BuyPassLevel" | "activitybattlepass.BuyPassLevel" => {
-            let levels = decode_varint_field(request_args, 1).max(1);
+            let Ok(request) = BattlePassLevelRequest::decode(request_args) else {
+                return invalid("battle pass level request is invalid");
+            };
+            let levels = request.levels;
             let price = if activity {
                 catalog.battlepass_activity_param.as_ref()
             } else {
@@ -137,7 +148,10 @@ pub(super) fn handle_typed_battlepass(
             HandlerResult::PushOnly
         }
         "battlepass.RecieveTaskReward" | "activitybattlepass.RecieveTaskReward" => {
-            let task_id = decode_varint_field(request_args, 1).max(0) as u64;
+            let Ok(request) = BattlePassTaskRewardRequest::decode(request_args) else {
+                return invalid("battle pass task request is invalid");
+            };
+            let task_id = request.task_id.max(0) as u64;
             let tasks = if activity {
                 &catalog.battlepass_activity_tasks
             } else {
@@ -268,7 +282,10 @@ pub(super) fn handle_typed_exchange(
             reply(method, typed_exchange_info_payload(account, catalog))
         }
         "exchange.Exchange" => {
-            let id = decode_varint_field(request_args, 1);
+            let Ok(request) = ExchangeRequest::decode(request_args) else {
+                return invalid("exchange request is invalid");
+            };
+            let id = request.exchange_id;
             let Some(config) = catalog.exchanges.get(&id) else {
                 return invalid("exchange item was not found");
             };
@@ -435,7 +452,10 @@ pub(super) fn handle_typed_world_event(
         "worldevent.UserStage" => reply(method, typed_world_event_stage_payload(account)),
         "worldeventrank.Rank" => reply(method, typed_world_event_rank_payload(account)),
         "worldevent.StageReward" => {
-            let stage_id = decode_varint_field(request_args, 1).max(0) as u64;
+            let Ok(request) = WorldEventStageRequest::decode(request_args) else {
+                return invalid("world event reward request is invalid");
+            };
+            let stage_id = request.stage_id as u64;
             let Some((event_id, event)) = active_world_event(catalog) else {
                 return reply(method, encode_rewards_list(&[]));
             };

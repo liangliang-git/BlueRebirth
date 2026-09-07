@@ -2,12 +2,14 @@ use blueoath_protocol::{
     ActivityCodeExchangeRequest, ActivityExchangeRewardRequest, ActivityExtractDrawRequest,
     ActivityFormulaRequest, ActivityItemIdRequest, ActivityRewardIndexRequest,
     ActivitySelectShipRequest, ActivitySelectTeamRequest, AlchemyRequest, BattleAutoMessageRequest,
-    BigActivityRankRequest, BirthdayFeedRequest, BuildShipRequest, BuildShipRewardRequest,
-    ChangeNameRequest, ChangeWorldChannelRequest, ChristmasBuyBlindBoxRequest,
-    ChristmasBuyItemRequest, CoopChangeChapterRequest, CoopCreateRoomRequest, CoopKickRequest,
-    CoopMatchTypeRequest, CoopPasswordRequest, CoopRoomHeroesRequest, CoopRoomIdRequest,
-    CopyAttackRequest, CopyIdRequest, CopyPassRequest, CopyRecordRequest, CopyRewardCountRequest,
-    CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode,
+    BattlePassLevelRequest, BattlePassRefreshRequest, BattlePassRewardRequest,
+    BattlePassTaskRewardRequest, BattlePassTypeRequest, BigActivityRankRequest,
+    BirthdayFeedRequest, BuildShipRequest, BuildShipRewardRequest, ChangeNameRequest,
+    ChangeWorldChannelRequest, ChristmasBuyBlindBoxRequest, ChristmasBuyItemRequest,
+    CoopChangeChapterRequest, CoopCreateRoomRequest, CoopKickRequest, CoopMatchTypeRequest,
+    CoopPasswordRequest, CoopRoomHeroesRequest, CoopRoomIdRequest, CopyAttackRequest,
+    CopyIdRequest, CopyPassRequest, CopyRecordRequest, CopyRewardCountRequest, CopyStartRequest,
+    DailyCopyEnterRequest, DailyCopySelectExRequest, Decode, ExchangeRequest,
     FashionPurchaseRequest, FriendSearchRequest, FriendTargetRequest, GetBarrageByIdRequest,
     GuildActivityPresentRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildCreateRequest,
     GuildIdRequest, GuildListRequest, GuildModifyRequest, GuildOfferRequest, GuildSearchRequest,
@@ -18,7 +20,7 @@ use blueoath_protocol::{
     SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
     SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest, SignDayRequest,
     SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
-    ValentineRewardRequest,
+    ValentineRewardRequest, WorldEventStageRequest,
 };
 
 #[test]
@@ -434,6 +436,34 @@ fn decodes_typed_activity_requests() {
     assert_eq!(
         CopyIdRequest::decode(&[0x08, 12]).unwrap(),
         CopyIdRequest { copy_id: 12 }
+    );
+    assert_eq!(
+        BattlePassRewardRequest::decode(&[0x08, 3]).unwrap(),
+        BattlePassRewardRequest { level: 3 }
+    );
+    assert_eq!(
+        BattlePassRefreshRequest::decode(&[0x08, 4]).unwrap(),
+        BattlePassRefreshRequest { task_id: 4 }
+    );
+    assert_eq!(
+        BattlePassTypeRequest::decode(&[0x08, 2]).unwrap(),
+        BattlePassTypeRequest { pass_type: 2 }
+    );
+    assert_eq!(
+        BattlePassLevelRequest::decode(&[0x08, 5]).unwrap(),
+        BattlePassLevelRequest { levels: 5 }
+    );
+    assert_eq!(
+        BattlePassTaskRewardRequest::decode(&[0x08, 6]).unwrap(),
+        BattlePassTaskRewardRequest { task_id: 6 }
+    );
+    assert_eq!(
+        ExchangeRequest::decode(&[0x08, 8]).unwrap(),
+        ExchangeRequest { exchange_id: 8 }
+    );
+    assert_eq!(
+        WorldEventStageRequest::decode(&[0x08, 9]).unwrap(),
+        WorldEventStageRequest { stage_id: 9 }
     );
 }
 

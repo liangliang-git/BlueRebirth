@@ -2623,6 +2623,114 @@ impl Decode for AlchemyRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BattlePassRewardRequest {
+    pub level: i32,
+}
+
+impl Decode for BattlePassRewardRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let level = required_field(&fields, 1, "battle pass is missing level")?;
+        if level <= 0 {
+            return Err(ProtocolError::Invalid("battle pass level is invalid"));
+        }
+        Ok(Self { level })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BattlePassRefreshRequest {
+    pub task_id: i32,
+}
+
+impl Decode for BattlePassRefreshRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            task_id: optional_i32(&fields, 1, "battle pass has duplicate task id")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BattlePassTypeRequest {
+    pub pass_type: i32,
+}
+
+impl Decode for BattlePassTypeRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let pass_type = required_field(&fields, 1, "battle pass is missing type")?;
+        if !(1..=2).contains(&pass_type) {
+            return Err(ProtocolError::Invalid("battle pass type is invalid"));
+        }
+        Ok(Self { pass_type })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BattlePassLevelRequest {
+    pub levels: i32,
+}
+
+impl Decode for BattlePassLevelRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let levels = required_field(&fields, 1, "battle pass is missing levels")?;
+        if levels <= 0 {
+            return Err(ProtocolError::Invalid("battle pass levels are invalid"));
+        }
+        Ok(Self { levels })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BattlePassTaskRewardRequest {
+    pub task_id: i32,
+}
+
+impl Decode for BattlePassTaskRewardRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            task_id: optional_i32(&fields, 1, "battle pass has duplicate task id")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExchangeRequest {
+    pub exchange_id: i32,
+}
+
+impl Decode for ExchangeRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let exchange_id = required_field(&fields, 1, "exchange is missing id")?;
+        if exchange_id <= 0 {
+            return Err(ProtocolError::Invalid("exchange id is invalid"));
+        }
+        Ok(Self { exchange_id })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorldEventStageRequest {
+    pub stage_id: i32,
+}
+
+impl Decode for WorldEventStageRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let stage_id = required_field(&fields, 1, "world event is missing stage id")?;
+        if stage_id <= 0 {
+            return Err(ProtocolError::Invalid("world event stage is invalid"));
+        }
+        Ok(Self { stage_id })
+    }
+}
+
 impl Decode for GuildTaskDonateRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
