@@ -5,8 +5,9 @@ use blueoath_protocol::{
     GetBarrageByIdRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, InviteRecordVersionRequest,
     InviteStateTypeRequest, OutpostBuildingRequest, OutpostSetHeroRequest, ProtocolError,
     SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest,
-    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, SportsMeetPointsRequest,
-    TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
+    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, ShipTaskCurrentShipRequest,
+    ShipTaskRewardRequest, SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest,
+    TeachingUserRequest,
 };
 
 #[test]
@@ -279,6 +280,20 @@ fn decodes_typed_chat_requests_with_length_limits() {
         InviteRecordVersionRequest::decode(&[0x08, 7]).unwrap(),
         InviteRecordVersionRequest { version: 7 }
     );
+    assert_eq!(
+        ShipTaskRewardRequest::decode(&[0x08, 12, 0x10, 3]).unwrap(),
+        ShipTaskRewardRequest {
+            ship_tid: 12,
+            task_id: 3,
+        }
+    );
+    assert_eq!(
+        ShipTaskCurrentShipRequest::decode(&[0x08, 12, 0x10, 0x8B, 0xEB, 0x01]).unwrap(),
+        ShipTaskCurrentShipRequest {
+            ship_tid: 12,
+            hero_template_id: 30091,
+        }
+    );
 }
 
 #[test]
@@ -318,5 +333,11 @@ fn rejects_invalid_typed_chat_requests() {
     assert!(matches!(
         InviteStateTypeRequest::decode(&[0x08, 4]),
         Err(ProtocolError::Invalid("invite state type is invalid"))
+    ));
+    assert!(matches!(
+        ShipTaskRewardRequest::decode(&[0x08, 0, 0x10, 1]),
+        Err(ProtocolError::Invalid(
+            "ship task reward request is invalid"
+        ))
     ));
 }

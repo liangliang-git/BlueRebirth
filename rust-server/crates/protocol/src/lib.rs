@@ -1797,6 +1797,54 @@ impl Decode for InviteRecordVersionRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShipTaskRewardRequest {
+    pub ship_tid: u64,
+    pub task_id: u64,
+}
+
+impl Decode for ShipTaskRewardRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let ship_tid = required_field(&fields, 1, "ship task is missing ship id")?;
+        let task_id = required_field(&fields, 2, "ship task is missing task id")?;
+        if ship_tid == 0 || task_id == 0 {
+            return Err(ProtocolError::Invalid(
+                "ship task reward request is invalid",
+            ));
+        }
+        Ok(Self {
+            ship_tid: u64::try_from(ship_tid)
+                .map_err(|_| ProtocolError::Invalid("ship task ship id is invalid"))?,
+            task_id: u64::try_from(task_id)
+                .map_err(|_| ProtocolError::Invalid("ship task id is invalid"))?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShipTaskCurrentShipRequest {
+    pub ship_tid: u64,
+    pub hero_template_id: u64,
+}
+
+impl Decode for ShipTaskCurrentShipRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let ship_tid = required_field(&fields, 1, "ship task is missing ship id")?;
+        let hero_template_id = required_field(&fields, 2, "ship task is missing hero template")?;
+        if ship_tid == 0 || hero_template_id == 0 {
+            return Err(ProtocolError::Invalid("ship task current ship is invalid"));
+        }
+        Ok(Self {
+            ship_tid: u64::try_from(ship_tid)
+                .map_err(|_| ProtocolError::Invalid("ship task ship id is invalid"))?,
+            hero_template_id: u64::try_from(hero_template_id)
+                .map_err(|_| ProtocolError::Invalid("ship task hero template is invalid"))?,
+        })
+    }
+}
+
 impl Decode for SeaDifficultyRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

@@ -13,8 +13,14 @@ pub(super) fn handle_typed(
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     match method {
         "shiptask.GetShipTaskReward" => {
-            let ship_tid = decode_varint_field(request_args, 1).max(0) as u64;
-            let task_id = decode_varint_field(request_args, 2).max(0) as u64;
+            let request = match ShipTaskRewardRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidRequest("ship task reward"))
+                }
+            };
+            let ship_tid = request.ship_tid;
+            let task_id = request.task_id;
             if let Some(task) = account
                 .ship_task
                 .tasks
@@ -38,8 +44,14 @@ pub(super) fn handle_typed(
             HandlerResult::PushOnly
         }
         "shiptask.GetAchievementReward" => {
-            let ship_tid = decode_varint_field(request_args, 1).max(0) as u64;
-            let achievement_id = decode_varint_field(request_args, 2).max(0) as u64;
+            let request = match ShipTaskRewardRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidRequest("ship task achievement"))
+                }
+            };
+            let ship_tid = request.ship_tid;
+            let achievement_id = request.task_id;
             let already_claimed = account.ship_task.achievements.iter().any(|achievement| {
                 achievement.ship_tid == ship_tid
                     && achievement.id == achievement_id
@@ -97,9 +109,16 @@ pub(super) fn handle_typed(
             HandlerResult::PushOnly
         }
         "shiptask.SetCurrentShip" => {
-            account.ship_task.current_ship_tid = decode_varint_field(request_args, 1).max(0) as u64;
-            account.ship_task.current_hero_template_id =
-                decode_varint_field(request_args, 2).max(0) as u64;
+            let request = match ShipTaskCurrentShipRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "ship task current ship",
+                    ))
+                }
+            };
+            account.ship_task.current_ship_tid = request.ship_tid;
+            account.ship_task.current_hero_template_id = request.hero_template_id;
             account.ship_task.set_ship_time = current_unix_seconds() as u64;
             append_shiptask_typed_push(post_pushes, account);
             HandlerResult::PushOnly
