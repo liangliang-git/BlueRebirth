@@ -153,9 +153,20 @@ impl Decode for CopyStartRequest {
                             .get(&1)
                             .into_iter()
                             .flatten()
-                            .map(|value| *value as i32)
-                            .collect()
+                            .map(|value| {
+                                to_signed_i32(*value, "copy start hero id is out of range")
+                            })
+                            .collect::<Result<Vec<_>, _>>()
                     })
+                })
+                .collect::<Result<Result<Vec<_>, _>, _>>()??
+                .into_iter()
+                .map(|ids| {
+                    if ids.iter().any(|id| *id <= 0) {
+                        Err(ProtocolError::Invalid("copy start hero id is invalid"))
+                    } else {
+                        Ok(ids)
+                    }
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         })
@@ -203,14 +214,14 @@ impl Decode for BuildingSetHeroListRequest {
                 .get(&1)
                 .into_iter()
                 .flatten()
-                .map(|value| *value as i32)
-                .collect(),
+                .map(|value| to_signed_i32(*value, "building id is out of range"))
+                .collect::<Result<Vec<_>, _>>()?,
             hero_ids: fields
                 .get(&2)
                 .into_iter()
                 .flatten()
-                .map(|value| *value as i32)
-                .collect(),
+                .map(|value| to_signed_i32(*value, "building hero id is out of range"))
+                .collect::<Result<Vec<_>, _>>()?,
         })
     }
 }
@@ -2513,9 +2524,11 @@ pub struct PositiveIdListRequest {
 impl Decode for PositiveIdListRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
-        Ok(Self {
-            ids: fields.get(&1).cloned().unwrap_or_default(),
-        })
+        let ids = fields.get(&1).cloned().unwrap_or_default();
+        if ids.contains(&0) {
+            return Err(ProtocolError::Invalid("positive id list contains zero"));
+        }
+        Ok(Self { ids })
     }
 }
 
@@ -2539,6 +2552,12 @@ impl Decode for ItemCountListRequest {
                 item_id: required_u64(&fields, 1, "item count is missing item id")?,
                 count: required_u64(&fields, 2, "item count is missing count")?,
             });
+        }
+        if items
+            .iter()
+            .any(|item| item.item_id == 0 || item.count == 0)
+        {
+            return Err(ProtocolError::Invalid("item count entry is invalid"));
         }
         Ok(Self { items })
     }
@@ -2564,6 +2583,14 @@ impl Decode for IllustrateBehaviourRequest {
                 illustrate_id: optional_u64(&fields, 1, "illustrate behaviour has duplicate id")?,
                 behaviours: fields.get(&2).cloned().unwrap_or_default(),
             });
+        }
+        if entries
+            .iter()
+            .any(|entry| entry.illustrate_id == 0 || entry.behaviours.contains(&0))
+        {
+            return Err(ProtocolError::Invalid(
+                "illustrate behaviour entry is invalid",
+            ));
         }
         Ok(Self { entries })
     }
@@ -3393,6 +3420,12 @@ fn required_field(
 
 fn to_i32(value: u64, error: &'static str) -> Result<i32, ProtocolError> {
     i32::try_from(value).map_err(|_| ProtocolError::Invalid(error))
+}
+
+fn to_signed_i32(value: u64, error: &'static str) -> Result<i32, ProtocolError> {
+    u32::try_from(value)
+        .map(|value| value as i32)
+        .map_err(|_| ProtocolError::Invalid(error))
 }
 
 pub struct TMessageCodec;
