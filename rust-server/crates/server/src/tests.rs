@@ -252,6 +252,7 @@ fn typed_fleet_mutation_validates_hero_ownership() {
             hp: 1,
             locked: false,
             equip_slots: Vec::new(),
+            pskills: std::collections::BTreeMap::new(),
         },
     );
     let value = blueoath_protocol::FleetInfo {

@@ -563,6 +563,7 @@ fn receive_typed_construction(
                 hp: 10_000_000_000,
                 locked: false,
                 equip_slots: vec![None; 6],
+                pskills: std::collections::BTreeMap::new(),
             },
         );
         rewards.push(ShopReward {

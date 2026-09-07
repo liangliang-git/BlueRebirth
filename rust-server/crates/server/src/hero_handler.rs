@@ -1184,6 +1184,7 @@ mod tests {
                 hp: 12,
                 locked: true,
                 equip_slots: Vec::new(),
+                pskills: std::collections::BTreeMap::new(),
             },
         );
         let result = handle_typed(

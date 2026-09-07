@@ -274,6 +274,7 @@ fn apply_typed_shop_good(
                         hp: 10_000_000_000,
                         locked: false,
                         equip_slots: vec![None; 6],
+                        pskills: std::collections::BTreeMap::new(),
                     },
                 );
                 last_id = i32::try_from(id.get()).ok()?;

@@ -148,6 +148,7 @@ mod tests {
                 hp: 1,
                 locked: false,
                 equip_slots: Vec::new(),
+                pskills: std::collections::BTreeMap::new(),
             },
         );
         account.fleet.fleets.insert(

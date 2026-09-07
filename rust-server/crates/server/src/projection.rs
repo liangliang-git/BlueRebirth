@@ -181,6 +181,16 @@ pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountStat
                         .unwrap_or(0)
                 })
                 .collect(),
+            pskills: hero
+                .pskills
+                .iter()
+                .map(|(skill_id, level)| PSkillEntry {
+                    pskill_id: u32::try_from(*skill_id).unwrap_or(u32::MAX),
+                    pskill_exp: 0,
+                    level: i32::try_from(*level).unwrap_or(i32::MAX),
+                    replace: 0,
+                })
+                .collect(),
             lock: hero.locked,
             ..HeroGrid::default()
         })

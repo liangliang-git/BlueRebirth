@@ -1309,6 +1309,14 @@ where
                         state.mood_recovery_multiplier,
                         &mut post_pushes,
                     )
+                } else if method.is_family(MethodFamily::Study) {
+                    progression_handler::handle_study_typed(
+                        typed,
+                        request.method.as_str(),
+                        request_args,
+                        current_unix_seconds(),
+                        &mut post_pushes,
+                    )
                 } else {
                     task_handler::handle_typed(
                         typed,
@@ -2406,7 +2414,6 @@ fn legacy_only_method(method: &str) -> bool {
             | MethodFamily::Magazine
             | MethodFamily::InteractionItem
             | MethodFamily::MopUp
-            | MethodFamily::Study
             | MethodFamily::WorldEvent
     )
 }

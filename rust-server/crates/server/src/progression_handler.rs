@@ -139,6 +139,222 @@ pub(super) fn handle_bathroom_typed(
     HandlerResult::Reply(Response::raw(method, response))
 }
 
+pub(super) fn handle_study_typed(
+    account: &mut AccountState,
+    method: &str,
+    request_args: &[u8],
+    now: u32,
+    post_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    match method {
+        "study.GetStudyInfo" => HandlerResult::Reply(Response::raw(
+            method,
+            study_info_payload_from_typed(account, now),
+        )),
+        "study.StartStudyPSkill" => {
+            let hero_id = decode_varint_u64_field(request_args, 1);
+            let skill_id = decode_varint_u64_field(request_args, 2);
+            let textbook_id = decode_varint_u64_field(request_args, 3);
+            let valid = hero_id > 0
+                && skill_id > 0
+                && textbook_id > 0
+                && account.dock.heroes.contains_key(&hero_key(hero_id))
+                && account.study.progress.len() < 2
+                && !account
+                    .study
+                    .progress
+                    .iter()
+                    .any(|progress| progress.hero_id == hero_id)
+                && typed_item_count(account, textbook_id) > 0;
+            if !valid {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "study slot, hero, or textbook is invalid",
+                ));
+            }
+            let _ = consume_typed_item(account, textbook_id, 1);
+            account
+                .study
+                .progress
+                .push(blueoath_domain::StudyProgressState {
+                    hero_id,
+                    skill_id,
+                    textbook_id,
+                    begin_time: u64::from(now),
+                    end_time: u64::from(now.saturating_add(60)),
+                });
+            append_method_push(
+                post_pushes,
+                "study.GetStudyInfo",
+                study_info_payload_from_typed(account, now),
+            );
+            append_method_push(
+                post_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            HandlerResult::Reply(Response::raw(method, Vec::new()))
+        }
+        "study.CancelStudyPSkill" => {
+            let hero_id = decode_varint_u64_field(request_args, 1);
+            let requested_skill_id = decode_varint_u64_field(request_args, 2);
+            let index = account.study.progress.iter().position(|progress| {
+                progress.hero_id == hero_id
+                    && (requested_skill_id == 0 || progress.skill_id == requested_skill_id)
+            });
+            let Some(index) = index else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "study progress is missing",
+                ));
+            };
+            account.study.progress.remove(index);
+            append_method_push(
+                post_pushes,
+                "study.GetStudyInfo",
+                study_info_payload_from_typed(account, now),
+            );
+            HandlerResult::Reply(Response::raw(method, Vec::new()))
+        }
+        "study.EndStudyPSkill" => {
+            let hero_id = decode_varint_u64_field(request_args, 1);
+            let skill_id = decode_varint_u64_field(request_args, 2);
+            finish_study_typed(account, hero_id, skill_id, now, false)
+                .map(|payload| {
+                    append_method_push(
+                        post_pushes,
+                        "hero.UpdateHeroBagData",
+                        HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+                    );
+                    append_method_push(
+                        post_pushes,
+                        "study.GetStudyInfo",
+                        study_info_payload_from_typed(account, now),
+                    );
+                    HandlerResult::Reply(Response::raw(method, payload))
+                })
+                .unwrap_or_else(|| {
+                    HandlerResult::Error(GameError::InvalidRequest("study is not finished"))
+                })
+        }
+        "study.SpeedUpStudy" => {
+            let hero_id = decode_varint_u64_field(request_args, 1);
+            let skill_id = decode_varint_u64_field(request_args, 2);
+            let items = decode_repeated_message_field(request_args, 3)
+                .into_iter()
+                .map(|item| {
+                    (
+                        decode_varint_u64_field(&item, 1),
+                        decode_varint_u64_field(&item, 2),
+                    )
+                })
+                .filter(|(item_id, count)| *item_id > 0 && *count > 0)
+                .collect::<Vec<_>>();
+            if items.is_empty()
+                || !account
+                    .study
+                    .progress
+                    .iter()
+                    .any(|progress| progress.hero_id == hero_id && progress.skill_id == skill_id)
+                || items
+                    .iter()
+                    .any(|(item_id, count)| typed_item_count(account, *item_id) < *count)
+            {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "study progress or speedup items are missing",
+                ));
+            }
+            for (item_id, count) in items {
+                let _ = consume_typed_item(account, item_id, count);
+            }
+            finish_study_typed(account, hero_id, skill_id, now, true)
+                .map(|payload| {
+                    append_method_push(
+                        post_pushes,
+                        "hero.UpdateHeroBagData",
+                        HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+                    );
+                    append_method_push(
+                        post_pushes,
+                        "study.GetStudyInfo",
+                        study_info_payload_from_typed(account, now),
+                    );
+                    HandlerResult::Reply(Response::raw(method, payload))
+                })
+                .unwrap_or_else(|| {
+                    HandlerResult::Error(GameError::InvalidState("study progress is missing"))
+                })
+        }
+        _ => HandlerResult::Empty,
+    }
+}
+
+fn typed_item_count(account: &AccountState, template_id: u64) -> u64 {
+    blueoath_domain::TemplateId::new(template_id)
+        .ok()
+        .and_then(|id| account.inventory.items.get(&id).copied())
+        .unwrap_or_default()
+}
+
+fn consume_typed_item(account: &mut AccountState, template_id: u64, count: u64) -> bool {
+    let Ok(template_id) = blueoath_domain::TemplateId::new(template_id) else {
+        return false;
+    };
+    let Some(amount) = account.inventory.items.get_mut(&template_id) else {
+        return false;
+    };
+    if *amount < count {
+        return false;
+    }
+    *amount -= count;
+    if *amount == 0 {
+        account.inventory.items.remove(&template_id);
+    }
+    true
+}
+
+fn finish_study_typed(
+    account: &mut AccountState,
+    hero_id: u64,
+    skill_id: u64,
+    now: u32,
+    force: bool,
+) -> Option<Vec<u8>> {
+    let index = account
+        .study
+        .progress
+        .iter()
+        .position(|progress| progress.hero_id == hero_id && progress.skill_id == skill_id)?;
+    if !force && account.study.progress[index].end_time > u64::from(now) {
+        return None;
+    }
+    let progress = account.study.progress.remove(index);
+    let hero = account.dock.heroes.get_mut(&hero_key(hero_id))?;
+    let before = hero.pskills.get(&skill_id).copied().unwrap_or_default();
+    let after = before.saturating_add(1).max(1);
+    hero.pskills.insert(skill_id, after);
+    let mut output = Vec::new();
+    append_varint_field(&mut output, 1, hero_id);
+    append_varint_field(&mut output, 2, skill_id);
+    append_varint_field(&mut output, 3, u64::from(before));
+    append_varint_field(&mut output, 4, u64::from(after));
+    append_varint_field(&mut output, 5, progress.textbook_id);
+    Some(output)
+}
+
+fn study_info_payload_from_typed(account: &AccountState, _now: u32) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(&mut output, 1, 2);
+    for progress in &account.study.progress {
+        let mut item = Vec::new();
+        append_varint_field(&mut item, 1, progress.hero_id);
+        append_varint_field(&mut item, 2, progress.skill_id);
+        append_varint_field(&mut item, 3, progress.textbook_id);
+        append_varint_field(&mut item, 4, progress.begin_time);
+        append_varint_field(&mut item, 5, progress.end_time);
+        append_message_field(&mut output, 2, &item);
+    }
+    output
+}
+
 fn hero_key(value: u64) -> blueoath_domain::HeroId {
     blueoath_domain::HeroId::new(value).expect("validated positive hero id")
 }
@@ -791,6 +1007,7 @@ mod typed_tests {
                 hp: 100,
                 locked: false,
                 equip_slots: Vec::new(),
+                pskills: std::collections::BTreeMap::new(),
             },
         );
         let mut start = Vec::new();
@@ -822,5 +1039,53 @@ mod typed_tests {
         assert!(account.bathroom.heroes.is_empty());
         assert_eq!(account.dock.heroes[&hero_id].mood, 300_000);
         assert_eq!(pushes.len(), 3);
+    }
+
+    #[test]
+    fn typed_study_consumes_textbook_and_levels_skill() {
+        let hero_id = blueoath_domain::HeroId::new(9).unwrap();
+        let textbook_id = blueoath_domain::TemplateId::new(7001).unwrap();
+        let mut account = AccountState::default();
+        account.dock.heroes.insert(
+            hero_id,
+            blueoath_domain::HeroState {
+                id: hero_id,
+                template_id: blueoath_domain::TemplateId::new(100).unwrap(),
+                name: String::new(),
+                change_name_time: 0,
+                level: 1,
+                exp: 0,
+                mood: 0,
+                affection: 0,
+                hp: 100,
+                locked: false,
+                equip_slots: Vec::new(),
+                pskills: std::collections::BTreeMap::new(),
+            },
+        );
+        account.inventory.items.insert(textbook_id, 1);
+        let mut start = Vec::new();
+        append_varint_field(&mut start, 1, 9);
+        append_varint_field(&mut start, 2, 41);
+        append_varint_field(&mut start, 3, 7001);
+        let mut pushes = Vec::new();
+        let result = handle_study_typed(
+            &mut account,
+            "study.StartStudyPSkill",
+            &start,
+            100,
+            &mut pushes,
+        );
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert_eq!(typed_item_count(&account, 7001), 0);
+
+        let mut end = Vec::new();
+        append_varint_field(&mut end, 1, 9);
+        append_varint_field(&mut end, 2, 41);
+        let result =
+            handle_study_typed(&mut account, "study.EndStudyPSkill", &end, 200, &mut pushes);
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert!(account.study.progress.is_empty());
+        assert_eq!(account.dock.heroes[&hero_id].pskills.get(&41), Some(&1));
     }
 }

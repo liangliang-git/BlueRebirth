@@ -350,6 +350,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
             hp: 80,
             locked: true,
             equip_slots: vec![Some(equip_id)],
+            pskills: [(41, 2)].into_iter().collect(),
         },
     );
     account.dock.equipments.insert(
@@ -424,6 +425,16 @@ fn typed_repository_transaction_commits_domain_mutation() {
             buff_time: 8,
             power: 9,
         });
+    account
+        .study
+        .progress
+        .push(blueoath_domain::StudyProgressState {
+            hero_id: 10,
+            skill_id: 41,
+            textbook_id: 7001,
+            begin_time: 100,
+            end_time: 160,
+        });
     account.battle.active = Some(BattleSession {
         chapter_id: ChapterId::new(3).unwrap(),
         copy_id: CopyId::new(300).unwrap(),
@@ -458,6 +469,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
         vec![Some(equip_id)]
     );
     assert_eq!(loaded.dock.equipments[&equip_id].hero_id, Some(hero_id));
+    assert_eq!(loaded.dock.heroes[&hero_id].pskills.get(&41), Some(&2));
     assert_eq!(loaded.character.class_id, 3);
     assert_eq!(loaded.character.create_time, 123);
     assert_eq!(loaded.character.message, "typed hello");
@@ -507,6 +519,8 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(loaded.bathroom.heroes[0].position, 2);
     assert!(loaded.bathroom.heroes[0].is_auto);
     assert_eq!(loaded.bathroom.heroes[0].buff_id, 7);
+    assert_eq!(loaded.study.progress.len(), 1);
+    assert_eq!(loaded.study.progress[0].skill_id, 41);
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())

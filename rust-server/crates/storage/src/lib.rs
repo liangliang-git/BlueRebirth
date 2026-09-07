@@ -261,6 +261,7 @@ impl ProfileStore {
                     hp: non_negative_u64(row.8, "hero hp")?,
                     locked: row.9 != 0,
                     equip_slots: Vec::new(),
+                    pskills: std::collections::BTreeMap::new(),
                 },
             );
         }
@@ -967,6 +968,67 @@ impl ProfileStore {
                         }
                     }
                     _ => {}
+                }
+            } else if let Some(hero_id) = activity_id
+                .strip_prefix("heroSkills:")
+                .and_then(|value| value.parse::<u64>().ok())
+            {
+                if let Some(hero) = account
+                    .dock
+                    .heroes
+                    .values_mut()
+                    .find(|hero| hero.id.get() == hero_id)
+                {
+                    if let Ok(skill_id) = progress_kind.parse::<u64>() {
+                        hero.pskills.insert(
+                            skill_id,
+                            u32::try_from(value).map_err(|_| {
+                                StorageError::InvalidTypedAccount(
+                                    "hero skill level is too large".to_owned(),
+                                )
+                            })?,
+                        );
+                    }
+                }
+            } else if activity_id == "study" {
+                let mut parts = progress_kind.split(':');
+                if parts.next() == Some("progress") {
+                    if let (Some(hero), Some(skill), Some(field)) =
+                        (parts.next(), parts.next(), parts.next())
+                    {
+                        let Some(hero_id) = hero.parse::<u64>().ok() else {
+                            continue;
+                        };
+                        let Some(skill_id) = skill.parse::<u64>().ok() else {
+                            continue;
+                        };
+                        let progress = account.study.progress.iter_mut().find(|progress| {
+                            progress.hero_id == hero_id && progress.skill_id == skill_id
+                        });
+                        let progress = if let Some(progress) = progress {
+                            progress
+                        } else {
+                            account
+                                .study
+                                .progress
+                                .push(blueoath_domain::StudyProgressState {
+                                    hero_id,
+                                    skill_id,
+                                    ..Default::default()
+                                });
+                            account
+                                .study
+                                .progress
+                                .last_mut()
+                                .expect("pushed study progress")
+                        };
+                        match field {
+                            "textbook" => progress.textbook_id = value,
+                            "begin" => progress.begin_time = value,
+                            "end" => progress.end_time = value,
+                            _ => {}
+                        }
+                    }
                 }
             } else if activity_id == "bathroom" {
                 if progress_kind == "isAllAuto" {
@@ -1928,6 +1990,42 @@ impl ProfileStore {
                     timestamp(),
                 ],
             )?;
+        }
+        for hero in account.dock.heroes.values() {
+            for (skill_id, level) in &hero.pskills {
+                transaction.execute(
+                    "INSERT INTO activity_progress(
+                        profile_id, activity_id, progress_kind, value, updated_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        profile.id.as_str(),
+                        format!("heroSkills:{}", hero.id.get()),
+                        skill_id.to_string(),
+                        typed_i64(u64::from(*level), "hero skill level")?,
+                        timestamp(),
+                    ],
+                )?;
+            }
+        }
+        for progress in &account.study.progress {
+            let prefix = format!("progress:{}:{}", progress.hero_id, progress.skill_id);
+            for (field, value) in [
+                ("textbook", progress.textbook_id),
+                ("begin", progress.begin_time),
+                ("end", progress.end_time),
+            ] {
+                transaction.execute(
+                    "INSERT INTO activity_progress(
+                        profile_id, activity_id, progress_kind, value, updated_at
+                     ) VALUES (?1, 'study', ?2, ?3, ?4)",
+                    params![
+                        profile.id.as_str(),
+                        format!("{prefix}:{field}"),
+                        typed_i64(value, "study progress")?,
+                        timestamp(),
+                    ],
+                )?;
+            }
         }
         let mut sports_progress = vec![
             (

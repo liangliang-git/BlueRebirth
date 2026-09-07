@@ -183,6 +183,8 @@ pub struct HeroState {
     pub hp: u64,
     pub locked: bool,
     pub equip_slots: Vec<Option<EquipId>>,
+    #[serde(default)]
+    pub pskills: BTreeMap<u64, u32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -385,6 +387,20 @@ pub struct SportsMeetState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StudyProgressState {
+    pub hero_id: u64,
+    pub skill_id: u64,
+    pub textbook_id: u64,
+    pub begin_time: u64,
+    pub end_time: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StudyState {
+    pub progress: Vec<StudyProgressState>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BathroomHeroState {
     pub hero_id: u64,
     pub position: u32,
@@ -509,6 +525,8 @@ pub struct AccountState {
     pub sports_meet: SportsMeetState,
     #[serde(default)]
     pub bathroom: BathroomState,
+    #[serde(default)]
+    pub study: StudyState,
     #[serde(default)]
     pub tower: TowerState,
     #[serde(default)]
@@ -694,6 +712,7 @@ impl NewAccountFactory {
                     None,
                     None,
                 ],
+                pskills: BTreeMap::new(),
             },
         );
         for (id, template_id) in [(1, 30_091), (2, 30_221)] {
