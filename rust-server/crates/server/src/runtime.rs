@@ -835,3 +835,41 @@ async fn handle_connection(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{persist_typed_account, ProfileStore, StorageError};
+    use blueoath_domain::{CurrencyKind, NewAccountFactory, ProfileId};
+
+    #[test]
+    fn typed_persistence_rejects_stale_snapshot() {
+        let root = std::env::temp_dir().join(format!(
+            "blueoath-runtime-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock is after epoch")
+                .as_nanos()
+        ));
+        let store = ProfileStore::open(&root).unwrap();
+        let profile_id = ProfileId::new("revision-guard").unwrap();
+        let mut account = NewAccountFactory::create(profile_id.clone(), "Captain");
+        store.save_typed_account(&mut account).unwrap();
+        let stale = account.clone();
+        account.resources.credit(CurrencyKind::Gold, 10).unwrap();
+        persist_typed_account(&store, account).unwrap();
+
+        let error = persist_typed_account(&store, stale).unwrap_err();
+        assert!(matches!(
+            error,
+            StorageError::InvalidTypedAccount(message)
+                if message.contains("revision changed during request")
+        ));
+        let loaded = store
+            .load_typed_account(&profile_id)
+            .unwrap()
+            .expect("account should remain available");
+        assert_eq!(loaded.resources.amount(CurrencyKind::Gold).get(), 10);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
