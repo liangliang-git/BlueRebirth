@@ -4,12 +4,14 @@ use serde_json::{json, Value};
 
 use super::*;
 
+#[cfg(test)]
 pub(super) fn set_character_i64(account: &mut Value, key: &str, value: i32) {
     if let Some(character) = account.get_mut("character").and_then(Value::as_object_mut) {
         character.insert(key.to_owned(), json!(value));
     }
 }
 
+#[cfg(test)]
 pub(super) fn set_character_string(account: &mut Value, key: &str, value: String) {
     if let Some(character) = account.get_mut("character").and_then(Value::as_object_mut) {
         character.insert(key.to_owned(), Value::String(value));

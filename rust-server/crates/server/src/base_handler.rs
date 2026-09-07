@@ -940,6 +940,7 @@ fn mini_game_simple_user(state: &ServerState, account: &Value) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 fn buy_resource(account: &mut Value, method: &str, now: u32) -> Option<()> {
     let (currency, amount, diamond_cost, count_key, time_key) = match method {
         "user.BuyGold" => (1, 1_000, 10, "buyGoldNum", "buyGoldTime"),

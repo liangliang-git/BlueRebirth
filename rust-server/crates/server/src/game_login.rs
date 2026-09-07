@@ -464,7 +464,9 @@ where
                         account.character.secretary_id = u64::try_from(typed.secretary_id)
                             .ok()
                             .and_then(|id| blueoath_domain::HeroId::new(id).ok());
-                    } else if let Some(account) = account.as_deref_mut() {
+                    }
+                    #[cfg(test)]
+                    if let Some(account) = account.as_deref_mut() {
                         set_character_i64(account, "secretaryId", typed.secretary_id);
                     }
                 }
@@ -480,8 +482,10 @@ where
             match ChangeNameRequest::decode(request_args) {
                 Ok(typed) => {
                     if let Some(account) = typed_account.as_mut() {
-                        account.character.name = typed.name;
-                    } else if let Some(account) = account.as_deref_mut() {
+                        account.character.name = typed.name.clone();
+                    }
+                    #[cfg(test)]
+                    if let Some(account) = account.as_deref_mut() {
                         set_character_string(account, "name", typed.name);
                     }
                 }
@@ -495,8 +499,10 @@ where
             match SetMessageRequest::decode(request_args) {
                 Ok(typed) => {
                     if let Some(account) = typed_account.as_mut() {
-                        account.character.message = typed.message;
-                    } else if let Some(account) = account.as_deref_mut() {
+                        account.character.message = typed.message.clone();
+                    }
+                    #[cfg(test)]
+                    if let Some(account) = account.as_deref_mut() {
                         set_character_string(account, "message", typed.message);
                     }
                 }
@@ -512,7 +518,9 @@ where
                 Ok(typed) => {
                     if let Some(account) = typed_account.as_mut() {
                         account.character.head_frame = typed.head_frame.max(0) as u32;
-                    } else if let Some(account) = account.as_deref_mut() {
+                    }
+                    #[cfg(test)]
+                    if let Some(account) = account.as_deref_mut() {
                         set_character_i64(account, "headFrame", typed.head_frame);
                     }
                 }
@@ -529,7 +537,9 @@ where
                 Ok(typed) => {
                     if let Some(account) = typed_account.as_mut() {
                         account.character.head = typed.head.max(0) as u32;
-                    } else if let Some(account) = account.as_deref_mut() {
+                    }
+                    #[cfg(test)]
+                    if let Some(account) = account.as_deref_mut() {
                         set_character_i64(account, "head", typed.head);
                     }
                 }
