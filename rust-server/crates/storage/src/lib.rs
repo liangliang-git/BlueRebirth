@@ -1291,6 +1291,17 @@ impl ProfileStore {
                 ],
             )?;
         }
+        for copy_id in &account.battle.passed_copies {
+            transaction.execute(
+                "INSERT INTO copy_progress(
+                    profile_id, copy_id, star_level, first_passed
+                 ) VALUES (?1, ?2, 0, 1)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(copy_id.get(), "passed copy id")?,
+                ],
+            )?;
+        }
         for (building_id, level) in &account.buildings.levels {
             let production = account.buildings.productions.get(building_id);
             transaction.execute(
