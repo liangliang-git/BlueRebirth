@@ -1255,6 +1255,34 @@ where
             }
             result.into_payload()
         }
+        "task.TaskInfo" => {
+            if let Some(typed) = typed_account.as_ref() {
+                Some(task_info_payload_from_typed_account(typed, task_catalog))
+            } else {
+                let mut context = GameLoginRequestContext {
+                    state,
+                    account: &mut account,
+                    catalogs: *catalogs,
+                    pre_pushes: &mut pre_pushes,
+                    post_pushes: &mut post_pushes,
+                    handler_error: &mut handler_error,
+                    pass_details: &mut pass_details,
+                    pass_rewards: &mut pass_rewards,
+                    pass_hero_ids: &mut pass_hero_ids,
+                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                };
+                let result = progression_handler::handle(
+                    &mut context,
+                    request.method.as_str(),
+                    request_args,
+                );
+                if let HandlerResult::Error(error) = &result {
+                    handler_error = Some(error.clone());
+                }
+                result.into_payload()
+            }
+        }
         _ if method.is_family(MethodFamily::Study)
             || method.is_family(MethodFamily::Task)
             || method.is_family(MethodFamily::Bathroom) =>
