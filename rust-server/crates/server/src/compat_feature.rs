@@ -51,6 +51,9 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "illustrate.VowHero"
             | "illustrate.VowDecTime"
             | "illustrate.IllustrateNew"
+            | "illustrate.AddBehaviour"
+            | "illustrate.EquipNew"
+            | "illustrate.ModiVowHeroList"
             | "repair.RepairHero"
     )
 }
@@ -107,7 +110,11 @@ pub(super) fn handle_typed(
                 ));
             }
         }
-        pre_pushes.push(BagInfoCodec::encode(&bag_info_from_typed_account(account)));
+        append_method_push(
+            pre_pushes,
+            "bag.UpdateBagData",
+            BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+        );
         let mut output = Vec::new();
         append_varint_field(&mut output, 1, 0);
         append_varint_field(&mut output, 2, 0);
@@ -135,7 +142,11 @@ pub(super) fn handle_typed(
         if !grant_typed_treasure_reward(account, &mut reward) {
             return HandlerResult::Error(GameError::InvalidState("wish hero cannot be granted"));
         }
-        pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
+        append_method_push(
+            pre_pushes,
+            "hero.UpdateHeroBagData",
+            HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+        );
         append_method_push(
             pre_pushes,
             "illustrate.IllustrateInfo",
@@ -168,6 +179,111 @@ pub(super) fn handle_typed(
         }
         response.extend(illustrate_info_payload_for_entries(&entries));
         return HandlerResult::Reply(Response::raw(method, response));
+    }
+    if method == "illustrate.AddBehaviour" {
+        let incoming = decode_repeated_message_field(request_args, 1);
+        if incoming.is_empty() {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "illustrate behaviour request is invalid",
+            ));
+        }
+        let mut updated = Vec::new();
+        for item in incoming {
+            let illustrate_id = decode_varint_field(&item, 1);
+            if illustrate_id <= 0 {
+                continue;
+            }
+            let behaviours = decode_repeated_varint_field(&item, 2)
+                .into_iter()
+                .filter(|id| *id > 0)
+                .collect::<std::collections::BTreeSet<_>>();
+            for behaviour in &behaviours {
+                account.activities.progress.insert(
+                    format!("compat:illustrate:{illustrate_id}:behaviour:{behaviour}"),
+                    1,
+                );
+            }
+            updated.push((illustrate_id, behaviours.into_iter().collect::<Vec<_>>()));
+        }
+        if updated.is_empty() {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "illustrate behaviour request is invalid",
+            ));
+        }
+        append_method_push(
+            pre_pushes,
+            "illustrate.IllustrateInfo",
+            illustrate_info_payload_for_entries(&updated),
+        );
+        return HandlerResult::PushOnly;
+    }
+    if method == "illustrate.EquipNew" {
+        let ids = decode_repeated_varint_field(request_args, 1)
+            .into_iter()
+            .filter(|id| *id > 0)
+            .collect::<Vec<_>>();
+        if ids.is_empty() {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "illustrate equipment id list is empty",
+            ));
+        }
+        let now = u64::from(current_unix_seconds());
+        let mut output = Vec::new();
+        for id in ids {
+            account
+                .activities
+                .progress
+                .insert(format!("compat:illustrateEquip:{id}:getTime"), now);
+            account
+                .activities
+                .progress
+                .insert(format!("compat:illustrateEquip:{id}:new"), 1);
+            let mut item = Vec::new();
+            append_varint_field(&mut item, 1, id as u64);
+            append_varint_field(&mut item, 2, now);
+            append_varint_field(&mut item, 3, 1);
+            append_message_field(&mut output, 1, &item);
+        }
+        append_message_field(&mut output, 9, &[]);
+        return HandlerResult::Reply(Response::raw(method, output));
+    }
+    if method == "illustrate.ModiVowHeroList" {
+        let hero_ids = decode_repeated_varint_field(request_args, 1)
+            .into_iter()
+            .filter(|id| *id > 0)
+            .map(|id| id as u64)
+            .collect::<std::collections::BTreeSet<u64>>();
+        let template_ids = account
+            .dock
+            .heroes
+            .values()
+            .filter(|hero| hero_ids.contains(&hero.id.get()))
+            .filter_map(|hero| i32::try_from(hero.template_id.get()).ok())
+            .collect::<Vec<_>>();
+        for key in account
+            .activities
+            .progress
+            .keys()
+            .filter(|key| key.starts_with("compat:illustrate:vow:"))
+            .cloned()
+            .collect::<Vec<_>>()
+        {
+            account.activities.progress.remove(&key);
+        }
+        for hero_id in &hero_ids {
+            account
+                .activities
+                .progress
+                .insert(format!("compat:illustrate:vow:{hero_id}"), 1);
+        }
+        if !template_ids.is_empty() {
+            append_method_push(
+                pre_pushes,
+                "illustrate.IllustrateInfo",
+                illustrate_info_payload_for_templates(&template_ids, None),
+            );
+        }
+        return HandlerResult::PushOnly;
     }
     if matches!(
         method,
@@ -257,7 +373,11 @@ pub(super) fn handle_typed(
             .activities
             .progress
             .insert(married_count_key, married_count.saturating_add(1));
-        pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
+        append_method_push(
+            pre_pushes,
+            "hero.UpdateHeroBagData",
+            HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+        );
         append_method_push(
             pre_pushes,
             "user.UpdateUserInfo",
@@ -326,7 +446,11 @@ pub(super) fn handle_typed(
         {
             hero.affection = current.saturating_add(gained);
         }
-        pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
+        append_method_push(
+            pre_pushes,
+            "hero.UpdateHeroBagData",
+            HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+        );
         append_method_push(
             pre_pushes,
             "bag.UpdateBagData",
@@ -420,7 +544,11 @@ pub(super) fn handle_typed(
                 hero.hp = HP_COEFFICIENT as u64;
             }
         }
-        pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
+        append_method_push(
+            pre_pushes,
+            "hero.UpdateHeroBagData",
+            HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+        );
         append_method_push(
             pre_pushes,
             "user.UpdateUserInfo",
@@ -597,7 +725,11 @@ fn handle_typed_combination(
         if deputy_id > 0 {
             set_typed_combination_value(account, deputy_id, "beCombined", main_id);
         }
-        pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
+        append_method_push(
+            pre_pushes,
+            "hero.UpdateHeroBagData",
+            HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+        );
         return HandlerResult::PushOnly;
     }
 
@@ -642,8 +774,16 @@ fn handle_typed_combination(
             ));
         }
         set_typed_combination_value(account, hero_id, "level", level);
-        pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
-        pre_pushes.push(BagInfoCodec::encode(&bag_info_from_typed_account(account)));
+        append_method_push(
+            pre_pushes,
+            "hero.UpdateHeroBagData",
+            HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+        );
+        append_method_push(
+            pre_pushes,
+            "bag.UpdateBagData",
+            BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+        );
         return HandlerResult::PushOnly;
     }
 
@@ -671,8 +811,16 @@ fn handle_typed_combination(
         ));
     }
     set_typed_combination_value(account, hero_id, "grade", next_star.max(0) as u64);
-    pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
-    pre_pushes.push(BagInfoCodec::encode(&bag_info_from_typed_account(account)));
+    append_method_push(
+        pre_pushes,
+        "hero.UpdateHeroBagData",
+        HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+    );
+    append_method_push(
+        pre_pushes,
+        "bag.UpdateBagData",
+        BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+    );
     HandlerResult::PushOnly
 }
 
@@ -899,11 +1047,21 @@ fn handle_typed_treasure(
             ));
         }
     }
-    pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
-    pre_pushes.push(BagInfoCodec::encode(&bag_info_from_typed_account(account)));
-    pre_pushes.push(EquipListCodec::encode(&equip_list_from_typed_account(
-        account,
-    )));
+    append_method_push(
+        pre_pushes,
+        "hero.UpdateHeroBagData",
+        HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+    );
+    append_method_push(
+        pre_pushes,
+        "bag.UpdateBagData",
+        BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+    );
+    append_method_push(
+        pre_pushes,
+        "equip.UpdateEquipBagData",
+        EquipListCodec::encode(&equip_list_from_typed_account(account)),
+    );
     HandlerResult::Reply(Response::raw(
         method,
         encode_treasure_response(&pending, treasure_id),
@@ -2559,6 +2717,79 @@ mod tests {
         ));
         assert_eq!(
             account.activities.progress.get("compat:illustrate:7:seen"),
+            Some(&1)
+        );
+
+        let mut behaviour_item = Vec::new();
+        append_varint_field(&mut behaviour_item, 1, 7);
+        append_varint_field(&mut behaviour_item, 2, 101);
+        append_varint_field(&mut behaviour_item, 2, 102);
+        let mut behaviour = Vec::new();
+        append_message_field(&mut behaviour, 1, &behaviour_item);
+        assert!(matches!(
+            handle_typed(
+                &state,
+                &mut account,
+                "illustrate.AddBehaviour",
+                &behaviour,
+                None,
+                None,
+                &mut pushes,
+            ),
+            HandlerResult::PushOnly
+        ));
+        assert_eq!(
+            account
+                .activities
+                .progress
+                .get("compat:illustrate:7:behaviour:101"),
+            Some(&1)
+        );
+        assert_eq!(
+            TMessageCodec::decode_response(pushes.last().unwrap())
+                .unwrap()
+                .method,
+            "illustrate.IllustrateInfo"
+        );
+
+        let mut equip_new = Vec::new();
+        append_varint_field(&mut equip_new, 1, 30_000_001);
+        assert!(matches!(
+            handle_typed(
+                &state,
+                &mut account,
+                "illustrate.EquipNew",
+                &equip_new,
+                None,
+                None,
+                &mut pushes,
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account
+                .activities
+                .progress
+                .get("compat:illustrateEquip:30000001:new"),
+            Some(&1)
+        );
+
+        let mut vow_list = Vec::new();
+        append_varint_field(&mut vow_list, 1, 1);
+        assert!(matches!(
+            handle_typed(
+                &state,
+                &mut account,
+                "illustrate.ModiVowHeroList",
+                &vow_list,
+                None,
+                None,
+                &mut pushes,
+            ),
+            HandlerResult::PushOnly
+        ));
+        assert_eq!(
+            account.activities.progress.get("compat:illustrate:vow:1"),
             Some(&1)
         );
 
