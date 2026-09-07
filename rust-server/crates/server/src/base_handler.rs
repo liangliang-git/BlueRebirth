@@ -582,6 +582,7 @@ struct TeacherRankEntry {
     prestige: u64,
 }
 
+#[cfg(test)]
 fn teacher_rank_payload(state: &ServerState, current: &Value, begin: i32, offset: i32) -> Vec<u8> {
     let mut entries = state
         .social_store
@@ -725,6 +726,7 @@ fn teacher_simple_user_payload(entry: &TeacherRankEntry) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 fn queue_init_payload(account: &Value) -> Vec<u8> {
     let queue = account.get("queue");
     let mut output = Vec::new();
@@ -759,6 +761,7 @@ fn queue_init_payload(account: &Value) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 fn queue_update_payload(account: &Value) -> Vec<u8> {
     let queue = account.get("queue");
     let mut output = Vec::new();
@@ -784,6 +787,7 @@ fn queue_update_payload(account: &Value) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 fn medal_replace_reward_payload(account: &Value) -> Vec<u8> {
     let rewards = account.get("medalReplaceRewards").and_then(Value::as_array);
     let mut output = Vec::new();
@@ -816,6 +820,7 @@ fn medal_replace_reward_payload(account: &Value) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 fn set_mini_game_score(account: &mut Value, chapter_id: i32, copy_id: i32, score: i32, now: i32) {
     let scores = account
         .as_object_mut()
@@ -846,6 +851,7 @@ fn set_mini_game_score(account: &mut Value, chapter_id: i32, copy_id: i32, score
     }
 }
 
+#[cfg(test)]
 fn mini_game_chapter_score(account: &Value, chapter_id: i32) -> i32 {
     account
         .get("miniGameScores")
@@ -858,6 +864,7 @@ fn mini_game_chapter_score(account: &Value, chapter_id: i32) -> i32 {
         .fold(0_i32, i32::saturating_add)
 }
 
+#[cfg(test)]
 fn mini_game_score_response(score: i32, now: i32) -> Vec<u8> {
     let mut output = Vec::new();
     append_varint_field(&mut output, 1, score.max(0) as u64);
@@ -865,6 +872,7 @@ fn mini_game_score_response(score: i32, now: i32) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 fn mini_game_rank_response(
     state: &ServerState,
     account: &Value,
@@ -901,6 +909,7 @@ fn mini_game_rank_response(
     output
 }
 
+#[cfg(test)]
 fn mini_game_simple_user(state: &ServerState, account: &Value) -> Vec<u8> {
     let character = account.get("character").unwrap_or(account);
     let mut output = Vec::new();
@@ -965,6 +974,7 @@ fn buy_resource(account: &mut Value, method: &str, now: u32) -> Option<()> {
     Some(())
 }
 
+#[cfg(test)]
 fn jopen_payload(account: &Value) -> Vec<u8> {
     let state = account.get("jopen").unwrap_or(&Value::Null);
     let mut output = Vec::new();
