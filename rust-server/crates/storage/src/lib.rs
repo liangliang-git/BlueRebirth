@@ -2337,6 +2337,27 @@ fn project_normalized_core(
             ],
         )?;
     }
+    if let (Some(guild), Some(activity)) = (
+        account.get("guild").and_then(Value::as_object),
+        account.get("guildBigActivity").and_then(Value::as_object),
+    ) {
+        let guild_id = positive_field(guild, "guildId", 0);
+        if guild_id > 0 {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'guildBigActivity', ?2, ?3, ?4)
+                 ON CONFLICT(profile_id, activity_id, progress_kind) DO UPDATE SET
+                   value = excluded.value, updated_at = excluded.updated_at",
+                params![
+                    profile_id,
+                    format!("points:{guild_id}"),
+                    non_negative_field(activity, "points"),
+                    timestamp()
+                ],
+            )?;
+        }
+    }
     if let Some(character) = account.get("character").and_then(Value::as_object) {
         transaction.execute(
             "INSERT INTO activity_progress(

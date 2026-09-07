@@ -353,7 +353,34 @@ fn guild_big_activity_rate_payload(state: &Value) -> Vec<u8> {
 }
 
 fn guild_big_activity_rank_payload(_server_state: &ServerState, current: &Value) -> Vec<u8> {
-    let guilds = std::collections::BTreeMap::<u64, (String, i64, i64)>::new();
+    let mut guilds = std::collections::BTreeMap::<u64, (String, i64, i64)>::new();
+    if let Some(store) = _server_state.social_store.as_ref() {
+        if let Ok(accounts) = store.list_typed_accounts() {
+            for account in accounts {
+                for (key, points) in account
+                    .activities
+                    .progress
+                    .iter()
+                    .filter(|(key, _)| key.starts_with("guildBigActivity\u{1f}points:"))
+                {
+                    let Some(guild_id) = key
+                        .rsplit(':')
+                        .next()
+                        .and_then(|value| value.parse::<u64>().ok())
+                    else {
+                        continue;
+                    };
+                    let entry = guilds
+                        .entry(guild_id)
+                        .or_insert(("BlueOath".to_owned(), 0, 0));
+                    entry.1 = entry
+                        .1
+                        .saturating_add(i64::try_from(*points).unwrap_or(i64::MAX));
+                    entry.2 = entry.2.saturating_add(1);
+                }
+            }
+        }
+    }
     let mut ranked = guilds.into_iter().collect::<Vec<_>>();
     ranked.sort_by(|left, right| {
         right
