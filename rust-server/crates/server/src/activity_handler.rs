@@ -732,10 +732,10 @@ fn handle_typed_paper_cut(
     account: &mut blueoath_domain::AccountState,
     request_args: &[u8],
 ) -> HandlerResult {
-    let materials = decode_repeated_varint_field(request_args, 1);
-    if materials.is_empty() {
-        return HandlerResult::Error(GameError::InvalidRequest("paper cut materials are empty"));
-    }
+    let Ok(request) = PaperCutRequest::decode(request_args) else {
+        return HandlerResult::Error(GameError::InvalidRequest("paper cut request is invalid"));
+    };
+    let materials = request.material_ids;
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     let Some(formula_config) = catalog.paper_cut_formulas.values().find(|config| {
         config

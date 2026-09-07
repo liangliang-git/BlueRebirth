@@ -9,18 +9,19 @@ use blueoath_protocol::{
     CoopChangeChapterRequest, CoopCreateRoomRequest, CoopKickRequest, CoopMatchTypeRequest,
     CoopPasswordRequest, CoopRoomHeroesRequest, CoopRoomIdRequest, CopyAttackRequest,
     CopyIdRequest, CopyPassRequest, CopyRecordRequest, CopyRewardCountRequest, CopyStartRequest,
-    DailyCopyEnterRequest, DailyCopySelectExRequest, Decode, ExchangeRequest,
-    FashionPurchaseRequest, FriendSearchRequest, FriendTargetRequest, GetBarrageByIdRequest,
-    GuildActivityPresentRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildCreateRequest,
-    GuildIdRequest, GuildListRequest, GuildModifyRequest, GuildOfferRequest, GuildSearchRequest,
-    GuildTaskDonateRequest, GuildTaskIdRequest, GuildTaskMemberRequest, GuildWarBaseRequest,
-    GuildWarScoreRequest, HeroAwakenFinishRequest, HeroAwakenRewardRequest, HeroChangeEquipRequest,
-    InviteRecordVersionRequest, InviteStateTypeRequest, OutpostBuildingRequest,
-    OutpostSetHeroRequest, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
-    SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
-    SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest, SignDayRequest,
-    SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
-    ValentineRewardRequest, WorldEventStageRequest,
+    DailyCopyEnterRequest, DailyCopySelectExRequest, Decode, DiscussRequest, ExchangeRequest,
+    FashionPurchaseRequest, FoodComposeRequest, FriendSearchRequest, FriendTargetRequest,
+    GetBarrageByIdRequest, GuildActivityPresentRequest, GuildBoxAnonymousRequest,
+    GuildBoxIdRequest, GuildCreateRequest, GuildIdRequest, GuildListRequest, GuildModifyRequest,
+    GuildOfferRequest, GuildSearchRequest, GuildTaskDonateRequest, GuildTaskIdRequest,
+    GuildTaskMemberRequest, GuildWarBaseRequest, GuildWarScoreRequest, HeroAwakenFinishRequest,
+    HeroAwakenRewardRequest, HeroChangeEquipRequest, InviteRecordVersionRequest,
+    InviteStateTypeRequest, OutpostBuildingRequest, OutpostSetHeroRequest, PaperCutRequest,
+    ProtocolError, SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest,
+    SetHeadFrameRequest, SetHeadRequest, SetMessageRequest, SetSecretaryRequest,
+    ShipTaskCurrentShipRequest, ShipTaskRewardRequest, SignDayRequest, SportsMeetPointsRequest,
+    TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest, ValentineRewardRequest,
+    WorldEventStageRequest,
 };
 
 #[test]
@@ -464,6 +465,23 @@ fn decodes_typed_activity_requests() {
     assert_eq!(
         WorldEventStageRequest::decode(&[0x08, 9]).unwrap(),
         WorldEventStageRequest { stage_id: 9 }
+    );
+    assert_eq!(
+        PaperCutRequest::decode(&[0x08, 1, 0x08, 2]).unwrap(),
+        PaperCutRequest {
+            material_ids: vec![1, 2],
+        }
+    );
+    assert_eq!(
+        FoodComposeRequest::decode(&[0x08, 1, 0x08, 2, 0x10, 3]).unwrap(),
+        FoodComposeRequest {
+            material_ids: vec![1, 2],
+            recipe_id: 3,
+        }
+    );
+    assert_eq!(
+        DiscussRequest::decode(&[0x08, 11]).unwrap(),
+        DiscussRequest { discuss_id: 11 }
     );
 }
 

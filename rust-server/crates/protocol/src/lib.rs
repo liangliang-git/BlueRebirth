@@ -2731,6 +2731,69 @@ impl Decode for WorldEventStageRequest {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaperCutRequest {
+    pub material_ids: Vec<i32>,
+}
+
+impl Decode for PaperCutRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let material_ids = fields
+            .get(&1)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|value| to_i32(value, "paper cut material id is out of range"))
+            .collect::<Result<Vec<_>, _>>()?;
+        if material_ids.is_empty() || material_ids.iter().any(|id| *id <= 0) {
+            return Err(ProtocolError::Invalid("paper cut request is invalid"));
+        }
+        Ok(Self { material_ids })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FoodComposeRequest {
+    pub material_ids: Vec<i32>,
+    pub recipe_id: i32,
+}
+
+impl Decode for FoodComposeRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let material_ids = fields
+            .get(&1)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|value| to_i32(value, "food material id is out of range"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let recipe_id = optional_i32(&fields, 2, "food compose has duplicate recipe")?;
+        if material_ids.iter().any(|id| *id <= 0) || (material_ids.is_empty() && recipe_id <= 0) {
+            return Err(ProtocolError::Invalid("food compose request is invalid"));
+        }
+        Ok(Self {
+            material_ids,
+            recipe_id,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiscussRequest {
+    pub discuss_id: i32,
+}
+
+impl Decode for DiscussRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            discuss_id: optional_i32(&fields, 1, "discuss has duplicate id")?,
+        })
+    }
+}
+
 impl Decode for GuildTaskDonateRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

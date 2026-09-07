@@ -361,7 +361,10 @@ pub(super) fn handle_typed_food_compose(
             reply(method, typed_food_info_payload(account, catalog))
         }
         "foodCompose.FoodCompose" => {
-            let material_ids = decode_repeated_varint_field(request_args, 1);
+            let Ok(request) = FoodComposeRequest::decode(request_args) else {
+                return invalid("food compose request is invalid");
+            };
+            let material_ids = request.material_ids;
             let recipe_id = catalog
                 .food_recipes
                 .iter()
@@ -376,7 +379,7 @@ pub(super) fn handle_typed_food_compose(
                     !requested.is_empty() && configured == requested
                 })
                 .map(|(id, _)| *id)
-                .unwrap_or_else(|| decode_varint_field(request_args, 2));
+                .unwrap_or(request.recipe_id);
             let Some(recipe) = catalog.food_recipes.get(&recipe_id) else {
                 return invalid("food recipe was not found");
             };
