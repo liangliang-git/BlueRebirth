@@ -194,6 +194,7 @@ pub(super) fn hero_intensify_state(
     Ok(consumed_ids.to_vec())
 }
 
+#[cfg(test)]
 pub(super) fn hero_change_equip_state(
     account: &mut Value,
     hero_id: u64,
@@ -203,6 +204,7 @@ pub(super) fn hero_change_equip_state(
     hero_change_equip_state_for_type(account, hero_id, slot, equip_id, 1)
 }
 
+#[cfg(test)]
 pub(super) fn hero_change_equip_state_for_type(
     account: &mut Value,
     hero_id: u64,
@@ -344,6 +346,7 @@ fn hero_states_mut(hero: &mut serde_json::Map<String, Value>, equip_type: u64) -
     }
 }
 
+#[cfg(test)]
 pub(super) fn hero_auto_equip_state(
     account: &mut Value,
     equip_type: u64,
@@ -368,6 +371,7 @@ pub(super) fn hero_auto_equip_state(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn hero_auto_unequip_state(
     account: &mut Value,
     equip_type: u64,
@@ -401,6 +405,7 @@ pub(super) fn hero_auto_unequip_state(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn hero_equip_binding_state(
     account: &mut Value,
     hero_id: u64,
@@ -430,6 +435,7 @@ pub(super) fn hero_equip_binding_state(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn hero_equip_unbinding_state(
     account: &mut Value,
     hero_id: u64,
@@ -462,6 +468,7 @@ pub(super) fn hero_equip_unbinding_state(
     Ok(Vec::new())
 }
 
+#[cfg(test)]
 pub(super) fn hero_equip_effect_state(
     account: &mut Value,
     hero_id: u64,
@@ -479,6 +486,7 @@ pub(super) fn hero_equip_effect_state(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn hero_equip_lock_transplant_state(
     account: &mut Value,
     hero_ids: &[u64],
@@ -543,6 +551,7 @@ pub(super) fn hero_equip_lock_transplant_state(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn hero_advance_max_level_state(
     account: &mut Value,
     catalog: &ShipAdvanceCatalog,
@@ -588,6 +597,7 @@ pub(super) fn hero_advance_max_level_state(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn hero_advance_mub_state(
     account: &mut Value,
     catalog: &ShipBreakCatalog,
@@ -679,6 +689,7 @@ pub(super) fn hero_advance_mub_state(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn hero_remould_state(
     account: &mut Value,
     catalog: &ShipRemouldCatalog,
@@ -842,6 +853,7 @@ pub(super) fn hero_remould_state(
 }
 
 #[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn fashion_equip_state(
     account: &mut Value,
     catalog: Option<&FashionList>,
@@ -904,6 +916,7 @@ pub(super) fn fashion_equip_state(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn hero_advance_state(
     account: &mut Value,
     catalog: &ShipBreakCatalog,
@@ -1057,6 +1070,7 @@ pub(super) fn hero_advance_state(
     Ok((hero_id, consumed_ids.to_vec()))
 }
 
+#[cfg(test)]
 pub(super) fn consume_hero_skill_upgrade_materials(
     account: &mut Value,
     catalog: &HeroSkillUpgradeCatalog,
@@ -1197,6 +1211,7 @@ pub(super) fn retire_heroes_state(
     retired
 }
 
+#[cfg(test)]
 pub(super) fn encode_hero_delete_payload(account: &Value, hero_ids: &[u64]) -> Vec<u8> {
     let bag_size = account
         .get("dock")
@@ -1214,6 +1229,7 @@ pub(super) fn encode_hero_delete_payload(account: &Value, hero_ids: &[u64]) -> V
     HeroBagCodec::encode(&HeroBag { heroes, bag_size })
 }
 
+#[cfg(test)]
 pub(super) fn encode_hero_intensify_payload(
     account: &Value,
     target_id: u64,
@@ -1238,6 +1254,7 @@ pub(super) fn encode_hero_intensify_payload(
     })
 }
 
+#[cfg(test)]
 pub(super) fn apply_hero_breakdown_rewards(
     account: &mut Value,
     retired_templates: &[i32],
@@ -1285,6 +1302,7 @@ pub(super) fn encode_retire_hero_response(rewards: &[ShopReward]) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 pub(super) fn encode_hero_bag_push(account: &Value) -> Vec<u8> {
     TMessageCodec::encode_response(&TResponse {
         method: "hero.UpdateHeroBagData".to_owned(),
