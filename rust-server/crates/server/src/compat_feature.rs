@@ -38,7 +38,11 @@ fn consume_typed_item(
 pub(super) fn handles_typed(method: &str) -> bool {
     matches!(
         method,
-        "hero.Marry" | "hero.AddAffection" | "repair.RepairHero"
+        "cachedata.CacheData"
+            | "user.GetHeadBuyCount"
+            | "hero.Marry"
+            | "hero.AddAffection"
+            | "repair.RepairHero"
     )
 }
 
@@ -50,6 +54,12 @@ pub(super) fn handle_typed(
     affection_catalog: Option<&AffectionCatalog>,
     pre_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
+    if method == "cachedata.CacheData" {
+        return HandlerResult::Reply(Response::raw(method, cache_data_payload()));
+    }
+    if method == "user.GetHeadBuyCount" {
+        return HandlerResult::Reply(Response::raw(method, head_buy_count_payload()));
+    }
     if method == "hero.Marry" {
         let hero_id = decode_varint_u64_field(request_args, 1);
         let marry_type = decode_varint_field(request_args, 2);
