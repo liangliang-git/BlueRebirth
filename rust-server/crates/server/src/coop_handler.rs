@@ -81,7 +81,7 @@ pub(super) fn handle_typed(
                     "co-op create request is invalid",
                 ));
             };
-            let Some(hero_ids) = typed_coop_hero_ids(account, &request.hero_ids, true) else {
+            let Some(hero_ids) = typed_coop_hero_ids(account, &request.hero_ids, false) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "co-op hero list is invalid",
                 ));

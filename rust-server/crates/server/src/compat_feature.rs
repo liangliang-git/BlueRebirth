@@ -98,9 +98,15 @@ pub(super) fn handle_typed(
         return HandlerResult::Reply(Response::raw(method, head_buy_count_payload()));
     }
     if method == "illustrate.VowDecTime" {
-        let items = decode_repeated_message_field(request_args, 1)
+        let Ok(request) = ItemCountListRequest::decode(request_args) else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "wish cooldown item list is invalid",
+            ));
+        };
+        let items = request
+            .items
             .into_iter()
-            .map(|item| (decode_varint_field(&item, 1), decode_varint_field(&item, 2)))
+            .filter_map(|item| Some((i32::try_from(item.item_id).ok()?, item.count)))
             .filter(|(item_id, count)| *item_id > 0 && *count > 0)
             .collect::<Vec<_>>();
         if items.is_empty() {
@@ -120,7 +126,7 @@ pub(super) fn handle_typed(
                 .get(&template_id)
                 .copied()
                 .unwrap_or_default()
-                < *count as u64
+                < *count
             {
                 return HandlerResult::Error(GameError::InvalidState(
                     "not enough wish cooldown items",
@@ -128,7 +134,7 @@ pub(super) fn handle_typed(
             }
         }
         for (item_id, count) in items {
-            if !consume_typed_item(account, item_id, count as u64) {
+            if !consume_typed_item(account, item_id, count) {
                 return HandlerResult::Error(GameError::InvalidState(
                     "wish cooldown item cannot be consumed",
                 ));
@@ -145,9 +151,10 @@ pub(super) fn handle_typed(
         return HandlerResult::Reply(Response::raw(method, output));
     }
     if method == "illustrate.VowHero" {
-        let ship_info_id = decode_repeated_varint_field(request_args, 1)
-            .into_iter()
-            .find(|id| *id > 0);
+        let Ok(request) = PositiveIdListRequest::decode(request_args) else {
+            return HandlerResult::Error(GameError::InvalidRequest("wish hero is invalid"));
+        };
+        let ship_info_id = request.ids.into_iter().find(|id| *id > 0);
         let Some(ship_info_id) = ship_info_id else {
             return HandlerResult::Error(GameError::InvalidRequest("wish hero is invalid"));
         };
@@ -155,6 +162,9 @@ pub(super) fn handle_typed(
             .checked_mul(10)
             .and_then(|id| id.checked_add(1))
         else {
+            return HandlerResult::Error(GameError::InvalidRequest("wish hero id is invalid"));
+        };
+        let Ok(template_id) = i32::try_from(template_id) else {
             return HandlerResult::Error(GameError::InvalidRequest("wish hero id is invalid"));
         };
         let mut reward = ShopReward {
@@ -184,9 +194,16 @@ pub(super) fn handle_typed(
         return HandlerResult::Reply(Response::raw(method, output));
     }
     if method == "illustrate.IllustrateNew" {
-        let ids = decode_repeated_varint_field(request_args, 1)
+        let Ok(request) = PositiveIdListRequest::decode(request_args) else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "illustrate id list is invalid",
+            ));
+        };
+        let ids = request
+            .ids
             .into_iter()
             .filter(|id| *id > 0)
+            .filter_map(|id| i32::try_from(id).ok())
             .collect::<Vec<_>>();
         if ids.is_empty() {
             return HandlerResult::Error(GameError::InvalidRequest("illustrate id list is empty"));
@@ -205,21 +222,29 @@ pub(super) fn handle_typed(
         return HandlerResult::Reply(Response::raw(method, response));
     }
     if method == "illustrate.AddBehaviour" {
-        let incoming = decode_repeated_message_field(request_args, 1);
-        if incoming.is_empty() {
+        let Ok(request) = IllustrateBehaviourRequest::decode(request_args) else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "illustrate behaviour request is invalid",
+            ));
+        };
+        if request.entries.is_empty() {
             return HandlerResult::Error(GameError::InvalidRequest(
                 "illustrate behaviour request is invalid",
             ));
         }
         let mut updated = Vec::new();
-        for item in incoming {
-            let illustrate_id = decode_varint_field(&item, 1);
+        for item in request.entries {
+            let Some(illustrate_id) = i32::try_from(item.illustrate_id).ok() else {
+                continue;
+            };
             if illustrate_id <= 0 {
                 continue;
             }
-            let behaviours = decode_repeated_varint_field(&item, 2)
+            let behaviours = item
+                .behaviours
                 .into_iter()
                 .filter(|id| *id > 0)
+                .filter_map(|id| i32::try_from(id).ok())
                 .collect::<std::collections::BTreeSet<_>>();
             for behaviour in &behaviours {
                 account.activities.progress.insert(
@@ -242,7 +267,13 @@ pub(super) fn handle_typed(
         return HandlerResult::PushOnly;
     }
     if method == "illustrate.EquipNew" {
-        let ids = decode_repeated_varint_field(request_args, 1)
+        let Ok(request) = PositiveIdListRequest::decode(request_args) else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "illustrate equipment id list is invalid",
+            ));
+        };
+        let ids = request
+            .ids
             .into_iter()
             .filter(|id| *id > 0)
             .collect::<Vec<_>>();
@@ -263,7 +294,7 @@ pub(super) fn handle_typed(
                 .progress
                 .insert(format!("compat:illustrateEquip:{id}:new"), 1);
             let mut item = Vec::new();
-            append_varint_field(&mut item, 1, id as u64);
+            append_varint_field(&mut item, 1, id);
             append_varint_field(&mut item, 2, now);
             append_varint_field(&mut item, 3, 1);
             append_message_field(&mut output, 1, &item);
@@ -272,10 +303,15 @@ pub(super) fn handle_typed(
         return HandlerResult::Reply(Response::raw(method, output));
     }
     if method == "illustrate.ModiVowHeroList" {
-        let hero_ids = decode_repeated_varint_field(request_args, 1)
+        let Ok(request) = PositiveIdListRequest::decode(request_args) else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "illustrate vow hero list is invalid",
+            ));
+        };
+        let hero_ids = request
+            .ids
             .into_iter()
             .filter(|id| *id > 0)
-            .map(|id| id as u64)
             .collect::<std::collections::BTreeSet<u64>>();
         let template_ids = account
             .dock
@@ -332,8 +368,11 @@ pub(super) fn handle_typed(
         return handle_typed_treasure(account, method, request_args, pre_pushes);
     }
     if method == "hero.Marry" {
-        let hero_id = decode_varint_u64_field(request_args, 1);
-        let marry_type = decode_varint_field(request_args, 2);
+        let Ok(request) = HeroMarryRequest::decode(request_args) else {
+            return HandlerResult::Error(GameError::InvalidRequest("marriage request is invalid"));
+        };
+        let hero_id = request.hero_id;
+        let marry_type = request.marry_type;
         if hero_id == 0 || !(1..=2).contains(&marry_type) {
             return HandlerResult::Error(GameError::InvalidRequest("marriage request is invalid"));
         }
@@ -410,9 +449,12 @@ pub(super) fn handle_typed(
         return HandlerResult::PushOnly;
     }
     if method == "hero.AddAffection" {
-        let hero_id = decode_varint_u64_field(request_args, 1);
-        let item_id = decode_varint_field(request_args, 2);
-        let requested = decode_varint_field(request_args, 3).clamp(1, 99) as u64;
+        let Ok(request) = HeroAffectionRequest::decode(request_args) else {
+            return HandlerResult::Error(GameError::InvalidRequest("affection request is invalid"));
+        };
+        let hero_id = request.hero_id;
+        let item_id = request.item_id;
+        let requested = request.count.clamp(1, 99) as u64;
         let Some(exp_per_item) = affection_catalog
             .and_then(|catalog| catalog.exp_by_item.get(&item_id))
             .copied()
@@ -491,10 +533,13 @@ pub(super) fn handle_typed(
             "compat feature method is unsupported",
         ));
     }
-    let hero_ids = decode_repeated_varint_field(request_args, 1)
+    let Ok(request) = PositiveIdListRequest::decode(request_args) else {
+        return HandlerResult::Error(GameError::InvalidRequest("repair hero list is invalid"));
+    };
+    let hero_ids = request
+        .ids
         .into_iter()
         .filter(|id| *id > 0)
-        .map(|id| id as u64)
         .collect::<std::collections::BTreeSet<_>>();
     if hero_ids.is_empty() {
         return HandlerResult::Error(GameError::InvalidRequest("repair hero list is empty"));
@@ -704,8 +749,13 @@ fn handle_typed_combination(
         return HandlerResult::Error(GameError::CatalogUnavailable);
     };
     if method == "hero.HeroCombine" {
-        let main_id = decode_varint_u64_field(request_args, 1);
-        let deputy_id = decode_varint_u64_field(request_args, 2);
+        let Ok(request) = HeroCombineRequest::decode(request_args) else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "hero combination relation is invalid",
+            ));
+        };
+        let main_id = request.main_id;
+        let deputy_id = request.deputy_id;
         if main_id == 0 || main_id == deputy_id {
             return HandlerResult::Error(GameError::InvalidRequest(
                 "hero combination relation is invalid",
@@ -757,7 +807,12 @@ fn handle_typed_combination(
         return HandlerResult::PushOnly;
     }
 
-    let hero_id = decode_varint_u64_field(request_args, 1);
+    let Ok(request) = HeroCombineRequest::decode(request_args) else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "hero combination request is invalid",
+        ));
+    };
+    let hero_id = request.main_id;
     if hero_id == 0
         || !account
             .dock
@@ -978,17 +1033,20 @@ fn handle_typed_treasure(
     request_args: &[u8],
     pre_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
-    let treasure_id = decode_varint_field(request_args, 1);
+    let Ok(request) = TreasureOpenRequest::decode(request_args) else {
+        return HandlerResult::Error(GameError::InvalidRequest("treasure request is invalid"));
+    };
+    let treasure_id = request.treasure_id;
     let (open_num, selected_option, drop_id) = if method == "bag.GetNormalTreasureInfo" {
         let catalog = BUILD_SHIP_CATALOG.get_or_init(BuildShipCatalog::default);
         (
-            decode_varint_field(request_args, 2),
+            request.count,
             None,
             catalog.treasure_drop_by_item.get(&treasure_id).copied(),
         )
     } else {
-        let position = decode_varint_field(request_args, 2);
-        let open_num = decode_varint_field(request_args, 3).max(1);
+        let position = request.position;
+        let open_num = request.count.max(1);
         let catalog = BUILD_SHIP_CATALOG.get_or_init(BuildShipCatalog::default);
         let Some(selected) = catalog.selected_treasure_by_item.get(&treasure_id) else {
             return HandlerResult::Error(GameError::CatalogUnavailable);

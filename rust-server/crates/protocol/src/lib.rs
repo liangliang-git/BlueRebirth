@@ -2103,7 +2103,7 @@ impl Decode for CoopCreateRoomRequest {
         let fields = decode_varint_fields(payload)?;
         let copy_id = required_field(&fields, 2, "co-op is missing copy id")?;
         let hero_ids = decode_coop_hero_ids(payload)?;
-        if copy_id <= 0 || hero_ids.is_empty() {
+        if copy_id <= 0 {
             return Err(ProtocolError::Invalid("co-op create request is invalid"));
         }
         Ok(Self { copy_id, hero_ids })
@@ -2408,6 +2408,138 @@ pub struct HeroChangeEquipRequest {
     pub slot: u64,
     pub equip_id: u64,
     pub equip_type: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PositiveIdListRequest {
+    pub ids: Vec<u64>,
+}
+
+impl Decode for PositiveIdListRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            ids: fields.get(&1).cloned().unwrap_or_default(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemCountEntry {
+    pub item_id: u64,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemCountListRequest {
+    pub items: Vec<ItemCountEntry>,
+}
+
+impl Decode for ItemCountListRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let mut items = Vec::new();
+        for nested in decode_repeated_message_fields(payload, 1)? {
+            let fields = decode_varint_fields(&nested)?;
+            items.push(ItemCountEntry {
+                item_id: required_u64(&fields, 1, "item count is missing item id")?,
+                count: required_u64(&fields, 2, "item count is missing count")?,
+            });
+        }
+        Ok(Self { items })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IllustrateBehaviourEntry {
+    pub illustrate_id: u64,
+    pub behaviours: Vec<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IllustrateBehaviourRequest {
+    pub entries: Vec<IllustrateBehaviourEntry>,
+}
+
+impl Decode for IllustrateBehaviourRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let mut entries = Vec::new();
+        for nested in decode_repeated_message_fields(payload, 1)? {
+            let fields = decode_varint_fields(&nested)?;
+            entries.push(IllustrateBehaviourEntry {
+                illustrate_id: optional_u64(&fields, 1, "illustrate behaviour has duplicate id")?,
+                behaviours: fields.get(&2).cloned().unwrap_or_default(),
+            });
+        }
+        Ok(Self { entries })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeroMarryRequest {
+    pub hero_id: u64,
+    pub marry_type: i32,
+}
+
+impl Decode for HeroMarryRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            hero_id: required_u64(&fields, 1, "marriage request is missing hero id")?,
+            marry_type: optional_i32(&fields, 2, "marriage request has duplicate type")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeroAffectionRequest {
+    pub hero_id: u64,
+    pub item_id: i32,
+    pub count: i32,
+}
+
+impl Decode for HeroAffectionRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            hero_id: required_u64(&fields, 1, "affection request is missing hero id")?,
+            item_id: required_field(&fields, 2, "affection request is missing item id")?,
+            count: optional_i32(&fields, 3, "affection request has duplicate count")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeroCombineRequest {
+    pub main_id: u64,
+    pub deputy_id: u64,
+}
+
+impl Decode for HeroCombineRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            main_id: optional_u64(&fields, 1, "hero combination has duplicate main id")?,
+            deputy_id: optional_u64(&fields, 2, "hero combination has duplicate deputy id")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TreasureOpenRequest {
+    pub treasure_id: i32,
+    pub position: i32,
+    pub count: i32,
+}
+
+impl Decode for TreasureOpenRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            treasure_id: optional_i32(&fields, 1, "treasure request has duplicate id")?,
+            position: optional_i32(&fields, 2, "treasure request has duplicate position")?,
+            count: optional_i32(&fields, 3, "treasure request has duplicate count")?,
+        })
+    }
 }
 
 impl Decode for HeroChangeEquipRequest {
