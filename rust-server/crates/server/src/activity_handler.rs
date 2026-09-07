@@ -27,6 +27,11 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "activitySSRrolls.ActivityRollsRand"
             | "activitybirthday.BirthdayRefresh"
             | "activitybirthday.UpdateBirthdayInfo"
+            | "activityfashion.PushActivityFashionInfo"
+            | "activitycodeexchange.UpdateActivityCodeExgInfo"
+            | "activitypapercut.UpdateActivityPaperCutInfo"
+            | "activitysecretcopy.UpdateActivitySecretCopyInfo"
+            | "activityvalentineloveletter.UpdateActivityValentineLoveLetterInfo"
             | "activityVideo.GetActivityVideo"
             | "activityVideo.SetActivityVideo"
             | "activitychristmasshop.UpdateActivityChristmasShopInfo"
@@ -105,6 +110,21 @@ pub(super) fn handle_typed(
         }
         "activitybirthday.BirthdayRefresh" | "activitybirthday.UpdateBirthdayInfo" => {
             typed_reply(method, typed_birthday_payload(progress))
+        }
+        "activityfashion.PushActivityFashionInfo" => {
+            typed_reply(method, typed_fashion_payload(progress))
+        }
+        "activitycodeexchange.UpdateActivityCodeExgInfo" => {
+            typed_reply(method, typed_code_exchange_payload(progress))
+        }
+        "activitypapercut.UpdateActivityPaperCutInfo" => {
+            typed_reply(method, typed_paper_cut_payload(progress))
+        }
+        "activitysecretcopy.UpdateActivitySecretCopyInfo" => {
+            typed_reply(method, typed_secret_copy_payload(progress))
+        }
+        "activityvalentineloveletter.UpdateActivityValentineLoveLetterInfo" => {
+            typed_reply(method, typed_valentine_payload(progress))
         }
         "activityVideo.GetActivityVideo" => typed_reply(method, typed_video_payload(progress)),
         "activitychristmasshop.UpdateActivityChristmasShopInfo" => {
@@ -273,6 +293,154 @@ fn typed_video_payload(progress: &std::collections::BTreeMap<String, u64>) -> Ve
             append_varint_field(&mut output, 1, id);
         }
     }
+    output
+}
+
+fn typed_fashion_payload(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(
+        &mut output,
+        1,
+        activity_value(progress, "activityFashion", "activityId"),
+    );
+    append_varint_field(
+        &mut output,
+        2,
+        activity_value(progress, "activityFashion", "buyCount"),
+    );
+    for key in progress.keys() {
+        if let Some(index) = key
+            .strip_prefix("activity:activityFashion:specialReward:")
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            append_varint_field(&mut output, 3, index);
+        }
+    }
+    output
+}
+
+fn typed_code_exchange_payload(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
+    let mut output = Vec::new();
+    let mut ids = std::collections::BTreeSet::new();
+    for key in progress.keys() {
+        if let Some(id) = key
+            .strip_prefix("activity:activityCodeExchange:receipt:")
+            .and_then(|value| value.split_once(':'))
+            .and_then(|(id, _)| id.parse::<u64>().ok())
+        {
+            ids.insert(id);
+        }
+    }
+    for id in ids {
+        let mut receipt = Vec::new();
+        append_varint_field(&mut receipt, 1, id);
+        append_varint_field(
+            &mut receipt,
+            2,
+            activity_value(
+                progress,
+                "activityCodeExchange",
+                &format!("receipt:{id}:count"),
+            ),
+        );
+        append_message_field(&mut output, 1, &receipt);
+    }
+    output
+}
+
+fn typed_paper_cut_payload(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
+    let mut output = Vec::new();
+    let mut ids = std::collections::BTreeSet::new();
+    for key in progress.keys() {
+        if let Some(id) = key
+            .strip_prefix("activity:activityPaperCut:formula:")
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            ids.insert(id);
+        }
+    }
+    for id in ids {
+        let mut formula = Vec::new();
+        append_varint_field(&mut formula, 1, id);
+        append_varint_field(
+            &mut formula,
+            2,
+            activity_value(progress, "activityPaperCut", &format!("formula:{id}:count")),
+        );
+        append_message_field(&mut output, 1, &formula);
+    }
+    output
+}
+
+fn typed_secret_copy_payload(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(
+        &mut output,
+        1,
+        activity_value(progress, "activitySecretCopy", "passTimePerfect"),
+    );
+    let mut ids = std::collections::BTreeSet::new();
+    for key in progress.keys() {
+        if let Some(id) = key
+            .strip_prefix("activity:activitySecretCopy:reward:")
+            .and_then(|value| value.split_once(':'))
+            .and_then(|(id, _)| id.parse::<u64>().ok())
+        {
+            ids.insert(id);
+        }
+    }
+    for id in ids {
+        let mut reward = Vec::new();
+        append_varint_field(&mut reward, 1, id);
+        append_varint_field(
+            &mut reward,
+            2,
+            activity_value(
+                progress,
+                "activitySecretCopy",
+                &format!("reward:{id}:getReward"),
+            ),
+        );
+        append_message_field(&mut output, 2, &reward);
+    }
+    output
+}
+
+fn typed_valentine_payload(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
+    let mut output = Vec::new();
+    let mut ids = std::collections::BTreeSet::new();
+    for key in progress.keys() {
+        if let Some(id) = key
+            .strip_prefix("activity:activityValentine:loveShip:")
+            .and_then(|value| value.split_once(':'))
+            .and_then(|(id, _)| id.parse::<u64>().ok())
+        {
+            ids.insert(id);
+        }
+    }
+    for id in ids {
+        let prefix = format!("loveShip:{id}:");
+        let mut hero = Vec::new();
+        append_varint_field(&mut hero, 1, id);
+        for (field, name) in [
+            (2, "heroId"),
+            (3, "templateId"),
+            (4, "shipTid"),
+            (5, "isGift"),
+        ] {
+            append_varint_field(
+                &mut hero,
+                field,
+                activity_value(progress, "activityValentine", &format!("{prefix}{name}")),
+            );
+        }
+        append_message_field(&mut output, 1, &hero);
+    }
+    append_varint_field(
+        &mut output,
+        2,
+        activity_value(progress, "activityValentine", "curActShip"),
+    );
     output
 }
 
