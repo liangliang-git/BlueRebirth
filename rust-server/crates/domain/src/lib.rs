@@ -363,6 +363,50 @@ pub struct ActivityState {
     pub progress: BTreeMap<String, u64>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TowerRewardState {
+    pub reward_type: u32,
+    pub config_id: u64,
+    pub amount: u64,
+    pub instance_id: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TowerState {
+    pub chapter_id: u32,
+    pub area_index: u32,
+    pub copy_index: u32,
+    pub topic_index: u32,
+    pub daily_count: u32,
+    pub reset_time: u64,
+    pub sf_id_counts: BTreeMap<u64, u32>,
+    pub hero_ids: Vec<HeroId>,
+    pub lock_equip_ids: Vec<EquipId>,
+    pub pass_last_chapter_id: u32,
+    pub is_reset: bool,
+    pub max_level: u32,
+    pub max_area: u32,
+    pub max_copy: u32,
+    pub daily_count_ex: u32,
+    pub is_new_level: bool,
+    pub save_pass_copy_ids: Vec<CopyId>,
+    pub pending_rewards: Vec<TowerRewardState>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivityTowerState {
+    pub activity_id: u32,
+    pub reset_time: u64,
+    pub small_reset_number: u32,
+    pub quick_number: u32,
+    pub history_max: u32,
+    pub save_pass_copy_ids: Vec<CopyId>,
+    pub pass_copy_ids: Vec<CopyId>,
+    pub lock_equip_ids: Vec<EquipId>,
+    pub hero_ids: Vec<HeroId>,
+    pub save_pass_stage_copy_ids: Vec<CopyId>,
+}
+
 impl ResourceLedger {
     pub fn amount(&self, kind: CurrencyKind) -> ResourceAmount {
         self.amounts
@@ -418,6 +462,10 @@ pub struct AccountState {
     pub chat: ChatState,
     #[serde(default)]
     pub activities: ActivityState,
+    #[serde(default)]
+    pub tower: TowerState,
+    #[serde(default)]
+    pub activity_tower: ActivityTowerState,
 }
 
 impl AccountState {
@@ -513,6 +561,41 @@ impl AccountState {
             {
                 return Err(DomainError::InvalidState("construction job is invalid"));
             }
+        }
+        for hero_id in self
+            .tower
+            .hero_ids
+            .iter()
+            .chain(self.activity_tower.hero_ids.iter())
+        {
+            if !self.dock.heroes.contains_key(hero_id) {
+                return Err(DomainError::InvalidState("tower references missing hero"));
+            }
+        }
+        for equip_id in self
+            .tower
+            .lock_equip_ids
+            .iter()
+            .chain(self.activity_tower.lock_equip_ids.iter())
+        {
+            if !self.dock.equipments.contains_key(equip_id) {
+                return Err(DomainError::InvalidState(
+                    "tower references missing equipment",
+                ));
+            }
+        }
+        if self.tower.hero_ids.iter().collect::<BTreeSet<_>>().len() != self.tower.hero_ids.len()
+            || self
+                .activity_tower
+                .hero_ids
+                .iter()
+                .collect::<BTreeSet<_>>()
+                .len()
+                != self.activity_tower.hero_ids.len()
+        {
+            return Err(DomainError::InvalidState(
+                "tower hero list contains duplicates",
+            ));
         }
         Ok(())
     }

@@ -5516,13 +5516,18 @@ fn pve_room_payload_contains_room_owner_and_ready_state() {
 
 #[test]
 fn tower_info_payload_contains_initial_progress_and_reset_time() {
-    let account = json!({"tower": {"chapterId": 30001, "resetTime": 123}});
+    let mut account = blueoath_domain::NewAccountFactory::create(
+        blueoath_domain::ProfileId::new("tower-payload").unwrap(),
+        "Tower",
+    );
+    account.tower.chapter_id = 30_001;
+    account.tower.reset_time = 123;
     let catalog = ChapterCatalog {
         tower_chapter_id: 30001,
         ..ChapterCatalog::default()
     };
     let payload =
-        super::game_login::tower_handler::tower_info_payload(&account, Some(&catalog), 456);
+        super::game_login::tower_handler::tower_info_payload_typed(&account, Some(&catalog), 456);
 
     assert_eq!(decode_varint_field(&payload, 1), 30001);
     assert_eq!(decode_varint_field(&payload, 2), 0);
@@ -5533,7 +5538,11 @@ fn tower_info_payload_contains_initial_progress_and_reset_time() {
 
 #[test]
 fn activity_tower_payload_contains_reset_time() {
-    let payload = super::game_login::tower_handler::activity_tower_payload(&json!({}), 456);
+    let account = blueoath_domain::NewAccountFactory::create(
+        blueoath_domain::ProfileId::new("activity-tower-payload").unwrap(),
+        "Tower",
+    );
+    let payload = super::game_login::tower_handler::activity_tower_payload_typed(&account, 456);
     assert_eq!(decode_varint_field(&payload, 1), 0);
     assert_eq!(decode_varint_field(&payload, 2), 456);
 }

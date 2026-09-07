@@ -167,6 +167,48 @@ fn typed_social_relations_round_trip_through_normalized_storage() {
 }
 
 #[test]
+fn typed_tower_state_round_trips_through_normalized_storage() {
+    let (store, root) = store();
+    let profile_id = ProfileId::new("typed-tower").unwrap();
+    let mut account = NewAccountFactory::create(profile_id.clone(), "Tower Captain");
+    let hero_id = account.dock.heroes.keys().next().copied().unwrap();
+    let equip_id = account.dock.equipments.keys().next().copied().unwrap();
+    account.tower.chapter_id = 30_001;
+    account.tower.area_index = 2;
+    account.tower.copy_index = 3;
+    account.tower.daily_count = 4;
+    account.tower.sf_id_counts.insert(100, 2);
+    account.tower.hero_ids.push(hero_id);
+    account.tower.lock_equip_ids.push(equip_id);
+    account
+        .tower
+        .save_pass_copy_ids
+        .push(CopyId::new(9).unwrap());
+    account
+        .tower
+        .pending_rewards
+        .push(blueoath_domain::TowerRewardState {
+            reward_type: 1,
+            config_id: 2,
+            amount: 3,
+            instance_id: 4,
+        });
+    account.activity_tower.activity_id = 7;
+    account.activity_tower.quick_number = 2;
+    account
+        .activity_tower
+        .pass_copy_ids
+        .push(CopyId::new(10).unwrap());
+    account.activity_tower.hero_ids.push(hero_id);
+
+    store.create(&account).unwrap();
+    let loaded = store.load_typed_account(&profile_id).unwrap().unwrap();
+    assert_eq!(loaded.tower, account.tower);
+    assert_eq!(loaded.activity_tower, account.activity_tower);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
     let suffix = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
     let root = std::env::temp_dir().join(format!(
@@ -209,7 +251,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 17);
+    assert_eq!(version, 18);
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",

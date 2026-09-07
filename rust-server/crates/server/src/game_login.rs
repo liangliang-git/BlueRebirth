@@ -1589,41 +1589,35 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::Tower) => {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            let result = if let Some(typed) = typed_account.as_mut() {
+                tower_handler::handle_typed(
+                    typed,
+                    request.method.as_str(),
+                    request_args,
+                    chapter_catalog,
+                    current_unix_seconds(),
+                )
+            } else {
+                HandlerResult::Error(GameError::InvalidRequest("tower requires typed account"))
             };
-            let result = tower_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::ActivityTower) => {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            let result = if let Some(typed) = typed_account.as_mut() {
+                tower_handler::handle_activity_typed(
+                    typed,
+                    request.method.as_str(),
+                    request_args,
+                    current_unix_seconds(),
+                )
+            } else {
+                HandlerResult::Error(GameError::InvalidRequest(
+                    "activity tower requires typed account",
+                ))
             };
-            let result =
-                tower_handler::handle_activity(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -2435,8 +2429,6 @@ fn legacy_only_method(method: &str) -> bool {
             | MethodFamily::SportsMeet
             | MethodFamily::SportsMeetRank
             | MethodFamily::TalentTree
-            | MethodFamily::Tower
-            | MethodFamily::ActivityTower
             | MethodFamily::Bathroom
             | MethodFamily::Battle
             | MethodFamily::BattlePass

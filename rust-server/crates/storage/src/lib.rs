@@ -1,8 +1,9 @@
 use blueoath_domain::{
-    AccountRepository, AccountState, ChapterId, CharacterState, ChatBarrageState, ChatMessageState,
-    ConstructionJobState, ConstructionProjectState, CopyId, CurrencyKind, EquipId, EquipmentState,
-    FleetId, FleetRecord, HeroId, HeroState, NewAccountFactory, PresetFleetState, ProfileId,
-    ProfileState, RepositoryError, TemplateId,
+    AccountRepository, AccountState, ActivityTowerState, ChapterId, CharacterState,
+    ChatBarrageState, ChatMessageState, ConstructionJobState, ConstructionProjectState, CopyId,
+    CurrencyKind, EquipId, EquipmentState, FleetId, FleetRecord, HeroId, HeroState,
+    NewAccountFactory, PresetFleetState, ProfileId, ProfileState, RepositoryError, TemplateId,
+    TowerRewardState,
 };
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -930,6 +931,161 @@ impl ProfileStore {
                 non_negative_u64(value, "activity progress")?,
             );
         }
+
+        if let Some(values) = connection
+            .query_row(
+                "SELECT chapter_id, area_index, copy_index, topic_index, daily_count,
+                        reset_time, pass_last_chapter_id, is_reset, max_level, max_area,
+                        max_copy, daily_count_ex, is_new_level
+                 FROM tower_progress WHERE profile_id = ?1",
+                params![profile_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
+                        row.get::<_, i64>(9)?,
+                        row.get::<_, i64>(10)?,
+                        row.get::<_, i64>(11)?,
+                        row.get::<_, i64>(12)?,
+                    ))
+                },
+            )
+            .optional()?
+        {
+            account.tower.chapter_id = non_negative_u32(values.0, "tower chapter id")?;
+            account.tower.area_index = non_negative_u32(values.1, "tower area index")?;
+            account.tower.copy_index = non_negative_u32(values.2, "tower copy index")?;
+            account.tower.topic_index = non_negative_u32(values.3, "tower topic index")?;
+            account.tower.daily_count = non_negative_u32(values.4, "tower daily count")?;
+            account.tower.reset_time = non_negative_u64(values.5, "tower reset time")?;
+            account.tower.pass_last_chapter_id = non_negative_u32(values.6, "tower last chapter")?;
+            account.tower.is_reset = values.7 != 0;
+            account.tower.max_level = non_negative_u32(values.8, "tower max level")?;
+            account.tower.max_area = non_negative_u32(values.9, "tower max area")?;
+            account.tower.max_copy = non_negative_u32(values.10, "tower max copy")?;
+            account.tower.daily_count_ex = non_negative_u32(values.11, "tower daily count ex")?;
+            account.tower.is_new_level = values.12 != 0;
+        }
+        let mut statement = connection.prepare(
+            "SELECT sf_id, count FROM tower_sf_counts
+             WHERE profile_id = ?1 ORDER BY sf_id",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })? {
+            let (sf_id, count) = row?;
+            account.tower.sf_id_counts.insert(
+                positive_u64(sf_id, "tower sf id")?,
+                non_negative_u32(count, "tower sf count")?,
+            );
+        }
+        let mut statement = connection.prepare(
+            "SELECT kind, value FROM tower_ids
+             WHERE profile_id = ?1 ORDER BY kind, position",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })? {
+            let (kind, value) = row?;
+            match kind.as_str() {
+                "hero" => account
+                    .tower
+                    .hero_ids
+                    .push(positive_hero_id(value, "tower hero id")?),
+                "lock_equip" => account
+                    .tower
+                    .lock_equip_ids
+                    .push(positive_equip_id(value, "tower equipment id")?),
+                "save_copy" => account.tower.save_pass_copy_ids.push(
+                    CopyId::new(positive_u64(value, "tower saved copy id")?)
+                        .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?,
+                ),
+                _ => {}
+            }
+        }
+        let mut statement = connection.prepare(
+            "SELECT reward_type, config_id, amount, instance_id
+             FROM tower_rewards WHERE profile_id = ?1 ORDER BY position",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })? {
+            let (reward_type, config_id, amount, instance_id) = row?;
+            account.tower.pending_rewards.push(TowerRewardState {
+                reward_type: non_negative_u32(reward_type, "tower reward type")?,
+                config_id: non_negative_u64(config_id, "tower reward config id")?,
+                amount: non_negative_u64(amount, "tower reward amount")?,
+                instance_id: non_negative_u64(instance_id, "tower reward instance id")?,
+            });
+        }
+        if let Some(values) = connection
+            .query_row(
+                "SELECT activity_id, reset_time, small_reset_number, quick_number, history_max
+                 FROM activity_tower_progress WHERE profile_id = ?1",
+                params![profile_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .optional()?
+        {
+            account.activity_tower = ActivityTowerState {
+                activity_id: non_negative_u32(values.0, "activity tower id")?,
+                reset_time: non_negative_u64(values.1, "activity tower reset time")?,
+                small_reset_number: non_negative_u32(values.2, "activity tower reset count")?,
+                quick_number: non_negative_u32(values.3, "activity tower quick count")?,
+                history_max: non_negative_u32(values.4, "activity tower history max")?,
+                ..ActivityTowerState::default()
+            };
+        }
+        let mut statement = connection.prepare(
+            "SELECT kind, value FROM activity_tower_ids
+             WHERE profile_id = ?1 ORDER BY kind, position",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })? {
+            let (kind, value) = row?;
+            let copy_id = || {
+                CopyId::new(positive_u64(value, "activity tower copy id")?)
+                    .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))
+            };
+            match kind.as_str() {
+                "save_copy" => account.activity_tower.save_pass_copy_ids.push(copy_id()?),
+                "pass_copy" => account.activity_tower.pass_copy_ids.push(copy_id()?),
+                "lock_equip" => account
+                    .activity_tower
+                    .lock_equip_ids
+                    .push(positive_equip_id(value, "activity tower equipment id")?),
+                "hero" => account
+                    .activity_tower
+                    .hero_ids
+                    .push(positive_hero_id(value, "activity tower hero id")?),
+                "save_stage_copy" => account
+                    .activity_tower
+                    .save_pass_stage_copy_ids
+                    .push(copy_id()?),
+                _ => {}
+            }
+        }
         account
             .validate()
             .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
@@ -1517,6 +1673,135 @@ impl ProfileStore {
                 )?;
             }
         }
+        transaction.execute(
+            "INSERT INTO tower_progress(
+                profile_id, chapter_id, floor, reset_day, area_index, copy_index,
+                topic_index, daily_count, reset_time, pass_last_chapter_id, is_reset,
+                max_level, max_area, max_copy, daily_count_ex, is_new_level
+             ) VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            params![
+                profile.id.as_str(),
+                typed_i64(account.tower.chapter_id, "tower chapter id")?,
+                typed_i64(account.tower.area_index, "tower floor")?,
+                typed_i64(account.tower.area_index, "tower area index")?,
+                typed_i64(account.tower.copy_index, "tower copy index")?,
+                typed_i64(account.tower.topic_index, "tower topic index")?,
+                typed_i64(account.tower.daily_count, "tower daily count")?,
+                typed_i64(account.tower.reset_time, "tower reset time")?,
+                typed_i64(account.tower.pass_last_chapter_id, "tower last chapter")?,
+                i64::from(account.tower.is_reset),
+                typed_i64(account.tower.max_level, "tower max level")?,
+                typed_i64(account.tower.max_area, "tower max area")?,
+                typed_i64(account.tower.max_copy, "tower max copy")?,
+                typed_i64(account.tower.daily_count_ex, "tower daily count ex")?,
+                i64::from(account.tower.is_new_level),
+            ],
+        )?;
+        for (sf_id, count) in &account.tower.sf_id_counts {
+            transaction.execute(
+                "INSERT INTO tower_sf_counts(profile_id, sf_id, count) VALUES (?1, ?2, ?3)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(*sf_id, "tower sf id")?,
+                    typed_i64(*count, "tower sf count")?,
+                ],
+            )?;
+        }
+        let insert_tower_id = |kind: &str, position: usize, value: u64| {
+            transaction.execute(
+                "INSERT INTO tower_ids(profile_id, kind, position, value)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    kind,
+                    typed_i64(position, "tower id position")?,
+                    typed_i64(value, "tower id value")?,
+                ],
+            )?;
+            Ok::<(), StorageError>(())
+        };
+        for (position, hero_id) in account.tower.hero_ids.iter().enumerate() {
+            insert_tower_id("hero", position, hero_id.get())?;
+        }
+        for (position, equip_id) in account.tower.lock_equip_ids.iter().enumerate() {
+            insert_tower_id("lock_equip", position, equip_id.get())?;
+        }
+        for (position, copy_id) in account.tower.save_pass_copy_ids.iter().enumerate() {
+            insert_tower_id("save_copy", position, copy_id.get())?;
+        }
+        for (position, reward) in account.tower.pending_rewards.iter().enumerate() {
+            transaction.execute(
+                "INSERT INTO tower_rewards(
+                    profile_id, position, reward_type, config_id, amount, instance_id
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(position, "tower reward position")?,
+                    typed_i64(reward.reward_type, "tower reward type")?,
+                    typed_i64(reward.config_id, "tower reward config id")?,
+                    typed_i64(reward.amount, "tower reward amount")?,
+                    typed_i64(reward.instance_id, "tower reward instance id")?,
+                ],
+            )?;
+        }
+        transaction.execute(
+            "INSERT INTO activity_tower_progress(
+                profile_id, activity_id, reset_time, small_reset_number, quick_number, history_max
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                profile.id.as_str(),
+                typed_i64(account.activity_tower.activity_id, "activity tower id")?,
+                typed_i64(
+                    account.activity_tower.reset_time,
+                    "activity tower reset time"
+                )?,
+                typed_i64(
+                    account.activity_tower.small_reset_number,
+                    "activity tower reset count",
+                )?,
+                typed_i64(
+                    account.activity_tower.quick_number,
+                    "activity tower quick count"
+                )?,
+                typed_i64(
+                    account.activity_tower.history_max,
+                    "activity tower history max"
+                )?,
+            ],
+        )?;
+        let insert_activity_tower_id = |kind: &str, position: usize, value: u64| {
+            transaction.execute(
+                "INSERT INTO activity_tower_ids(profile_id, kind, position, value)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    kind,
+                    typed_i64(position, "activity tower id position")?,
+                    typed_i64(value, "activity tower id value")?,
+                ],
+            )?;
+            Ok::<(), StorageError>(())
+        };
+        for (position, copy_id) in account.activity_tower.save_pass_copy_ids.iter().enumerate() {
+            insert_activity_tower_id("save_copy", position, copy_id.get())?;
+        }
+        for (position, copy_id) in account.activity_tower.pass_copy_ids.iter().enumerate() {
+            insert_activity_tower_id("pass_copy", position, copy_id.get())?;
+        }
+        for (position, equip_id) in account.activity_tower.lock_equip_ids.iter().enumerate() {
+            insert_activity_tower_id("lock_equip", position, equip_id.get())?;
+        }
+        for (position, hero_id) in account.activity_tower.hero_ids.iter().enumerate() {
+            insert_activity_tower_id("hero", position, hero_id.get())?;
+        }
+        for (position, copy_id) in account
+            .activity_tower
+            .save_pass_stage_copy_ids
+            .iter()
+            .enumerate()
+        {
+            insert_activity_tower_id("save_stage_copy", position, copy_id.get())?;
+        }
         for (key, value) in &account.activities.progress {
             let (activity_id, progress_kind) = key.split_once('\u{1f}').unwrap_or((key, "value"));
             transaction.execute(
@@ -1630,6 +1915,12 @@ fn clear_normalized_account(
         "battle_session_fleets",
         "battle_session_heroes",
         "battle_sessions",
+        "activity_tower_ids",
+        "activity_tower_progress",
+        "tower_rewards",
+        "tower_ids",
+        "tower_sf_counts",
+        "tower_progress",
         "fleet_members",
         "fleets",
         "hero_equip_slots",
@@ -1743,6 +2034,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0015_construction_typed_state.sql"),
     include_str!("../../../migrations/0016_battle_session_typed_state.sql"),
     include_str!("../../../migrations/0017_drop_json_accounts.sql"),
+    include_str!("../../../migrations/0018_typed_tower_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {
