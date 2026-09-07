@@ -869,6 +869,28 @@ impl ProfileStore {
                 account.battle.passed_copies.insert(copy_id);
             }
         }
+        let mut statement = connection.prepare(
+            "SELECT chapter_id, reward_index
+             FROM copy_star_rewards WHERE profile_id = ?1
+             ORDER BY chapter_id, reward_index",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })? {
+            let (chapter_id, reward_index) = row?;
+            account.battle.claimed_star_rewards.insert((
+                u32::try_from(positive_u64(chapter_id, "star reward chapter id")?).map_err(
+                    |_| {
+                        StorageError::InvalidTypedAccount(
+                            "star reward chapter id is invalid".to_owned(),
+                        )
+                    },
+                )?,
+                u32::try_from(positive_u64(reward_index, "star reward index")?).map_err(|_| {
+                    StorageError::InvalidTypedAccount("star reward index is invalid".to_owned())
+                })?,
+            ));
+        }
         account.sea.difficulty = connection
             .query_row(
                 "SELECT difficulty FROM sea_difficulty WHERE profile_id = ?1",
@@ -2448,6 +2470,18 @@ impl ProfileStore {
                 ],
             )?;
         }
+        for (chapter_id, reward_index) in &account.battle.claimed_star_rewards {
+            transaction.execute(
+                "INSERT INTO copy_star_rewards(
+                    profile_id, chapter_id, reward_index
+                 ) VALUES (?1, ?2, ?3)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(*chapter_id as u64, "star reward chapter id")?,
+                    typed_i64(*reward_index as u64, "star reward index")?,
+                ],
+            )?;
+        }
         if account.sea.difficulty > 0 {
             transaction.execute(
                 "INSERT INTO sea_difficulty(profile_id, difficulty) VALUES (?1, ?2)",
@@ -3384,6 +3418,7 @@ fn clear_normalized_account(
         "copy_record_heroes",
         "copy_records",
         "copy_progress",
+        "copy_star_rewards",
         "sea_difficulty",
         "sea_progress",
         "tower_progress",
@@ -3519,6 +3554,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0021_copy_records_typed_state.sql"),
     include_str!("../../../migrations/0022_sea_progress_typed_state.sql"),
     include_str!("../../../migrations/0023_sea_difficulty_typed_state.sql"),
+    include_str!("../../../migrations/0024_copy_star_rewards_typed_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

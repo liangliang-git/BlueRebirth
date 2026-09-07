@@ -252,7 +252,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 23);
+    assert_eq!(version, 24);
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
@@ -388,6 +388,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
     account.tasks.claimed.insert(7);
     account.daily_copy.reset_day = 42;
     account.sea.difficulty = 3;
+    account.battle.claimed_star_rewards.insert((3, 1));
     account
         .daily_copy
         .challenge_times
@@ -720,6 +721,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(loaded.battle.records[0].ex_buffs, vec![7001]);
     assert_eq!(loaded.battle.records[0].pass_time, 12);
     assert_eq!(loaded.battle.records[0].secret_id, 2);
+    assert!(loaded.battle.claimed_star_rewards.contains(&(3, 1)));
     let _ = std::fs::remove_dir_all(root);
 }
 

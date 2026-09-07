@@ -13,6 +13,124 @@ pub(super) fn handle_typed(
     handle_typed_with_catalog(account, method, request_args, None, 1.0)
 }
 
+pub(super) fn handle_typed_copy_star_reward(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    chapter_catalog: Option<&ChapterCatalog>,
+    task_catalog: Option<&TaskCatalog>,
+    pre_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    let chapter_id = decode_varint_field(request_args, 1);
+    let mut indexes = decode_repeated_varint_field(request_args, 3)
+        .into_iter()
+        .filter(|index| *index > 0)
+        .collect::<Vec<_>>();
+    if indexes.is_empty() {
+        let index = decode_varint_field(request_args, 2);
+        if index > 0 {
+            indexes.push(index);
+        }
+    }
+    let Some(chapter_rewards) =
+        chapter_catalog.and_then(|catalog| catalog.star_rewards_by_chapter.get(&chapter_id))
+    else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "copy star reward chapter was not found",
+        ));
+    };
+    let Some(task_catalog) = task_catalog else {
+        return HandlerResult::Error(GameError::InvalidState(
+            "copy reward catalog is unavailable",
+        ));
+    };
+    if chapter_id <= 0 || indexes.is_empty() {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "copy star reward request is invalid",
+        ));
+    }
+    let Ok(chapter_id_u32) = u32::try_from(chapter_id) else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "copy star reward chapter is invalid",
+        ));
+    };
+    let requested_indexes = indexes.clone();
+    let star_num = chapter_rewards
+        .level_ids
+        .iter()
+        .filter(|copy_id| {
+            u64::try_from(**copy_id)
+                .ok()
+                .and_then(|id| blueoath_domain::CopyId::new(id).ok())
+                .is_some_and(|copy_id| account.battle.passed_copies.contains(&copy_id))
+        })
+        .map(|_| 7)
+        .sum::<i32>();
+    let mut pending = Vec::new();
+    let mut pending_indexes = std::collections::BTreeSet::new();
+    for index in indexes {
+        let Some(position) = usize::try_from(index.saturating_sub(1)).ok() else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "copy star reward index is invalid",
+            ));
+        };
+        let Some(required_stars) = chapter_rewards.star_conditions.get(position).copied() else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "copy star reward index is invalid",
+            ));
+        };
+        let Some(reward_id) = chapter_rewards.reward_ids.get(position).copied() else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "copy star reward is not configured",
+            ));
+        };
+        let reward_index = u32::try_from(index).unwrap_or_default();
+        if !pending_indexes.insert(index)
+            || star_num < required_stars
+            || account
+                .battle
+                .claimed_star_rewards
+                .contains(&(chapter_id_u32, reward_index))
+        {
+            return HandlerResult::Error(GameError::InvalidState(
+                "copy star reward is unavailable",
+            ));
+        }
+        let Some(rewards) = task_catalog.rewards_by_id.get(&reward_id) else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "copy star reward is not configured",
+            ));
+        };
+        if rewards.is_empty() {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "copy star reward is not configured",
+            ));
+        }
+        pending.extend(rewards.iter().map(|(goods_type, item_id, num)| ShopReward {
+            goods_type: *goods_type,
+            item_id: *item_id,
+            num: *num,
+            instance_id: 0,
+        }));
+    }
+    if !can_grant_typed_task_rewards(account, &pending) {
+        return HandlerResult::Error(GameError::InvalidState(
+            "copy star reward type is unsupported",
+        ));
+    }
+    for reward in &pending {
+        let _ = grant_typed_task_reward(account, reward);
+    }
+    for index in requested_indexes {
+        account
+            .battle
+            .claimed_star_rewards
+            .insert((chapter_id_u32, u32::try_from(index).unwrap_or_default()));
+    }
+    pre_pushes.push(BagInfoCodec::encode(&bag_info_from_typed_account(account)));
+    HandlerResult::Reply(Response::raw(method, encode_task_reward_list(&pending)))
+}
+
 pub(super) fn handle_typed_with_catalog(
     account: &mut blueoath_domain::AccountState,
     method: &str,
@@ -1639,6 +1757,58 @@ mod tests {
             .passed_copies
             .contains(&CopyId::new(9).unwrap()));
         assert_eq!(account.battle.records.len(), 1);
+    }
+
+    #[test]
+    fn typed_copy_star_reward_is_idempotent_and_persistent_in_state() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("star-reward").unwrap(), "Battle");
+        account.battle.passed_copies.insert(CopyId::new(9).unwrap());
+        let mut chapter_catalog = ChapterCatalog::default();
+        chapter_catalog.star_rewards_by_chapter.insert(
+            1,
+            ChapterStarRewards {
+                level_ids: vec![9],
+                star_conditions: vec![7],
+                reward_ids: vec![9001],
+            },
+        );
+        let mut task_catalog = TaskCatalog::default();
+        task_catalog.rewards_by_id.insert(9001, vec![(1, 5000, 2)]);
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, 1);
+        append_varint_field(&mut request, 2, 1);
+        let mut pre_pushes = Vec::new();
+
+        assert!(matches!(
+            handle_typed_copy_star_reward(
+                &mut account,
+                "copy.StarReward",
+                &request,
+                Some(&chapter_catalog),
+                Some(&task_catalog),
+                &mut pre_pushes,
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account
+                .inventory
+                .items
+                .get(&blueoath_domain::TemplateId::new(5000).unwrap()),
+            Some(&2)
+        );
+        assert!(matches!(
+            handle_typed_copy_star_reward(
+                &mut account,
+                "copy.FetchRewardBox",
+                &request,
+                Some(&chapter_catalog),
+                Some(&task_catalog),
+                &mut pre_pushes,
+            ),
+            HandlerResult::Error(GameError::InvalidState(_))
+        ));
     }
 
     #[test]

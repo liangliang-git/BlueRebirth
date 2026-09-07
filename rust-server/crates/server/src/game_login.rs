@@ -172,6 +172,25 @@ where
     let mut typed_daily_copy_handled = false;
     let mut ret = match request.method.as_str() {
         _ if typed_account.is_some()
+            && matches!(
+                request.method.as_str(),
+                "copy.StarReward" | "copy.FetchRewardBox"
+            ) =>
+        {
+            let result = battle_handler::handle_typed_copy_star_reward(
+                typed_account.as_mut().expect("typed copy account"),
+                request.method.as_str(),
+                request_args,
+                chapter_catalog,
+                task_catalog,
+                &mut pre_pushes,
+            );
+            if let HandlerResult::Error(error) = &result {
+                handler_error = Some(error.clone());
+            }
+            result.into_payload()
+        }
+        _ if typed_account.is_some()
             && matches!(request.method.as_str(), "copy.DotBase" | "copyinfo.DotBase") =>
         {
             if decode_varint_field(request_args, 1) <= 0 {
@@ -2577,7 +2596,10 @@ fn legacy_only_method(method: &str) -> bool {
     if method == "copy.PassMiniGame" {
         return false;
     }
-    if matches!(method, "copy.DotBase" | "copyinfo.DotBase") {
+    if matches!(
+        method,
+        "copy.StarReward" | "copy.FetchRewardBox" | "copy.DotBase" | "copyinfo.DotBase"
+    ) {
         return false;
     }
     if matches!(

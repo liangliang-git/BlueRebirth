@@ -269,6 +269,8 @@ pub struct BattleProgressState {
     pub passed_copies: BTreeSet<CopyId>,
     #[serde(default)]
     pub records: Vec<CopyRecordState>,
+    #[serde(default)]
+    pub claimed_star_rewards: BTreeSet<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
