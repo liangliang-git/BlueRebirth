@@ -11,6 +11,8 @@ use super::catalog::*;
 use super::common::error::GameError;
 use super::common::request::RequestContext;
 use super::common::response::HandlerResult;
+#[cfg(not(test))]
+use super::common::response::Response;
 use super::router::{GameMethod, MethodFamily};
 use super::wire::*;
 use super::*;
@@ -101,6 +103,158 @@ struct GameLoginRequestContext<'state, 'account, 'scratch> {
     pass_shipwrecked_ids: &'scratch mut std::collections::HashSet<u64>,
 }
 
+#[cfg(not(test))]
+async fn write_typed_bootstrap_push<S>(
+    stream: &mut S,
+    method: &'static str,
+    payload: Vec<u8>,
+    now: u32,
+) -> Result<(), ServerError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    Ok(
+        NetSocketFrameCodec::write(stream, 0, &Response::new(method, payload).encode_push(now))
+            .await?,
+    )
+}
+
+#[cfg(not(test))]
+async fn write_typed_user_info_bootstrap<S>(
+    stream: &mut S,
+    state: &ServerState,
+    account: &AccountState,
+    catalogs: &GameLoginCatalogs<'_>,
+) -> Result<(), ServerError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let GameLoginCatalogs {
+        fashion: fashion_catalog,
+        equip: _equip_catalog,
+        shop: shop_catalog,
+        handbook_behaviours,
+        chapters: chapter_catalog,
+        tasks: task_catalog,
+        ..
+    } = *catalogs;
+    let now = current_unix_seconds();
+
+    let mut login_time = Vec::new();
+    append_varint_field(&mut login_time, 1, u64::from(now));
+    append_varint_field(&mut login_time, 2, u64::from(now.saturating_sub(3600)));
+    NetSocketFrameCodec::write(
+        stream,
+        0,
+        &Response::new("user.UpdateLoginTime", login_time).encode_push(now),
+    )
+    .await?;
+
+    let mut server_time = Vec::new();
+    append_varint_field(&mut server_time, 1, u64::from(now));
+    append_varint_field(&mut server_time, 2, u64::from(now));
+    NetSocketFrameCodec::write(
+        stream,
+        0,
+        &Response::new("user.UpdateSvrTime", server_time).encode_push(now),
+    )
+    .await?;
+
+    macro_rules! write_payload {
+        ($method:expr, $payload:expr $(,)?) => {
+            write_typed_bootstrap_push(stream, $method, $payload, now).await?;
+        };
+    }
+
+    write_payload!(
+        "user.GetUserInfo",
+        UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+    );
+
+    for (method, payload) in [
+        (
+            "build.BuildsInfo",
+            building_handler::typed_construction_info_payload(account, now),
+        ),
+        (
+            "bathroom.BathroomInfo",
+            progression_handler::bathroom_info_payload_from_typed(account),
+        ),
+        (
+            "study.GetStudyInfo",
+            progression_handler::study_info_payload_from_typed(account, now),
+        ),
+        (
+            "task.TaskInfo",
+            task_info_payload_from_typed_account(account, task_catalog),
+        ),
+    ] {
+        write_payload!(method, payload);
+    }
+
+    write_payload!(
+        "bag.UpdateBagData",
+        BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+    );
+    write_payload!(
+        "fashion.updateData",
+        FashionListCodec::encode(&fashion_list_from_typed_account(account, fashion_catalog)),
+    );
+    write_payload!(
+        "equip.UpdateEquipBagData",
+        EquipListCodec::encode(&equip_list_from_typed_account(account)),
+    );
+    write_payload!(
+        "hero.UpdateHeroBagData",
+        HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+    );
+    write_payload!(
+        "building.UpdateBuildingInfo",
+        UserBuildingInfoCodec::encode(&building_info_from_typed_account(account, now)),
+    );
+    write_payload!(
+        "tactic.GetHerosTactic",
+        FleetInfoCodec::encode(&fleet_info_from_typed_account(account)),
+    );
+    write_payload!("shop.UpdateShopInfo", shop_info_payload(shop_catalog),);
+    write_payload!("recharge.RechargeInfo", vec![0x1A, 0x00]);
+    write_payload!(
+        "buildship.BuildShipInfo",
+        buildship_info_payload_from_typed(account, now),
+    );
+    write_payload!(
+        "presetfleet.PresetFleetsInfo",
+        PresetFleetCodec::encode(&preset_fleet_info_from_typed_account(account)),
+    );
+
+    let template_ids = account
+        .dock
+        .heroes
+        .values()
+        .map(|hero| hero.template_id.get() as i32)
+        .collect::<Vec<_>>();
+    for (method, payload) in [
+        (
+            "illustrate.IllustrateInfo",
+            illustrate_info_payload_for_templates(&template_ids, handbook_behaviours),
+        ),
+        ("illustrate.OldIllustrateInfo", Vec::new()),
+        (
+            "illustrate.Memory",
+            story_memory_payload(chapter_catalog.map(|catalog| catalog.memories.as_slice())),
+        ),
+    ] {
+        write_payload!(method, payload);
+    }
+
+    let talent_catalog = current_talent_catalog();
+    write_payload!(
+        "talentTree.TalentTreeAllList",
+        talent_tree_payload_typed(account, &talent_catalog),
+    );
+    Ok(())
+}
+
 pub(super) async fn process_game_login_frame_payload_with_catalogs_typed_mut<S>(
     stream: &mut S,
     state: &ServerState,
@@ -129,6 +283,8 @@ where
         battle: battle_catalog,
         ..
     } = *catalogs;
+    #[cfg(not(test))]
+    let _ = (fashion_catalog, handbook_behaviours, hero_memories);
 
     // Keep immutable view independent from mutable account so profile mutations can update
     // the same request snapshot before response pushes are encoded.
@@ -157,7 +313,9 @@ where
     }
     let method = GameMethod::parse(&request.method);
     let is_user_info = method.is("user.GetUserInfo");
+    #[cfg(test)]
     let is_user_login = method.is("user.UserLogin");
+    #[cfg(test)]
     let is_profile_update = matches!(
         request.method.as_str(),
         "user.SetUserSecretary"
@@ -1738,6 +1896,7 @@ where
             ret = Some(Vec::new());
         }
     }
+    #[cfg(test)]
     if is_user_login && typed_account.is_none() {
         let now = current_unix_seconds();
         let fallback_catalog;
@@ -1905,6 +2064,7 @@ where
         NetSocketFrameCodec::write(stream, 0, &push).await?;
     }
     NetSocketFrameCodec::write(stream, 0, &response).await?;
+    #[cfg(test)]
     if is_profile_update {
         if let Some(account) = account.as_deref() {
             let push = TMessageCodec::encode_response(&TResponse {
@@ -1919,6 +2079,7 @@ where
             NetSocketFrameCodec::write(stream, 0, &push).await?;
         }
     }
+    #[cfg(test)]
     if is_user_info && (account.is_some() || typed_account.is_some()) {
         let account = account.as_deref().unwrap_or(&Value::Null);
         let typed_account_view = typed_account.as_deref();
@@ -2144,6 +2305,13 @@ where
             ..TResponse::default()
         });
         NetSocketFrameCodec::write(stream, 0, &push).await?;
+    }
+    #[cfg(not(test))]
+    if is_user_info {
+        let typed = typed_account
+            .as_deref()
+            .expect("typed account required for production user bootstrap");
+        write_typed_user_info_bootstrap(stream, state, typed, catalogs).await?;
     }
     #[cfg(test)]
     if let Some((copy_id, grade, battle_time, _first_pass, ex_buffs, exp_rewards)) = pass_details {

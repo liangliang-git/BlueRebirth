@@ -1,7 +1,9 @@
+#[cfg(test)]
 use serde_json::Value;
 
 use super::*;
 
+#[cfg(test)]
 pub(super) fn buildship_info_payload(account: Option<&Value>, now: u32) -> Vec<u8> {
     const ENABLED_POOLS: &[u32] = &[106, 109, 124, 150, 151, 152, 154];
     let mut output = Vec::new();
@@ -107,6 +109,7 @@ pub(super) fn expand_build_drop(catalog: &BuildShipCatalog, drop_id: i32) -> Vec
     out
 }
 
+#[cfg(test)]
 pub(super) fn append_buildship_count_map(
     output: &mut Vec<u8>,
     account: Option<&Value>,
@@ -131,6 +134,7 @@ pub(super) fn append_buildship_count_map(
     }
 }
 
+#[cfg(test)]
 pub(super) fn append_buildship_reward_map(
     output: &mut Vec<u8>,
     account: Option<&Value>,
@@ -163,6 +167,7 @@ pub(super) fn append_buildship_reward_map(
     }
 }
 
+#[cfg(test)]
 pub(super) fn snake_case_key(key: &str) -> String {
     let mut output = String::new();
     for (index, ch) in key.chars().enumerate() {

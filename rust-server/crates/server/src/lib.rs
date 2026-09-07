@@ -98,6 +98,7 @@ use mopup_state::*;
 use projection::*;
 use protocol_payload::*;
 use shop_state::*;
+#[cfg(test)]
 use study_state::*;
 use task_state::*;
 #[cfg(test)]
