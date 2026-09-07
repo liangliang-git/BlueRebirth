@@ -1212,6 +1212,40 @@ impl ProfileStore {
                         }
                     }
                 }
+            } else if activity_id == "worldEvent" {
+                match progress_kind.as_str() {
+                    "progress" => account.world_event.progress = value,
+                    "userProgress" => account.world_event.user_progress = value,
+                    key if key.starts_with("stage:") => {
+                        if let Ok(stage) = key[6..].parse::<u64>() {
+                            account.world_event.stages.push(stage);
+                        }
+                    }
+                    key if key.starts_with("claim:") => {
+                        let mut parts = key.split(':');
+                        let Some(event_id) = parts
+                            .next()
+                            .and_then(|_| parts.next())
+                            .and_then(|value| value.parse::<u64>().ok())
+                        else {
+                            continue;
+                        };
+                        let Some(stage_id) =
+                            parts.next().and_then(|value| value.parse::<u64>().ok())
+                        else {
+                            continue;
+                        };
+                        if value != 0 {
+                            account
+                                .world_event
+                                .claimed_stages_by_event
+                                .entry(event_id)
+                                .or_default()
+                                .insert(stage_id);
+                        }
+                    }
+                    _ => {}
+                }
             } else if activity_id == "buildShip" {
                 let mut parts = progress_kind.split(':');
                 match parts.next() {
@@ -2635,6 +2669,37 @@ impl ProfileStore {
                     profile.id.as_str(),
                     progress_kind,
                     typed_i64(value, "food compose state")?,
+                    timestamp(),
+                ],
+            )?;
+        }
+        let mut world_event_progress = vec![
+            ("progress".to_owned(), account.world_event.progress),
+            ("userProgress".to_owned(), account.world_event.user_progress),
+        ];
+        world_event_progress.extend(
+            account
+                .world_event
+                .stages
+                .iter()
+                .map(|stage| (format!("stage:{stage}"), 1)),
+        );
+        world_event_progress.extend(account.world_event.claimed_stages_by_event.iter().flat_map(
+            |(event_id, stages)| {
+                stages
+                    .iter()
+                    .map(move |stage| (format!("claim:{event_id}:{stage}"), 1))
+            },
+        ));
+        for (progress_kind, value) in world_event_progress {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'worldEvent', ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    progress_kind,
+                    typed_i64(value, "world event state")?,
                     timestamp(),
                 ],
             )?;

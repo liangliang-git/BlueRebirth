@@ -503,6 +503,14 @@ pub struct FoodComposeState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldEventState {
+    pub progress: u64,
+    pub user_progress: u64,
+    pub stages: Vec<u64>,
+    pub claimed_stages_by_event: BTreeMap<u64, BTreeSet<u64>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InviteScoreState {
     pub have_got_ssr: u64,
     pub have_got_fashion: u64,
@@ -671,6 +679,8 @@ pub struct AccountState {
     pub ship_task: ShipTaskState,
     #[serde(default)]
     pub food_compose: FoodComposeState,
+    #[serde(default)]
+    pub world_event: WorldEventState,
     #[serde(default)]
     pub exchange_times: BTreeMap<u64, u32>,
     #[serde(default)]

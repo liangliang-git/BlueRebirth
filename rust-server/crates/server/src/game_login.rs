@@ -968,6 +968,19 @@ where
             }
             result.into_payload()
         }
+        _ if method.is_family(MethodFamily::WorldEvent) && typed_account.is_some() => {
+            let result = extended_handler::handle_typed_world_event(
+                state,
+                typed_account.as_mut().expect("typed world event account"),
+                request.method.as_str(),
+                request_args,
+                &mut pre_pushes,
+            );
+            if let HandlerResult::Error(error) = &result {
+                handler_error = Some(error.clone());
+            }
+            result.into_payload()
+        }
         _ if extended_handler::handles(request.method.as_str()) => {
             let mut context = GameLoginRequestContext {
                 state,
@@ -2476,7 +2489,6 @@ fn legacy_only_method(method: &str) -> bool {
             | MethodFamily::Magazine
             | MethodFamily::InteractionItem
             | MethodFamily::MopUp
-            | MethodFamily::WorldEvent
     )
 }
 

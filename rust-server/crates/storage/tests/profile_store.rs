@@ -497,6 +497,15 @@ fn typed_repository_transaction_commits_domain_mutation() {
     account.exchange_times.insert(7001, 3);
     account.food_compose.last_recipe_id = 41;
     account.food_compose.recipes.insert(41, 2);
+    account.world_event.progress = 8;
+    account.world_event.user_progress = 6;
+    account.world_event.stages.push(3);
+    account
+        .world_event
+        .claimed_stages_by_event
+        .entry(5001)
+        .or_default()
+        .insert(3);
     account
         .ship_task
         .tasks
@@ -630,6 +639,14 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(loaded.exchange_times.get(&7001), Some(&3));
     assert_eq!(loaded.food_compose.last_recipe_id, 41);
     assert_eq!(loaded.food_compose.recipes.get(&41), Some(&2));
+    assert_eq!(loaded.world_event.progress, 8);
+    assert_eq!(loaded.world_event.user_progress, 6);
+    assert_eq!(loaded.world_event.stages, vec![3]);
+    assert!(loaded
+        .world_event
+        .claimed_stages_by_event
+        .get(&5001)
+        .is_some_and(|stages| stages.contains(&3)));
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())

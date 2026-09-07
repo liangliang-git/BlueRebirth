@@ -179,6 +179,109 @@ pub(super) fn handle_typed_food_compose(
     }
 }
 
+pub(super) fn handle_typed_world_event(
+    state: &ServerState,
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    pre_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    let catalog = gameplay_catalog();
+    match method {
+        "worldevent.Progress" => reply(method, typed_world_event_server_progress_payload(account)),
+        "worldevent.UserStage" => reply(method, typed_world_event_stage_payload(account)),
+        "worldeventrank.Rank" => reply(method, typed_world_event_rank_payload(account)),
+        "worldevent.StageReward" => {
+            let stage_id = decode_varint_field(request_args, 1).max(0) as u64;
+            let Some((event_id, event)) = active_world_event(catalog) else {
+                return reply(method, encode_rewards_list(&[]));
+            };
+            let reward_id = event
+                .get("server_stage_rewards")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find_map(|row| {
+                    let row = row.as_array()?;
+                    (row.first()?.as_i64()? == i64::try_from(stage_id).ok()?)
+                        .then(|| row.get(1)?.as_i64()?.try_into().ok())
+                        .flatten()
+                })
+                .unwrap_or_default();
+            if event_id <= 0
+                || stage_id == 0
+                || account
+                    .world_event
+                    .user_progress
+                    .max(account.world_event.progress)
+                    < stage_id
+                || reward_id <= 0
+                || account
+                    .world_event
+                    .claimed_stages_by_event
+                    .get(&(event_id as u64))
+                    .is_some_and(|stages| stages.contains(&stage_id))
+            {
+                return reply(method, encode_rewards_list(&[]));
+            }
+            let rewards = catalog
+                .rewards_by_id
+                .get(&reward_id)
+                .cloned()
+                .unwrap_or_default();
+            if rewards.is_empty() || !can_grant_typed_task_rewards(account, &rewards) {
+                return invalid("world event reward is unsupported");
+            }
+            for reward in &rewards {
+                let _ = grant_typed_task_reward(account, reward);
+            }
+            account
+                .world_event
+                .claimed_stages_by_event
+                .entry(event_id as u64)
+                .or_default()
+                .insert(stage_id);
+            append_method_push(
+                pre_pushes,
+                "user.UpdateUserInfo",
+                UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            reply(method, encode_rewards_list(&rewards))
+        }
+        _ => HandlerResult::Empty,
+    }
+}
+
+fn typed_world_event_server_progress_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(&mut output, 1, account.world_event.progress);
+    append_varint_field(&mut output, 2, 1);
+    output
+}
+
+fn typed_world_event_rank_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let mut node = Vec::new();
+    append_varint_field(&mut node, 1, 1);
+    append_varint_field(&mut node, 2, account.world_event.progress);
+    append_varint_field(&mut node, 3, 1);
+    let mut output = Vec::new();
+    append_message_field(&mut output, 1, &node);
+    output
+}
+
+fn typed_world_event_stage_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let mut output = Vec::new();
+    for stage in &account.world_event.stages {
+        append_varint_field(&mut output, 1, *stage);
+    }
+    output
+}
+
 fn typed_food_info_payload(
     account: &blueoath_domain::AccountState,
     catalog: &GameplayCatalog,
