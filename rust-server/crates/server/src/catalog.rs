@@ -628,6 +628,43 @@ pub(super) struct FoodRecipeConfig {
     pub(super) reward_id: i32,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct DropEntry {
+    pub(super) goods_type: i32,
+    pub(super) item_id: i32,
+    pub(super) min: i32,
+    pub(super) max: i32,
+    pub(super) rate: i64,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct DropItemConfig {
+    pub(super) entries: Vec<DropEntry>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct PaperCutFormulaConfig {
+    pub(super) id: i32,
+    pub(super) materials: Vec<i32>,
+    pub(super) drop_id: i32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct AnniversaryVideoConfig {
+    pub(super) reward_id: i32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct MagazineInfoConfig {
+    pub(super) rewards: Vec<i32>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct InteractionItemConfig {
+    pub(super) reward_id: i32,
+    pub(super) drop_id: i32,
+}
+
 #[derive(Clone, Debug, Default)]
 pub(super) struct GameplayCatalog {
     pub(super) rewards_by_id: std::collections::BTreeMap<i32, Vec<ShopReward>>,
@@ -641,9 +678,9 @@ pub(super) struct GameplayCatalog {
     pub(super) parameters: std::collections::BTreeMap<i32, Value>,
     pub(super) activity_extract: std::collections::BTreeMap<i32, Value>,
     pub(super) activity_extract_ur: std::collections::BTreeMap<i32, Value>,
-    pub(super) anniversary_videos: std::collections::BTreeMap<i32, Value>,
-    pub(super) paper_cut_formulas: std::collections::BTreeMap<i32, Value>,
-    pub(super) drop_items: std::collections::BTreeMap<i32, Value>,
+    pub(super) anniversary_videos: std::collections::BTreeMap<i32, AnniversaryVideoConfig>,
+    pub(super) paper_cut_formulas: std::collections::BTreeMap<i32, PaperCutFormulaConfig>,
+    pub(super) drop_items: std::collections::BTreeMap<i32, DropItemConfig>,
     pub(super) exchanges: std::collections::BTreeMap<i32, ExchangeConfig>,
     pub(super) food_recipes: std::collections::BTreeMap<i32, FoodRecipeConfig>,
     pub(super) testship_tasks: std::collections::BTreeMap<i32, Value>,
@@ -657,10 +694,10 @@ pub(super) struct GameplayCatalog {
     pub(super) guild_war_base_info: std::collections::BTreeMap<i32, Value>,
     pub(super) guild_war_rank: std::collections::BTreeMap<i32, Value>,
     pub(super) guild_war_rewards: std::collections::BTreeMap<i32, Value>,
-    pub(super) magazine_info: std::collections::BTreeMap<i32, Value>,
+    pub(super) magazine_info: std::collections::BTreeMap<i32, MagazineInfoConfig>,
     pub(super) magazine_pages: std::collections::BTreeMap<i32, Value>,
     pub(super) magazine_tasks: std::collections::BTreeMap<i32, Value>,
-    pub(super) interaction_items: std::collections::BTreeMap<i32, Value>,
+    pub(super) interaction_items: std::collections::BTreeMap<i32, InteractionItemConfig>,
     pub(super) interaction_item_bags: std::collections::BTreeMap<i32, Value>,
     pub(super) interaction_figures: std::collections::BTreeMap<i32, Value>,
     pub(super) guild_box_scores: std::collections::BTreeMap<i32, Value>,

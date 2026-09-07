@@ -1,5 +1,3 @@
-use serde_json::Value;
-
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
@@ -246,10 +244,8 @@ fn magazine_reward_id(catalog: &GameplayCatalog, reward_key: i32) -> i32 {
     catalog
         .magazine_info
         .values()
-        .filter_map(|info| info.get("rewards").and_then(Value::as_array))
-        .flat_map(|values| values.iter().filter_map(Value::as_i64))
+        .flat_map(|info| info.rewards.iter().copied())
         .nth(usize::try_from(reward_key.saturating_sub(1)).unwrap_or(usize::MAX))
-        .and_then(|value| i32::try_from(value).ok())
         .unwrap_or_default()
 }
 
@@ -257,31 +253,27 @@ fn interaction_reward_defs(catalog: &GameplayCatalog, item_id: i32) -> Vec<ShopR
     let Some(item) = catalog.interaction_items.get(&item_id) else {
         return Vec::new();
     };
-    if let Some(reward_id) = json_i32(item, "reward").filter(|id| *id > 0) {
+    if item.reward_id > 0 {
         return catalog
             .rewards_by_id
-            .get(&reward_id)
+            .get(&item.reward_id)
             .cloned()
             .unwrap_or_default();
     }
-    let Some(drop_id) = json_i32(item, "drop_id").filter(|id| *id > 0) else {
+    let Some(drop) = catalog
+        .drop_items
+        .get(&item.drop_id)
+        .filter(|_| item.drop_id > 0)
+    else {
         return Vec::new();
     };
-    catalog
-        .drop_items
-        .get(&drop_id)
-        .and_then(|drop| drop.get("drop"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|row| {
-            let row = row.as_array()?;
-            Some(ShopReward {
-                goods_type: i32::try_from(row.first()?.as_i64()?).ok()?,
-                item_id: i32::try_from(row.get(1)?.as_i64()?).ok()?,
-                num: i32::try_from(row.get(2)?.as_i64()?).ok()?,
-                instance_id: 0,
-            })
+    drop.entries
+        .iter()
+        .map(|entry| ShopReward {
+            goods_type: entry.goods_type,
+            item_id: entry.item_id,
+            num: entry.min,
+            instance_id: 0,
         })
         .filter(|reward| reward.goods_type > 0 && reward.item_id > 0 && reward.num > 0)
         .collect()

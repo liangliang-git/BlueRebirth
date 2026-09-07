@@ -738,55 +738,30 @@ fn handle_typed_paper_cut(
     let materials = request.material_ids;
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     let Some(formula_config) = catalog.paper_cut_formulas.values().find(|config| {
-        config
-            .get("formula")
-            .and_then(Value::as_array)
-            .is_some_and(|values| {
-                if values.len() != materials.len() {
-                    return false;
-                }
-                let mut configured = values
-                    .iter()
-                    .filter_map(Value::as_i64)
-                    .filter_map(|value| i32::try_from(value).ok())
-                    .collect::<Vec<_>>();
-                if configured.len() != materials.len() {
-                    return false;
-                }
-                configured.sort_unstable();
-                let mut requested = materials.clone();
-                requested.sort_unstable();
-                configured == requested
-            })
+        let mut configured = config.materials.clone();
+        let mut requested = materials.clone();
+        configured.sort_unstable();
+        requested.sort_unstable();
+        configured == requested
     }) else {
         return HandlerResult::Error(GameError::InvalidRequest(
             "paper cut formula is not configured",
         ));
     };
-    let formula = json_i32(formula_config, "id").unwrap_or_default();
-    let drop_id = json_i32(formula_config, "drop_id").unwrap_or_default();
+    let formula = formula_config.id;
     let Some(drop) = catalog
         .drop_items
-        .get(&drop_id)
-        .and_then(|config| config.get("drop"))
-        .and_then(Value::as_array)
-        .and_then(|values| values.first())
-        .and_then(Value::as_array)
+        .get(&formula_config.drop_id)
+        .and_then(|config| config.entries.first())
     else {
         return HandlerResult::Error(GameError::InvalidState(
             "paper cut reward is not configured",
         ));
     };
-    let goods_type =
-        i32::try_from(drop.first().and_then(Value::as_i64).unwrap_or_default()).unwrap_or_default();
-    let item_id =
-        i32::try_from(drop.get(1).and_then(Value::as_i64).unwrap_or_default()).unwrap_or_default();
-    let amount =
-        i32::try_from(drop.get(2).and_then(Value::as_i64).unwrap_or_default()).unwrap_or_default();
     let reward = ShopReward {
-        goods_type,
-        item_id,
-        num: amount,
+        goods_type: drop.goods_type,
+        item_id: drop.item_id,
+        num: drop.min,
         instance_id: 0,
     };
     let mut required = std::collections::BTreeMap::<blueoath_domain::TemplateId, u64>::new();
@@ -864,11 +839,9 @@ fn handle_typed_video_set(
             "activity video is not configured",
         ));
     };
-    let rewards = video
-        .get("reward")
-        .and_then(Value::as_i64)
-        .and_then(|reward_id| i32::try_from(reward_id).ok())
-        .and_then(|reward_id| catalog.rewards_by_id.get(&reward_id))
+    let rewards = catalog
+        .rewards_by_id
+        .get(&video.reward_id)
         .cloned()
         .unwrap_or_default();
     if !task_state::can_grant_typed_task_rewards(account, &rewards) {
@@ -1805,44 +1778,27 @@ fn activity_fashion_drop_reward(
         if depth > 8 {
             return None;
         }
-        let rows = catalog
-            .drop_items
-            .get(&drop_id)?
-            .get("drop")
-            .and_then(Value::as_array)?;
-        let entries = rows
-            .iter()
-            .filter_map(|row| {
-                let row = row.as_array()?;
-                let goods_type = i32::try_from(row.first()?.as_i64()?).ok()?;
-                let item_id = i32::try_from(row.get(1)?.as_i64()?).ok()?;
-                let min = i32::try_from(row.get(2)?.as_i64()?).ok()?;
-                let max = i32::try_from(row.get(3)?.as_i64()?).ok()?;
-                let rate = row.get(4)?.as_i64()?;
-                (goods_type > 0 && item_id > 0 && min > 0 && max >= min && rate > 0)
-                    .then_some((goods_type, item_id, min, max, rate))
-            })
-            .collect::<Vec<_>>();
-        let total = entries.iter().map(|entry| entry.4).sum::<i64>();
+        let entries = catalog.drop_items.get(&drop_id)?.entries.clone();
+        let total = entries.iter().map(|entry| entry.rate).sum::<i64>();
         if total <= 0 {
             return None;
         }
         let mut cursor = sequence.rem_euclid(total);
-        for (goods_type, item_id, min, max, rate) in entries {
-            if cursor < rate {
-                if goods_type == 4 {
-                    return resolve(catalog, item_id, sequence, depth + 1);
+        for entry in entries {
+            if cursor < entry.rate {
+                if entry.goods_type == 4 {
+                    return resolve(catalog, entry.item_id, sequence, depth + 1);
                 }
-                let span = i64::from(max.saturating_sub(min)).saturating_add(1);
-                let num = min.saturating_add((sequence.rem_euclid(span)) as i32);
+                let span = i64::from(entry.max.saturating_sub(entry.min)).saturating_add(1);
+                let num = entry.min.saturating_add((sequence.rem_euclid(span)) as i32);
                 return Some(ShopReward {
-                    goods_type,
-                    item_id,
+                    goods_type: entry.goods_type,
+                    item_id: entry.item_id,
                     num,
                     instance_id: 0,
                 });
             }
-            cursor -= rate;
+            cursor -= entry.rate;
         }
         None
     }

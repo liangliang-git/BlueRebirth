@@ -59,6 +59,43 @@ fn config_triplets(value: &Value, key: &str) -> Vec<(i32, i32, i32)> {
         .collect()
 }
 
+fn config_i32_array(value: &Value, key: &str) -> Vec<i32> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_i64)
+        .filter_map(|value| i32::try_from(value).ok())
+        .collect()
+}
+
+fn config_drop_entries(value: &Value) -> Vec<DropEntry> {
+    value
+        .get("drop")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            let row = row.as_array()?;
+            Some(DropEntry {
+                goods_type: i32::try_from(row.first()?.as_i64()?).ok()?,
+                item_id: i32::try_from(row.get(1)?.as_i64()?).ok()?,
+                min: i32::try_from(row.get(2)?.as_i64()?).ok()?,
+                max: i32::try_from(row.get(3)?.as_i64()?).ok()?,
+                rate: row.get(4)?.as_i64()?,
+            })
+        })
+        .filter(|entry| {
+            entry.goods_type > 0
+                && entry.item_id > 0
+                && entry.min > 0
+                && entry.max >= entry.min
+                && entry.rate > 0
+        })
+        .collect()
+}
+
 fn read_json_config_rows(path: &Path) -> Option<Vec<(i32, Value)>> {
     let json_path = path.with_extension("json");
     let bytes = std::fs::read(json_path).ok()?;
@@ -1137,6 +1174,64 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
             )
         })
         .collect();
+    let anniversary_videos = rows("config_anniversary_video.db")
+        .into_iter()
+        .map(|(id, value)| {
+            (
+                id,
+                AnniversaryVideoConfig {
+                    reward_id: json_i32(&value, "reward").unwrap_or_default(),
+                },
+            )
+        })
+        .collect();
+    let paper_cut_formulas = rows("config_interaction_paper_cut_fomula.db")
+        .into_iter()
+        .map(|(id, value)| {
+            (
+                id,
+                PaperCutFormulaConfig {
+                    id: json_i32(&value, "id").unwrap_or(id),
+                    materials: config_i32_array(&value, "formula"),
+                    drop_id: json_i32(&value, "drop_id").unwrap_or_default(),
+                },
+            )
+        })
+        .collect();
+    let drop_items = rows("config_drop_item.db")
+        .into_iter()
+        .map(|(id, value)| {
+            (
+                id,
+                DropItemConfig {
+                    entries: config_drop_entries(&value),
+                },
+            )
+        })
+        .collect();
+    let magazine_info = rows("config_magazine_info.db")
+        .into_iter()
+        .map(|(id, value)| {
+            (
+                id,
+                MagazineInfoConfig {
+                    rewards: config_i32_array(&value, "rewards"),
+                },
+            )
+        })
+        .collect();
+    let interaction_items = rows("config_interaction_item.db")
+        .into_iter()
+        .map(|(id, value)| {
+            (
+                id,
+                InteractionItemConfig {
+                    reward_id: json_i32(&value, "reward").unwrap_or_default(),
+                    drop_id: json_i32(&value, "drop_id").unwrap_or_default(),
+                },
+            )
+        })
+        .collect();
     GameplayCatalog {
         rewards_by_id: load_reward_definitions(&dir),
         battlepass_levels: battlepass_levels("config_battlepass_level.db"),
@@ -1149,9 +1244,9 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
         parameters: rows("config_parameter.db"),
         activity_extract: rows("config_activity_extract.db"),
         activity_extract_ur: rows("config_activity_extract_ur.db"),
-        anniversary_videos: rows("config_anniversary_video.db"),
-        paper_cut_formulas: rows("config_interaction_paper_cut_fomula.db"),
-        drop_items: rows("config_drop_item.db"),
+        anniversary_videos,
+        paper_cut_formulas,
+        drop_items,
         exchanges,
         food_recipes,
         testship_tasks: rows("config_testship_task.db"),
@@ -1168,10 +1263,10 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
         guild_war_base_info: rows("config_guildwar_base_info.db"),
         guild_war_rank: rows("config_guildwar_rank.db"),
         guild_war_rewards: rows("config_guildwar_reward.db"),
-        magazine_info: rows("config_magazine_info.db"),
+        magazine_info,
         magazine_pages: rows("config_magazine_page.db"),
         magazine_tasks: rows("config_task_magazine.db"),
-        interaction_items: rows("config_interaction_item.db"),
+        interaction_items,
         interaction_item_bags: rows("config_interaction_item_bag.db"),
         interaction_figures: rows("config_interaction_figurte.db"),
         guild_box_scores: rows("config_guildboxscore.db"),
