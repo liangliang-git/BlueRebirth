@@ -218,6 +218,56 @@ pub struct HeroChangeNameRequest {
     pub name: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroExpItemRequest {
+    pub template_id: i32,
+    pub amount: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroAddExpRequest {
+    pub hero_id: u64,
+    pub items: Vec<HeroExpItemRequest>,
+}
+
+impl Decode for HeroAddExpRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let mut reader = PbReader::new(payload);
+        let mut hero_id = None;
+        let mut items = Vec::new();
+        while let Some((field, wire)) = reader.next_field()? {
+            match (field, wire) {
+                (1, 0) => {
+                    if hero_id.is_some() {
+                        return Err(ProtocolError::Invalid("hero exp has duplicate hero id"));
+                    }
+                    hero_id = Some(reader.read_varint()?);
+                }
+                (2, 2) => {
+                    if items.len() >= 99 {
+                        return Err(ProtocolError::Invalid("hero exp has too many items"));
+                    }
+                    let fields = decode_varint_fields(reader.read_bytes()?)?;
+                    items.push(HeroExpItemRequest {
+                        template_id: required_field(
+                            &fields,
+                            2,
+                            "hero exp item is missing template id",
+                        )?,
+                        amount: required_field(&fields, 3, "hero exp item is missing amount")?,
+                    });
+                }
+                (_, wire) => reader.skip(wire)?,
+            }
+        }
+        let hero_id = hero_id.ok_or(ProtocolError::Invalid("hero exp is missing hero id"))?;
+        if hero_id == 0 || items.is_empty() {
+            return Err(ProtocolError::Invalid("hero exp request is invalid"));
+        }
+        Ok(Self { hero_id, items })
+    }
+}
+
 impl Decode for HeroChangeNameRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

@@ -344,15 +344,19 @@ pub(super) fn handle_typed(
             let Some(hero_level_catalog) = hero_level_catalog else {
                 return HandlerResult::Empty;
             };
-            let (hero_id, items) = decode_hero_add_exp_request(request_args);
-            if hero_id == 0 || items.is_empty() || items.len() > 99 {
+            let Ok(request) = HeroAddExpRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "hero experience request is invalid",
                 ));
-            }
-            let Some(hero_id) = blueoath_domain::HeroId::new(hero_id).ok() else {
+            };
+            let Some(hero_id) = blueoath_domain::HeroId::new(request.hero_id).ok() else {
                 return HandlerResult::Error(GameError::InvalidRequest("hero id is invalid"));
             };
+            let items = request
+                .items
+                .iter()
+                .map(|item| (item.template_id, item.amount))
+                .collect::<Vec<_>>();
             if !account.dock.heroes.contains_key(&hero_id) {
                 return HandlerResult::Error(GameError::InvalidRequest("hero was not found"));
             }
