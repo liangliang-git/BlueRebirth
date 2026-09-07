@@ -269,7 +269,7 @@ fn account_directory(server_state: &ServerState, current: &Value) -> Vec<(u64, V
     let mut entries = server_state
         .social_store
         .as_ref()
-        .and_then(|store| store.list_legacy_accounts().ok())
+        .and_then(|store| store.list().ok())
         .into_iter()
         .flatten()
         .filter_map(|(_, account)| account_uid(&account).map(|uid| (uid, account)))
@@ -497,7 +497,8 @@ mod tests {
         ));
         let store = blueoath_storage::ProfileStore::open(&root).unwrap();
         store
-            .save_legacy_account(
+            .legacy_json_accounts()
+            .save(
                 "lower",
                 &json!({
                     "character": {"uid": 1, "name": "Lower"},
@@ -506,7 +507,8 @@ mod tests {
             )
             .unwrap();
         store
-            .save_legacy_account(
+            .legacy_json_accounts()
+            .save(
                 "higher",
                 &json!({
                     "character": {"uid": 2, "name": "Higher"},

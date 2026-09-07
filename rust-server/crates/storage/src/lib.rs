@@ -58,6 +58,16 @@ pub struct ProfileStore {
     db_path: PathBuf,
 }
 
+/// Transitional store for the pre-refactor JSON account table.
+///
+/// Kept separate from `ProfileStore` so typed repository callers cannot
+/// accidentally fall back to the old persistence path. Delete with the
+/// `accounts` table after feature handlers finish migration.
+#[derive(Debug, Clone)]
+pub struct LegacyJsonAccountStore {
+    db_path: PathBuf,
+}
+
 impl ProfileStore {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, StorageError> {
         fs::create_dir_all(root.as_ref())?;
@@ -67,6 +77,12 @@ impl ProfileStore {
         let connection = store.connection()?;
         run_migrations(&connection)?;
         Ok(store)
+    }
+
+    pub fn legacy_json_accounts(&self) -> LegacyJsonAccountStore {
+        LegacyJsonAccountStore {
+            db_path: self.db_path.clone(),
+        }
     }
 
     pub fn load(&self, profile_id: &str) -> Result<Option<StoredProfile>, StorageError> {
@@ -121,21 +137,6 @@ impl ProfileStore {
             .query_map(params![profile_id], |row| row.get::<_, i32>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Some(StoredProfile { id, name, state }))
-    }
-
-    /// Transitional JSON snapshot read. New code must use `AccountRepository::load`.
-    pub fn load_legacy_account(&self, profile_id: &str) -> Result<Option<Value>, StorageError> {
-        let connection = self.connection()?;
-        connection
-            .query_row(
-                "SELECT account_json FROM accounts WHERE id = ?1",
-                params![profile_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?
-            .map(|json| serde_json::from_str(&json))
-            .transpose()
-            .map_err(StorageError::from)
     }
 
     pub fn load_typed_account(
@@ -565,102 +566,6 @@ impl ProfileStore {
         Ok(())
     }
 
-    /// Transitional JSON snapshot write. Remove after all feature handlers use typed state.
-    pub fn save_legacy_account(
-        &self,
-        profile_id: &str,
-        account: &Value,
-    ) -> Result<(), StorageError> {
-        self.save_legacy_account_with_revision(profile_id, account, None)
-            .map(|_| ())
-    }
-
-    pub fn load_legacy_account_with_revision(
-        &self,
-        profile_id: &str,
-    ) -> Result<Option<(Value, u64)>, StorageError> {
-        let connection = self.connection()?;
-        let account = connection
-            .query_row(
-                "SELECT account_json FROM accounts WHERE id = ?1",
-                params![profile_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        let Some(account_json) = account else {
-            return Ok(None);
-        };
-        let revision = connection
-            .query_row(
-                "SELECT revision FROM account_revisions WHERE profile_id = ?1",
-                params![profile_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?
-            .unwrap_or_default();
-        let revision = u64::try_from(revision)
-            .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, revision))?;
-        Ok(Some((serde_json::from_str(&account_json)?, revision)))
-    }
-
-    pub fn save_legacy_account_with_revision(
-        &self,
-        profile_id: &str,
-        account: &Value,
-        expected_revision: Option<u64>,
-    ) -> Result<u64, StorageError> {
-        if !is_valid_profile_id(profile_id) {
-            return Err(StorageError::InvalidProfileId);
-        }
-        let account_json = serde_json::to_string(account)?;
-        let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
-        let actual = transaction
-            .query_row(
-                "SELECT revision FROM account_revisions WHERE profile_id = ?1",
-                params![profile_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?
-            .unwrap_or_default();
-        let actual = u64::try_from(actual)
-            .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, actual))?;
-        if let Some(expected) = expected_revision {
-            if expected != actual {
-                return Err(StorageError::RevisionConflict { expected, actual });
-            }
-        }
-        let next_revision = actual.checked_add(1).ok_or_else(|| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
-                "account revision overflow",
-            )))
-        })?;
-        let sql_revision = i64::try_from(next_revision).map_err(|_| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
-                "account revision exceeds SQLite integer range",
-            )))
-        })?;
-        transaction.execute(
-            "INSERT INTO accounts(id, account_json, updated_utc)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(id) DO UPDATE SET
-               account_json = excluded.account_json,
-               updated_utc = excluded.updated_utc",
-            params![profile_id, account_json, timestamp()],
-        )?;
-        project_normalized_core(&transaction, profile_id, account)?;
-        transaction.execute(
-            "INSERT INTO account_revisions(profile_id, revision, updated_utc)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(profile_id) DO UPDATE SET
-               revision = excluded.revision,
-               updated_utc = excluded.updated_utc",
-            params![profile_id, sql_revision, timestamp()],
-        )?;
-        transaction.commit()?;
-        Ok(next_revision)
-    }
-
     fn save_typed_account_with_revision(
         &self,
         account: &AccountState,
@@ -898,8 +803,141 @@ impl ProfileStore {
         Ok(profiles)
     }
 
+    pub fn reset(&self, profile_id: &str) -> Result<(), StorageError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        transaction.execute("DELETE FROM profiles WHERE id = ?1", params![profile_id])?;
+        transaction.execute("DELETE FROM accounts WHERE id = ?1", params![profile_id])?;
+        transaction.execute(
+            "DELETE FROM account_revisions WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn connection(&self) -> Result<Connection, StorageError> {
+        let connection = Connection::open(&self.db_path)?;
+        connection.busy_timeout(std::time::Duration::from_secs(5))?;
+        connection.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;",
+        )?;
+        Ok(connection)
+    }
+}
+
+impl LegacyJsonAccountStore {
+    /// Transitional JSON snapshot read. New code must use `AccountRepository::load`.
+    pub fn load(&self, profile_id: &str) -> Result<Option<Value>, StorageError> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT account_json FROM accounts WHERE id = ?1",
+                params![profile_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|json| serde_json::from_str(&json))
+            .transpose()
+            .map_err(StorageError::from)
+    }
+
+    /// Transitional JSON snapshot write. Remove after all feature handlers use typed state.
+    pub fn save(&self, profile_id: &str, account: &Value) -> Result<(), StorageError> {
+        self.save_with_revision(profile_id, account, None)
+            .map(|_| ())
+    }
+
+    pub fn load_with_revision(
+        &self,
+        profile_id: &str,
+    ) -> Result<Option<(Value, u64)>, StorageError> {
+        let connection = self.connection()?;
+        let account = connection
+            .query_row(
+                "SELECT account_json FROM accounts WHERE id = ?1",
+                params![profile_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let Some(account_json) = account else {
+            return Ok(None);
+        };
+        let revision = connection
+            .query_row(
+                "SELECT revision FROM account_revisions WHERE profile_id = ?1",
+                params![profile_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .unwrap_or_default();
+        let revision = u64::try_from(revision)
+            .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, revision))?;
+        Ok(Some((serde_json::from_str(&account_json)?, revision)))
+    }
+
+    pub fn save_with_revision(
+        &self,
+        profile_id: &str,
+        account: &Value,
+        expected_revision: Option<u64>,
+    ) -> Result<u64, StorageError> {
+        if !is_valid_profile_id(profile_id) {
+            return Err(StorageError::InvalidProfileId);
+        }
+        let account_json = serde_json::to_string(account)?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let actual = transaction
+            .query_row(
+                "SELECT revision FROM account_revisions WHERE profile_id = ?1",
+                params![profile_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .unwrap_or_default();
+        let actual = u64::try_from(actual)
+            .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, actual))?;
+        if let Some(expected) = expected_revision {
+            if expected != actual {
+                return Err(StorageError::RevisionConflict { expected, actual });
+            }
+        }
+        let next_revision = actual.checked_add(1).ok_or_else(|| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                "account revision overflow",
+            )))
+        })?;
+        let sql_revision = i64::try_from(next_revision).map_err(|_| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                "account revision exceeds SQLite integer range",
+            )))
+        })?;
+        transaction.execute(
+            "INSERT INTO accounts(id, account_json, updated_utc)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET
+               account_json = excluded.account_json,
+               updated_utc = excluded.updated_utc",
+            params![profile_id, account_json, timestamp()],
+        )?;
+        project_normalized_core(&transaction, profile_id, account)?;
+        transaction.execute(
+            "INSERT INTO account_revisions(profile_id, revision, updated_utc)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(profile_id) DO UPDATE SET
+               revision = excluded.revision,
+               updated_utc = excluded.updated_utc",
+            params![profile_id, sql_revision, timestamp()],
+        )?;
+        transaction.commit()?;
+        Ok(next_revision)
+    }
+
     /// Transitional JSON directory read for legacy ranking features.
-    pub fn list_legacy_accounts(&self) -> Result<Vec<(String, Value)>, StorageError> {
+    pub fn list(&self) -> Result<Vec<(String, Value)>, StorageError> {
         let connection = self.connection()?;
         let mut statement =
             connection.prepare("SELECT id, account_json FROM accounts ORDER BY id")?;
@@ -912,19 +950,6 @@ impl ProfileStore {
             .into_iter()
             .map(|(id, account_json)| Ok((id, serde_json::from_str::<Value>(&account_json)?)))
             .collect()
-    }
-
-    pub fn reset(&self, profile_id: &str) -> Result<(), StorageError> {
-        let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
-        transaction.execute("DELETE FROM profiles WHERE id = ?1", params![profile_id])?;
-        transaction.execute("DELETE FROM accounts WHERE id = ?1", params![profile_id])?;
-        transaction.execute(
-            "DELETE FROM account_revisions WHERE profile_id = ?1",
-            params![profile_id],
-        )?;
-        transaction.commit()?;
-        Ok(())
     }
 
     fn connection(&self) -> Result<Connection, StorageError> {

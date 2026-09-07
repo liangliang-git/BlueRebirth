@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use blueoath_storage::{ProfileStore, StoredProfileState, StoredShip};
+use blueoath_storage::{LegacyJsonAccountStore, StoredProfileState, StoredShip};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
@@ -68,7 +68,7 @@ pub struct ServerState {
     pub affection_multiplier: f64,
     pub building_oil_multiplier: f64,
     pub building_gold_multiplier: f64,
-    pub(crate) social_store: Option<ProfileStore>,
+    pub(crate) social_store: Option<LegacyJsonAccountStore>,
     pub(crate) shared_social: Arc<Mutex<SharedSocialState>>,
 }
 

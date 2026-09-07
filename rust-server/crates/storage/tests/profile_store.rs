@@ -191,8 +191,9 @@ fn account_json_round_trips_without_losing_unknown_fields() {
         "futureField": {"preserve": true}
     });
 
-    store.save_legacy_account("one", &account).unwrap();
-    assert_eq!(store.load_legacy_account("one").unwrap(), Some(account));
+    let legacy = store.legacy_json_accounts();
+    legacy.save("one", &account).unwrap();
+    assert_eq!(legacy.load("one").unwrap(), Some(account));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -200,13 +201,15 @@ fn account_json_round_trips_without_losing_unknown_fields() {
 fn account_directory_lists_saved_accounts_in_stable_order() {
     let (store, root) = store();
     store
-        .save_legacy_account("two", &json!({"profileId": "two", "character": {"uid": 2}}))
+        .legacy_json_accounts()
+        .save("two", &json!({"profileId": "two", "character": {"uid": 2}}))
         .unwrap();
     store
-        .save_legacy_account("one", &json!({"profileId": "one", "character": {"uid": 1}}))
+        .legacy_json_accounts()
+        .save("one", &json!({"profileId": "one", "character": {"uid": 1}}))
         .unwrap();
 
-    let accounts = store.list_legacy_accounts().unwrap();
+    let accounts = store.legacy_json_accounts().list().unwrap();
     assert_eq!(accounts.len(), 2);
     assert_eq!(accounts[0].0, "one");
     assert_eq!(accounts[0].1["character"]["uid"], 1);
@@ -218,10 +221,17 @@ fn account_directory_lists_saved_accounts_in_stable_order() {
 #[test]
 fn invalid_account_profile_id_is_rejected() {
     let (store, root) = store();
-    let error = store.save_legacy_account("bad/id", &json!({})).unwrap_err();
+    let error = store
+        .legacy_json_accounts()
+        .save("bad/id", &json!({}))
+        .unwrap_err();
 
     assert!(matches!(error, StorageError::InvalidProfileId));
-    assert!(store.load_legacy_account("bad/id").unwrap().is_none());
+    assert!(store
+        .legacy_json_accounts()
+        .load("bad/id")
+        .unwrap()
+        .is_none());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -231,25 +241,24 @@ fn account_revision_supports_atomic_compare_and_swap() {
     let first = json!({"profileId": "one", "gold": 10});
     let second = json!({"profileId": "one", "gold": 20});
 
-    let revision = store
-        .save_legacy_account_with_revision("one", &first, None)
-        .unwrap();
+    let legacy = store.legacy_json_accounts();
+    let revision = legacy.save_with_revision("one", &first, None).unwrap();
     assert_eq!(revision, 1);
     assert_eq!(
-        store.load_legacy_account_with_revision("one").unwrap(),
+        legacy.load_with_revision("one").unwrap(),
         Some((first.clone(), 1))
     );
 
-    let next_revision = store
-        .save_legacy_account_with_revision("one", &second, Some(revision))
+    let next_revision = legacy
+        .save_with_revision("one", &second, Some(revision))
         .unwrap();
     assert_eq!(next_revision, 2);
 
-    let error = store
-        .save_legacy_account_with_revision("one", &first, Some(revision))
+    let error = legacy
+        .save_with_revision("one", &first, Some(revision))
         .unwrap_err();
     assert!(matches!(error, StorageError::RevisionConflict { .. }));
-    assert_eq!(store.load_legacy_account("one").unwrap(), Some(second));
+    assert_eq!(legacy.load("one").unwrap(), Some(second));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -427,7 +436,10 @@ fn account_snapshot_write_projects_core_rows_into_normalized_tables() {
         "tower": {"chapterId": 7, "floor": 5, "resetDay": 42}
     });
 
-    store.save_legacy_account("normalized", &account).unwrap();
+    store
+        .legacy_json_accounts()
+        .save("normalized", &account)
+        .unwrap();
     let typed = store
         .load_typed_account(&ProfileId::new("normalized").unwrap())
         .unwrap()
