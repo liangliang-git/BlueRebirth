@@ -1988,6 +1988,26 @@ impl Decode for BirthdayFeedRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActivityExtractDrawRequest {
+    pub draw_id: i32,
+    pub num: i32,
+}
+
+impl Decode for ActivityExtractDrawRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let draw_id = required_field(&fields, 1, "activity extract is missing draw id")?;
+        let num = optional_i32(&fields, 2, "activity extract has duplicate count")?;
+        if draw_id <= 0 || num < 0 {
+            return Err(ProtocolError::Invalid(
+                "activity extract request is invalid",
+            ));
+        }
+        Ok(Self { draw_id, num })
+    }
+}
+
 impl Decode for GuildTaskDonateRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

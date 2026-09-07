@@ -1,15 +1,16 @@
 use blueoath_protocol::{
-    BigActivityRankRequest, BirthdayFeedRequest, BuildShipRequest, BuildShipRewardRequest,
-    ChangeNameRequest, ChangeWorldChannelRequest, CopyAttackRequest, CopyPassRequest,
-    CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode,
-    FriendSearchRequest, FriendTargetRequest, GetBarrageByIdRequest, GuildActivityPresentRequest,
-    GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildTaskDonateRequest, GuildTaskIdRequest,
-    GuildTaskMemberRequest, HeroAwakenFinishRequest, HeroAwakenRewardRequest,
-    InviteRecordVersionRequest, InviteStateTypeRequest, OutpostBuildingRequest,
-    OutpostSetHeroRequest, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
-    SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
-    SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest,
-    SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
+    ActivityExtractDrawRequest, BigActivityRankRequest, BirthdayFeedRequest, BuildShipRequest,
+    BuildShipRewardRequest, ChangeNameRequest, ChangeWorldChannelRequest, CopyAttackRequest,
+    CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
+    DailyCopySelectExRequest, Decode, FriendSearchRequest, FriendTargetRequest,
+    GetBarrageByIdRequest, GuildActivityPresentRequest, GuildBoxAnonymousRequest,
+    GuildBoxIdRequest, GuildTaskDonateRequest, GuildTaskIdRequest, GuildTaskMemberRequest,
+    HeroAwakenFinishRequest, HeroAwakenRewardRequest, InviteRecordVersionRequest,
+    InviteStateTypeRequest, OutpostBuildingRequest, OutpostSetHeroRequest, ProtocolError,
+    SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest,
+    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, ShipTaskCurrentShipRequest,
+    ShipTaskRewardRequest, SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest,
+    TeachingUserRequest,
 };
 
 #[test]
@@ -346,6 +347,10 @@ fn decodes_typed_activity_requests() {
             team_id: 3,
             cake: 4,
         }
+    );
+    assert_eq!(
+        ActivityExtractDrawRequest::decode(&[0x08, 7, 0x10, 2]).unwrap(),
+        ActivityExtractDrawRequest { draw_id: 7, num: 2 }
     );
 }
 

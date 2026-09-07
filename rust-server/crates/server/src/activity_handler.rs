@@ -357,13 +357,13 @@ fn handle_typed_extract_draw(
     method: &str,
     request_args: &[u8],
 ) -> HandlerResult {
-    let draw_id = decode_varint_field(request_args, 1);
-    let num = decode_varint_field(request_args, 2).clamp(1, 10);
-    if draw_id <= 0 {
+    let Ok(request) = ActivityExtractDrawRequest::decode(request_args) else {
         return HandlerResult::Error(GameError::InvalidRequest(
-            "activity extract draw id is invalid",
+            "activity extract request is invalid",
         ));
-    }
+    };
+    let draw_id = request.draw_id;
+    let num = request.num.clamp(1, 10);
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     let ur = method == "activityextractur.Draw";
     let configs = if ur {
