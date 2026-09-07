@@ -3985,7 +3985,9 @@ fn trusted_task_event_advances_progress_and_completes() {
 fn typed_task_projection_matches_wire_shape_for_progress_and_completion() {
     let mut typed = NewAccountFactory::create(ProfileId::new("typed-task").unwrap(), "Task");
     typed.tasks.progress.insert(20, 1);
+    typed.tasks.task_types.insert(20, 2);
     typed.tasks.completed.insert(20);
+    typed.tasks.claimed.insert(20);
     let catalog = TaskCatalog {
         definitions: vec![TaskDefinition {
             task_type: 2,

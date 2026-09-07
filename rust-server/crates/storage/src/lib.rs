@@ -414,7 +414,7 @@ impl ProfileStore {
         }
 
         let mut statement = connection.prepare(
-            "SELECT task_id, progress, completed
+            "SELECT task_id, task_type, progress, completed
              FROM tasks WHERE profile_id = ?1 ORDER BY task_id",
         )?;
         let tasks = statement
@@ -423,12 +423,17 @@ impl ProfileStore {
                     row.get::<_, i64>(0)?,
                     row.get::<_, i64>(1)?,
                     row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        for (task_id, progress, completed) in tasks {
+        for (task_id, task_type, progress, completed) in tasks {
             let task_id = u64::try_from(task_id)
                 .map_err(|_| StorageError::InvalidTypedAccount("task id is invalid".to_owned()))?;
+            let task_type = u32::try_from(task_type).map_err(|_| {
+                StorageError::InvalidTypedAccount("task type is invalid".to_owned())
+            })?;
+            account.tasks.task_types.insert(task_id, task_type);
             account
                 .tasks
                 .progress
@@ -436,6 +441,19 @@ impl ProfileStore {
             if completed != 0 {
                 account.tasks.completed.insert(task_id);
             }
+        }
+        let mut statement = connection
+            .prepare("SELECT task_id FROM task_claims WHERE profile_id = ?1 ORDER BY task_id")?;
+        let claimed = statement
+            .query_map(params![profile_id.as_str()], |row| row.get::<_, i64>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        for task_id in claimed {
+            account
+                .tasks
+                .claimed
+                .insert(u64::try_from(task_id).map_err(|_| {
+                    StorageError::InvalidTypedAccount("claimed task id is invalid".to_owned())
+                })?);
         }
 
         let mut statement = connection.prepare(
@@ -895,12 +913,32 @@ impl ProfileStore {
         for (task_id, progress) in &account.tasks.progress {
             transaction.execute(
                 "INSERT INTO tasks(profile_id, task_id, task_type, progress, completed, reset_day)
-                 VALUES (?1, ?2, 0, ?3, ?4, 0)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0)",
                 params![
                     profile.id.as_str(),
                     typed_i64(*task_id, "task id")?,
+                    typed_i64(
+                        account
+                            .tasks
+                            .task_types
+                            .get(task_id)
+                            .copied()
+                            .unwrap_or_default(),
+                        "task type",
+                    )?,
                     typed_i64(*progress, "task progress")?,
                     i64::from(account.tasks.completed.contains(task_id)),
+                ],
+            )?;
+        }
+        for task_id in &account.tasks.claimed {
+            transaction.execute(
+                "INSERT INTO task_claims(profile_id, task_id, claimed_at)
+                 VALUES (?1, ?2, ?3)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(*task_id, "claimed task id")?,
+                    timestamp(),
                 ],
             )?;
         }

@@ -2,6 +2,51 @@ use serde_json::{json, Value};
 
 use super::*;
 
+/// Mirror legacy task records into normalized state until task handlers are fully typed.
+/// The mirror is request-scoped; normalized rows remain the persistence source of truth.
+pub(super) fn sync_typed_task_state(
+    account: &mut blueoath_domain::AccountState,
+    legacy: &Value,
+) -> bool {
+    let mut next_progress = std::collections::BTreeMap::new();
+    let mut next_types = std::collections::BTreeMap::new();
+    let mut next_completed = std::collections::BTreeSet::new();
+    let mut next_claimed = std::collections::BTreeSet::new();
+    if let Some(records) = legacy
+        .get("tasks")
+        .and_then(|tasks| tasks.get("records"))
+        .and_then(Value::as_array)
+    {
+        for record in records {
+            let task_id = value_i64_any(record, &["taskId", "task_id"]);
+            if task_id <= 0 {
+                continue;
+            }
+            let task_id = task_id as u64;
+            let task_type = value_i64_any(record, &["taskType", "task_type"]);
+            next_types.insert(task_id, task_type.max(0) as u32);
+            next_progress.insert(task_id, value_i64_any(record, &["count"]).max(0) as u64);
+            if value_i64_any(record, &["completed"]) != 0
+                || value_i64_any(record, &["finishTime", "finish_time"]) > 0
+            {
+                next_completed.insert(task_id);
+            }
+            if value_i64_any(record, &["rewardTime", "reward_time"]) > 0 {
+                next_claimed.insert(task_id);
+            }
+        }
+    }
+    let changed = account.tasks.progress != next_progress
+        || account.tasks.task_types != next_types
+        || account.tasks.completed != next_completed
+        || account.tasks.claimed != next_claimed;
+    account.tasks.progress = next_progress;
+    account.tasks.task_types = next_types;
+    account.tasks.completed = next_completed;
+    account.tasks.claimed = next_claimed;
+    changed
+}
+
 pub(super) fn complete_task(
     account: &mut Value,
     task_type: i32,
@@ -477,10 +522,16 @@ pub(super) fn task_info_payload_from_typed_account(
         output.extend_from_slice(&[0x62, 0x02, 0x08, 0x11, 0x10, 0x01, 0x68, 0x00]);
         return output;
     };
-    let claimed = |definition: &TaskDefinition| {
+    let completed = |definition: &TaskDefinition| {
         account
             .tasks
             .completed
+            .contains(&(definition.id.max(0) as u64))
+    };
+    let claimed = |definition: &TaskDefinition| {
+        account
+            .tasks
+            .claimed
             .contains(&(definition.id.max(0) as u64))
     };
     let progress_for = |definition: &TaskDefinition| {
@@ -558,9 +609,10 @@ pub(super) fn task_info_payload_from_typed_account(
                 let mut task = Vec::new();
                 append_varint_field(&mut task, 1, definition.id.max(0) as u64);
                 let count = progress_for(definition);
-                let completed = claimed(definition);
-                append_varint_field(&mut task, 2, u64::from(completed));
-                append_varint_field(&mut task, 3, u64::from(completed));
+                let is_completed = completed(definition);
+                let is_claimed = claimed(definition);
+                append_varint_field(&mut task, 2, u64::from(is_claimed));
+                append_varint_field(&mut task, 3, u64::from(is_completed));
                 append_varint_field(&mut task, 4, count);
                 append_varint_field(&mut task, 7, 0);
                 append_varint_field(&mut task, 8, 0);

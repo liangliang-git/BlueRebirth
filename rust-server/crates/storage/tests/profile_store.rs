@@ -359,7 +359,9 @@ fn typed_repository_transaction_commits_domain_mutation() {
         },
     );
     account.tasks.progress.insert(7, 8);
+    account.tasks.task_types.insert(7, 5);
     account.tasks.completed.insert(7);
+    account.tasks.claimed.insert(7);
     account.daily_copy.reset_day = 42;
     account
         .daily_copy
@@ -415,7 +417,9 @@ fn typed_repository_transaction_commits_domain_mutation() {
         vec![hero_id]
     );
     assert_eq!(loaded.tasks.progress.get(&7), Some(&8));
+    assert_eq!(loaded.tasks.task_types.get(&7), Some(&5));
     assert!(loaded.tasks.completed.contains(&7));
+    assert!(loaded.tasks.claimed.contains(&7));
     assert_eq!(loaded.daily_copy.reset_day, 42);
     assert_eq!(loaded.buildings.levels.get(&11), Some(&6));
     assert_eq!(loaded.buildings.template_ids.get(&11), Some(&41));

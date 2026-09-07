@@ -131,6 +131,9 @@ where
 
     let request = RequestContext::from(TMessageCodec::decode_request(&frame.payload)?);
     let request_args = request.args.as_slice();
+    if let (Some(typed), Some(legacy)) = (typed_account.as_deref_mut(), account_view) {
+        sync_typed_task_state(typed, legacy);
+    }
     if std::env::var_os("BLUEOATH_TRACE_METHODS").is_some() {
         eprintln!(
             "game-login method={} args={} hex={} f1={} f2={} f3={}",
@@ -340,6 +343,9 @@ where
         "user.UserLogin" => {
             if let Some(account) = account.as_deref_mut() {
                 advance_task_event(account, task_catalog, 1, 1, current_unix_seconds());
+                if let Some(typed) = typed_account.as_deref_mut() {
+                    sync_typed_task_state(typed, account);
+                }
                 if account.get("guild").is_some() {
                     guild_handler::push_guild_state(&mut post_pushes, account);
                 }
@@ -1853,7 +1859,7 @@ where
         }
     }
     if let Some((copy_id, grade, battle_time, _first_pass, ex_buffs, exp_rewards)) = pass_details {
-        if let Some(account) = account {
+        if let Some(account) = account.as_deref_mut() {
             record_battle_pass(
                 account,
                 copy_id,
@@ -2036,6 +2042,15 @@ where
                     goods_copy_snapshot_payload(account, chapter_catalog),
                 );
             }
+        }
+    }
+    if let (Some(typed), Some(legacy)) = (typed_account.as_deref_mut(), account.as_deref()) {
+        if sync_typed_task_state(typed, legacy) {
+            append_method_push(
+                &mut post_pushes,
+                "task.TaskInfo",
+                task_info_payload_from_typed_account(typed, task_catalog),
+            );
         }
     }
     for push in post_pushes {

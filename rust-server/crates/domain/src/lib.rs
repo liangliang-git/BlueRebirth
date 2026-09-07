@@ -239,6 +239,8 @@ pub struct DailyCopyState {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskState {
     pub progress: BTreeMap<u64, u64>,
+    #[serde(default)]
+    pub task_types: BTreeMap<u64, u32>,
     pub completed: BTreeSet<u64>,
     pub claimed: BTreeSet<u64>,
 }
