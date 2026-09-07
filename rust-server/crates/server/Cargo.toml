@@ -1,0 +1,18 @@
+[package]
+name = "blueoath-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+blueoath-transport = { path = "../transport" }
+blueoath-storage = { path = "../storage" }
+blueoath-protocol = { path = "../protocol" }
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

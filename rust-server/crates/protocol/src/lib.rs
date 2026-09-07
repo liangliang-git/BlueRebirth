@@ -1,0 +1,1733 @@
+use std::io;
+
+use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+const MAX_FRAME_SIZE: i32 = 4 * 1024 * 1024;
+
+#[derive(Debug, Error)]
+pub enum ProtocolError {
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error("truncated protobuf {0}")]
+    Truncated(&'static str),
+    #[error("invalid protobuf: {0}")]
+    Invalid(&'static str),
+    #[error("protobuf varint is too long")]
+    VarintTooLong,
+    #[error("invalid game login frame length: {0}")]
+    InvalidFrameLength(i64),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TRequest {
+    pub method: String,
+    pub args: Option<Vec<u8>>,
+    pub callback_handler: u32,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TResponse {
+    pub err: i32,
+    pub err_msg: String,
+    pub method: String,
+    pub ret: Option<Vec<u8>>,
+    pub callback_handler: u32,
+    pub time: u32,
+    pub token: String,
+    pub seq: u32,
+    pub is_response: i32,
+}
+
+pub struct TMessageCodec;
+
+impl TMessageCodec {
+    pub fn encode_request(value: &TRequest) -> Vec<u8> {
+        let mut output = Vec::new();
+        if !value.method.is_empty() {
+            write_bytes(&mut output, 1, value.method.as_bytes());
+        }
+        if let Some(args) = &value.args {
+            write_bytes(&mut output, 2, args);
+        }
+        if value.callback_handler != 0 {
+            write_varint_field(&mut output, 3, value.callback_handler as u64);
+        }
+        if !value.token.is_empty() {
+            write_bytes(&mut output, 4, value.token.as_bytes());
+        }
+        output
+    }
+
+    pub fn decode_request(payload: &[u8]) -> Result<TRequest, ProtocolError> {
+        let mut reader = PbReader::new(payload);
+        let mut value = TRequest::default();
+        while let Some((field, wire)) = reader.next_field()? {
+            match (field, wire) {
+                (1, 2) => value.method = reader.read_string()?,
+                (2, 2) => value.args = Some(reader.read_bytes()?.to_vec()),
+                (3, 0) => value.callback_handler = reader.read_varint()? as u32,
+                (4, 2) => value.token = reader.read_string()?,
+                (_, wire) => reader.skip(wire)?,
+            }
+        }
+        Ok(value)
+    }
+
+    pub fn encode_response(value: &TResponse) -> Vec<u8> {
+        let mut output = Vec::new();
+        if value.err != 0 {
+            write_varint_field(&mut output, 1, value.err as u32 as u64);
+        }
+        if !value.err_msg.is_empty() {
+            write_bytes(&mut output, 2, value.err_msg.as_bytes());
+        }
+        if !value.method.is_empty() {
+            write_bytes(&mut output, 3, value.method.as_bytes());
+        }
+        if let Some(ret) = &value.ret {
+            write_bytes(&mut output, 4, ret);
+        }
+        if value.callback_handler != 0 {
+            write_varint_field(&mut output, 5, value.callback_handler as u64);
+        }
+        if value.time != 0 {
+            write_varint_field(&mut output, 6, value.time as u64);
+        }
+        if !value.token.is_empty() {
+            write_bytes(&mut output, 7, value.token.as_bytes());
+        }
+        if value.seq != 0 {
+            write_varint_field(&mut output, 8, value.seq as u64);
+        }
+        if value.is_response != 0 {
+            write_varint_field(&mut output, 9, value.is_response as u32 as u64);
+        }
+        output
+    }
+
+    pub fn decode_response(payload: &[u8]) -> Result<TResponse, ProtocolError> {
+        let mut reader = PbReader::new(payload);
+        let mut value = TResponse::default();
+        while let Some((field, wire)) = reader.next_field()? {
+            match (field, wire) {
+                (1, 0) => value.err = reader.read_varint()? as i32,
+                (2, 2) => value.err_msg = reader.read_string()?,
+                (3, 2) => value.method = reader.read_string()?,
+                (4, 2) => value.ret = Some(reader.read_bytes()?.to_vec()),
+                (5, 0) => value.callback_handler = reader.read_varint()? as u32,
+                (6, 0) => value.time = reader.read_varint()? as u32,
+                (7, 2) => value.token = reader.read_string()?,
+                (8, 0) => value.seq = reader.read_varint()? as u32,
+                (9, 0) => value.is_response = reader.read_varint()? as i32,
+                (_, wire) => reader.skip(wire)?,
+            }
+        }
+        Ok(value)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TSampleInfo {
+    pub uuid: String,
+    pub model: String,
+    pub release: String,
+    pub network: String,
+    pub platform: String,
+    pub pkg_name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TArgLogin {
+    pub pid: String,
+    pub timestamp: i32,
+    pub open_date_time: String,
+    pub hash: String,
+    pub sample_info: Option<TSampleInfo>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TRetLogin {
+    pub ret: String,
+    pub feign_role_id: String,
+    pub err_code: i32,
+}
+
+pub struct GameLoginCodec;
+
+impl GameLoginCodec {
+    pub fn encode_login(value: &TArgLogin) -> Vec<u8> {
+        let mut output = Vec::new();
+        write_string(&mut output, 1, &value.pid);
+        write_int32(&mut output, 2, value.timestamp);
+        write_string(&mut output, 3, &value.open_date_time);
+        write_string(&mut output, 4, &value.hash);
+        if let Some(sample) = &value.sample_info {
+            let mut nested = Vec::new();
+            write_string(&mut nested, 1, &sample.uuid);
+            write_string(&mut nested, 2, &sample.model);
+            write_string(&mut nested, 3, &sample.release);
+            write_string(&mut nested, 4, &sample.network);
+            write_string(&mut nested, 5, &sample.platform);
+            write_string(&mut nested, 6, &sample.pkg_name);
+            write_bytes(&mut output, 5, &nested);
+        }
+        output
+    }
+
+    pub fn decode_login(payload: &[u8]) -> Result<TArgLogin, ProtocolError> {
+        let mut reader = PbReader::new(payload);
+        let mut value = TArgLogin::default();
+        while let Some((field, wire)) = reader.next_field()? {
+            match (field, wire) {
+                (1, 2) => value.pid = reader.read_string()?,
+                (2, 0) => value.timestamp = reader.read_varint()? as i32,
+                (3, 2) => value.open_date_time = reader.read_string()?,
+                (4, 2) => value.hash = reader.read_string()?,
+                (5, 2) => value.sample_info = Some(decode_sample_info(reader.read_bytes()?)?),
+                (_, wire) => reader.skip(wire)?,
+            }
+        }
+        Ok(value)
+    }
+
+    pub fn encode_response(value: &TRetLogin) -> Vec<u8> {
+        let mut output = Vec::new();
+        write_string(&mut output, 1, &value.ret);
+        write_string(&mut output, 2, &value.feign_role_id);
+        // Client checks ErrCode explicitly, so field 3 is always present.
+        write_varint_field(&mut output, 3, value.err_code as u32 as u64);
+        output
+    }
+
+    pub fn decode_login_response(payload: &[u8]) -> Result<TRetLogin, ProtocolError> {
+        let mut reader = PbReader::new(payload);
+        let mut value = TRetLogin::default();
+        while let Some((field, wire)) = reader.next_field()? {
+            match (field, wire) {
+                (1, 2) => value.ret = reader.read_string()?,
+                (2, 2) => value.feign_role_id = reader.read_string()?,
+                (3, 0) => value.err_code = reader.read_varint()? as i32,
+                (_, wire) => reader.skip(wire)?,
+            }
+        }
+        Ok(value)
+    }
+}
+
+pub struct UserLoginCodec;
+
+impl UserLoginCodec {
+    pub fn encode_response(ret: &str, ban_msg: &str, ban_time: i32) -> Vec<u8> {
+        let mut output = Vec::new();
+        if !ret.is_empty() {
+            write_bytes(&mut output, 1, ret.as_bytes());
+        }
+        if !ban_msg.is_empty() {
+            write_bytes(&mut output, 2, ban_msg.as_bytes());
+        }
+        if ban_time != 0 {
+            write_varint_field(&mut output, 3, ban_time as u32 as u64);
+        }
+        output
+    }
+}
+
+pub struct GuideInfoCodec;
+
+impl GuideInfoCodec {
+    pub fn encode_initial_progress_completed() -> Vec<u8> {
+        let mut output = Vec::new();
+        write_varint_field(&mut output, 1, 0);
+        write_varint_field(&mut output, 2, 0);
+        // Skip login/startup tutorial stages. Keep feature-unlock stages
+        // incomplete so their guides can still play when unlocked later.
+        const INITIAL_DONE_STAGES: [&str; 6] =
+            ["10000", "100000", "1000000", "99995", "99998", "99992"];
+        let done_stages = format!(
+            "{{{}}}",
+            INITIAL_DONE_STAGES
+                .iter()
+                .map(|id| format!("[\"{id}\"]=1"))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        for (key, value) in [
+            ("GUIDE_DONE_STAGES", done_stages.as_str()),
+            ("GUIDE_DOING_STAGE", ""),
+        ] {
+            let mut setting = Vec::new();
+            write_bytes(&mut setting, 1, key.as_bytes());
+            write_bytes(&mut setting, 2, value.as_bytes());
+            write_bytes(&mut output, 3, &setting);
+        }
+        write_bytes(&mut output, 4, &[0x08, 0x00, 0x10, 0x00]);
+        output
+    }
+}
+
+pub struct CopyInfoCodec;
+
+impl CopyInfoCodec {
+    pub fn encode(copy_type: i32, copy_ids: &[i32], max_copy_id: i32) -> Vec<u8> {
+        Self::encode_with_progress(copy_type, copy_ids, max_copy_id, copy_ids)
+    }
+
+    pub fn encode_with_progress(
+        copy_type: i32,
+        copy_ids: &[i32],
+        max_copy_id: i32,
+        passed_copy_ids: &[i32],
+    ) -> Vec<u8> {
+        let passed_copy_counts = passed_copy_ids
+            .iter()
+            .copied()
+            .map(|copy_id| (copy_id, 1))
+            .collect::<Vec<_>>();
+        Self::encode_with_progress_and_difficulty_for_type(
+            copy_type,
+            copy_ids,
+            max_copy_id,
+            passed_copy_ids,
+            &passed_copy_counts,
+            1,
+        )
+    }
+
+    /// Encodes sea-copy progress with selected safe-area difficulty.
+    pub fn encode_with_progress_and_difficulty(
+        copy_ids: &[i32],
+        max_copy_id: i32,
+        passed_copy_ids: &[i32],
+        difficulty: i32,
+    ) -> Vec<u8> {
+        let passed_copy_counts = passed_copy_ids
+            .iter()
+            .copied()
+            .map(|copy_id| (copy_id, 1))
+            .collect::<Vec<_>>();
+        Self::encode_with_progress_and_difficulty_and_counts(
+            copy_ids,
+            max_copy_id,
+            passed_copy_ids,
+            &passed_copy_counts,
+            difficulty,
+        )
+    }
+
+    /// Encodes sea-copy progress with actual repeat-clear counts.
+    pub fn encode_with_progress_and_difficulty_and_counts(
+        copy_ids: &[i32],
+        max_copy_id: i32,
+        passed_copy_ids: &[i32],
+        passed_copy_counts: &[(i32, i32)],
+        difficulty: i32,
+    ) -> Vec<u8> {
+        Self::encode_with_progress_and_difficulty_for_type(
+            2,
+            copy_ids,
+            max_copy_id,
+            passed_copy_ids,
+            passed_copy_counts,
+            difficulty,
+        )
+    }
+
+    fn encode_with_progress_and_difficulty_for_type(
+        copy_type: i32,
+        copy_ids: &[i32],
+        max_copy_id: i32,
+        passed_copy_ids: &[i32],
+        passed_copy_counts: &[(i32, i32)],
+        difficulty: i32,
+    ) -> Vec<u8> {
+        let mut output = Vec::new();
+        for copy_id in copy_ids {
+            let mut entry = Vec::new();
+            write_varint_field(&mut entry, 1, *copy_id as u32 as u64);
+            write_varint_field(&mut entry, 2, 0);
+            let passed = passed_copy_ids.contains(copy_id);
+            write_varint_field(&mut entry, 3, u64::from(passed) * 7);
+            write_varint_field(&mut entry, 4, 0);
+            write_varint_field(&mut entry, 5, 0);
+            write_varint_field(&mut entry, 6, u64::from(passed));
+            if copy_type == 2 || copy_type == 9 {
+                write_varint_field(&mut entry, 8, 1);
+                write_fixed32_field(&mut entry, 9, 0);
+                write_varint_field(&mut entry, 12, difficulty.max(1) as u64);
+            }
+            write_bytes(&mut output, 1, &entry);
+        }
+        for copy_id in passed_copy_ids {
+            let mut count = Vec::new();
+            write_varint_field(&mut count, 1, *copy_id as u32 as u64);
+            let pass_count = passed_copy_counts
+                .iter()
+                .find(|(id, _)| id == copy_id)
+                .map(|(_, count)| *count)
+                .unwrap_or(1);
+            write_varint_field(&mut count, 2, pass_count.max(1) as u64);
+            write_bytes(&mut output, 5, &count);
+        }
+        write_varint_field(&mut output, 2, max_copy_id as u32 as u64);
+        write_varint_field(&mut output, 3, copy_type as u32 as u64);
+        output
+    }
+}
+
+pub struct DailyCopyCodec;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DailyCopyProgress {
+    pub chapter_id: i32,
+    pub challenge_times: i32,
+    pub pass_copy: Vec<i32>,
+    pub select_ex: bool,
+    pub ex_star: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DailyCopyGroupProgress {
+    pub group_id: i32,
+    pub success_times: i32,
+}
+
+impl DailyCopyCodec {
+    pub fn encode_default() -> Vec<u8> {
+        Self::encode(&[(1, 1)], &[1])
+    }
+
+    pub fn encode(chapters: &[(i32, i32)], groups: &[i32]) -> Vec<u8> {
+        Self::encode_with_progress(chapters, groups, &[], &[], &[])
+    }
+
+    pub fn encode_with_progress(
+        chapters: &[(i32, i32)],
+        groups: &[i32],
+        chapter_progress: &[DailyCopyProgress],
+        group_progress: &[DailyCopyGroupProgress],
+        extra_group_progress: &[DailyCopyGroupProgress],
+    ) -> Vec<u8> {
+        let mut chapter = Vec::new();
+        let mut output = Vec::new();
+        for (chapter_id, _group_id) in chapters {
+            let progress = chapter_progress
+                .iter()
+                .find(|item| item.chapter_id == *chapter_id);
+            chapter.clear();
+            write_varint_field(&mut chapter, 1, *chapter_id as u32 as u64);
+            write_varint_field(
+                &mut chapter,
+                2,
+                progress.map_or(0, |item| item.challenge_times) as u32 as u64,
+            );
+            if let Some(progress) = progress {
+                for copy_id in &progress.pass_copy {
+                    write_varint_field(&mut chapter, 3, *copy_id as u32 as u64);
+                }
+            }
+            write_varint_field(
+                &mut chapter,
+                4,
+                u64::from(progress.is_some_and(|item| item.select_ex)),
+            );
+            write_varint_field(
+                &mut chapter,
+                5,
+                progress.map_or(0, |item| item.ex_star) as u32 as u64,
+            );
+            write_bytes(&mut output, 1, &chapter);
+        }
+        for field in [2, 3] {
+            for group_id in groups {
+                let mut group = Vec::new();
+                write_varint_field(&mut group, 1, *group_id as u32 as u64);
+                let progress = if field == 2 {
+                    group_progress
+                        .iter()
+                        .find(|item| item.group_id == *group_id)
+                } else {
+                    extra_group_progress
+                        .iter()
+                        .find(|item| item.group_id == *group_id)
+                };
+                write_varint_field(
+                    &mut group,
+                    2,
+                    progress.map_or(0, |item| item.success_times) as u32 as u64,
+                );
+                write_bytes(&mut output, field, &group);
+            }
+        }
+        output
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MedalAcquiredTime {
+    pub medal_id: i32,
+    pub time: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UserInfo {
+    pub uid: u64,
+    pub uname: String,
+    pub level: i32,
+    pub class_id: i32,
+    pub secretary_id: u32,
+    pub create_time: i32,
+    pub gold: i32,
+    pub diamond: i32,
+    pub supply: i32,
+    pub pve_pt: i32,
+    pub head: i32,
+    pub head_frame: i32,
+    pub exp: i32,
+    pub buy_gold_num: i32,
+    pub buy_gold_time: i32,
+    pub buy_supply_num: i32,
+    pub buy_supply_time: i32,
+    pub head_show: i32,
+    pub new_task_stage: i32,
+    pub server_id: i32,
+    pub bath: i32,
+    pub main_gun: i32,
+    pub torpedo: i32,
+    pub plane: i32,
+    pub other: i32,
+    pub retire: i32,
+    pub strategy: i32,
+    pub medal: i32,
+    pub tower: i32,
+    pub copy_train_point: i32,
+    pub fashion_point: i32,
+    pub guild_contri: i32,
+    pub lucky: i32,
+    pub teacher_medal: i32,
+    pub teacher_prestige: i32,
+    pub battle_pass_exp: i32,
+    pub battle_pass_gold: i32,
+    pub guild_coin_ii: i32,
+    pub ur_equip_coin: i32,
+    pub activity_battle_pass_exp: i32,
+    pub get_hero_count: i32,
+    pub attack_count: i32,
+    pub married_num: i32,
+    pub achieve_point: i32,
+    pub message: String,
+    pub medal_acquired_times: Vec<MedalAcquiredTime>,
+}
+
+pub struct UserInfoCodec;
+
+impl UserInfoCodec {
+    pub fn encode(value: &UserInfo) -> Vec<u8> {
+        let mut output = Vec::new();
+        if value.uid != 0 {
+            write_varint_field(&mut output, 1, value.uid);
+        }
+        write_string(&mut output, 2, &value.uname);
+        write_int32(&mut output, 4, value.head);
+        write_int32(&mut output, 5, value.head_frame);
+        write_int32(&mut output, 7, value.class_id);
+        write_int32(&mut output, 10, value.level);
+        write_varint_field(&mut output, 11, value.exp as u32 as u64);
+        write_varint_field(&mut output, 12, value.diamond as u32 as u64);
+        write_varint_field(&mut output, 13, value.gold as u32 as u64);
+        write_varint_field(&mut output, 14, value.supply as u32 as u64);
+        write_varint_field(&mut output, 15, value.main_gun as u32 as u64);
+        write_varint_field(&mut output, 16, value.torpedo as u32 as u64);
+        write_varint_field(&mut output, 17, value.plane as u32 as u64);
+        write_varint_field(&mut output, 18, value.other as u32 as u64);
+        write_varint_field(&mut output, 22, value.create_time as u32 as u64);
+        write_varint_field(&mut output, 23, u64::from(value.secretary_id));
+        write_string(&mut output, 25, &value.message);
+        write_varint_field(&mut output, 26, value.buy_gold_num as u32 as u64);
+        write_varint_field(&mut output, 27, value.buy_gold_time as u32 as u64);
+        write_varint_field(&mut output, 28, value.buy_supply_num as u32 as u64);
+        write_varint_field(&mut output, 29, value.buy_supply_time as u32 as u64);
+        write_varint_field(&mut output, 30, value.retire as u32 as u64);
+        write_varint_field(&mut output, 32, value.achieve_point as u32 as u64);
+        write_varint_field(&mut output, 35, value.bath as u32 as u64);
+        write_varint_field(&mut output, 37, value.strategy as u32 as u64);
+        write_varint_field(&mut output, 39, value.medal as u32 as u64);
+        write_varint_field(&mut output, 40, value.attack_count as u32 as u64);
+        write_varint_field(&mut output, 41, value.get_hero_count as u32 as u64);
+        write_varint_field(&mut output, 45, value.married_num as u32 as u64);
+        write_varint_field(&mut output, 44, value.head_show as u32 as u64);
+        write_varint_field(&mut output, 46, value.new_task_stage.max(7) as u32 as u64);
+        write_varint_field(&mut output, 47, value.copy_train_point as u32 as u64);
+        write_varint_field(&mut output, 48, value.tower as u32 as u64);
+        write_varint_field(&mut output, 49, value.fashion_point as u32 as u64);
+        write_varint_field(&mut output, 50, value.lucky as u32 as u64);
+        write_varint_field(&mut output, 51, value.teacher_medal as u32 as u64);
+        write_varint_field(&mut output, 52, value.teacher_prestige as u32 as u64);
+        write_varint_field(&mut output, 53, value.guild_contri as u32 as u64);
+        write_varint_field(&mut output, 56, value.server_id.max(1) as u32 as u64);
+        for medal in &value.medal_acquired_times {
+            if medal.medal_id <= 0 || medal.time <= 0 {
+                continue;
+            }
+            let mut entry = Vec::new();
+            write_varint_field(&mut entry, 1, medal.medal_id as u32 as u64);
+            write_varint_field(&mut entry, 2, medal.time as u32 as u64);
+            write_bytes(&mut output, 57, &entry);
+        }
+        write_varint_field(&mut output, 58, value.battle_pass_exp as u32 as u64);
+        write_varint_field(&mut output, 59, value.battle_pass_gold as u32 as u64);
+        write_varint_field(&mut output, 62, value.pve_pt as u32 as u64);
+        write_varint_field(&mut output, 63, value.guild_coin_ii as u32 as u64);
+        write_varint_field(&mut output, 64, value.ur_equip_coin as u32 as u64);
+        write_varint_field(
+            &mut output,
+            65,
+            value.activity_battle_pass_exp as u32 as u64,
+        );
+        output
+    }
+
+    pub fn decode(payload: &[u8]) -> Result<UserInfo, ProtocolError> {
+        let mut reader = PbReader::new(payload);
+        let mut value = UserInfo::default();
+        while let Some((field, wire)) = reader.next_field()? {
+            match (field, wire) {
+                (1, 0) => value.uid = reader.read_varint()?,
+                (2, 2) => value.uname = reader.read_string()?,
+                (4, 0) => value.head = reader.read_varint()? as i32,
+                (5, 0) => value.head_frame = reader.read_varint()? as i32,
+                (7, 0) => value.class_id = reader.read_varint()? as i32,
+                (10, 0) => value.level = reader.read_varint()? as i32,
+                (11, 0) => value.exp = reader.read_varint()? as i32,
+                (12, 0) => value.diamond = reader.read_varint()? as i32,
+                (13, 0) => value.gold = reader.read_varint()? as i32,
+                (14, 0) => value.supply = reader.read_varint()? as i32,
+                (15, 0) => value.main_gun = reader.read_varint()? as i32,
+                (16, 0) => value.torpedo = reader.read_varint()? as i32,
+                (17, 0) => value.plane = reader.read_varint()? as i32,
+                (18, 0) => value.other = reader.read_varint()? as i32,
+                (22, 0) => value.create_time = reader.read_varint()? as i32,
+                (23, 0) => value.secretary_id = reader.read_varint()? as u32,
+                (25, 2) => value.message = reader.read_string()?,
+                (26, 0) => value.buy_gold_num = reader.read_varint()? as i32,
+                (27, 0) => value.buy_gold_time = reader.read_varint()? as i32,
+                (28, 0) => value.buy_supply_num = reader.read_varint()? as i32,
+                (29, 0) => value.buy_supply_time = reader.read_varint()? as i32,
+                (30, 0) => value.retire = reader.read_varint()? as i32,
+                (32, 0) => value.achieve_point = reader.read_varint()? as i32,
+                (35, 0) => value.bath = reader.read_varint()? as i32,
+                (37, 0) => value.strategy = reader.read_varint()? as i32,
+                (39, 0) => value.medal = reader.read_varint()? as i32,
+                (40, 0) => value.attack_count = reader.read_varint()? as i32,
+                (41, 0) => value.get_hero_count = reader.read_varint()? as i32,
+                (45, 0) => value.married_num = reader.read_varint()? as i32,
+                (44, 0) => value.head_show = reader.read_varint()? as i32,
+                (46, 0) => value.new_task_stage = reader.read_varint()? as i32,
+                (47, 0) => value.copy_train_point = reader.read_varint()? as i32,
+                (48, 0) => value.tower = reader.read_varint()? as i32,
+                (49, 0) => value.fashion_point = reader.read_varint()? as i32,
+                (50, 0) => value.lucky = reader.read_varint()? as i32,
+                (51, 0) => value.teacher_medal = reader.read_varint()? as i32,
+                (52, 0) => value.teacher_prestige = reader.read_varint()? as i32,
+                (53, 0) => value.guild_contri = reader.read_varint()? as i32,
+                (56, 0) => value.server_id = reader.read_varint()? as i32,
+                (57, 2) => {
+                    let payload = reader.read_bytes()?.to_vec();
+                    let mut nested = PbReader::new(&payload);
+                    let mut medal = MedalAcquiredTime::default();
+                    while let Some((nested_field, nested_wire)) = nested.next_field()? {
+                        match (nested_field, nested_wire) {
+                            (1, 0) => medal.medal_id = nested.read_varint()? as i32,
+                            (2, 0) => medal.time = nested.read_varint()? as i32,
+                            (_, nested_wire) => nested.skip(nested_wire)?,
+                        }
+                    }
+                    if medal.medal_id > 0 && medal.time > 0 {
+                        value.medal_acquired_times.push(medal);
+                    }
+                }
+                (62, 0) => value.pve_pt = reader.read_varint()? as i32,
+                (58, 0) => value.battle_pass_exp = reader.read_varint()? as i32,
+                (59, 0) => value.battle_pass_gold = reader.read_varint()? as i32,
+                (63, 0) => value.guild_coin_ii = reader.read_varint()? as i32,
+                (64, 0) => value.ur_equip_coin = reader.read_varint()? as i32,
+                (65, 0) => value.activity_battle_pass_exp = reader.read_varint()? as i32,
+                (_, wire) => reader.skip(wire)?,
+            }
+        }
+        Ok(value)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PSkillEntry {
+    pub pskill_id: u32,
+    pub pskill_exp: u32,
+    pub level: i32,
+    pub replace: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AttrIntensify {
+    pub attr_type: i32,
+    pub intensify_level: i32,
+    pub cur_exp: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeroEquipSlot {
+    pub equip_id: u32,
+    pub state: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeroEquipGroup {
+    pub equip_type: i32,
+    pub slots: Vec<HeroEquipSlot>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EquipEffectInfo {
+    pub effect_type: i32,
+    pub effect_ids: Vec<i32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeroCombinationInfo {
+    pub com_lv: i32,
+    pub com_grade: i32,
+    pub combine: u32,
+    pub be_combined: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeroGrid {
+    pub hero_id: u32,
+    pub template_id: i32,
+    pub level: i32,
+    pub fashioning: i32,
+    pub exp: i32,
+    pub create_time: i32,
+    pub update_time: i32,
+    pub affection: i32,
+    pub marry_time: i32,
+    pub cur_hp: i64,
+    pub mood: i32,
+    pub marry_type: i32,
+    pub equip_slots: Vec<u32>,
+    pub name: String,
+    pub change_name_time: i32,
+    pub lock: bool,
+    pub advance: i32,
+    pub adv_lv: i32,
+    pub remould_effects: Vec<i32>,
+    pub remould_level: i32,
+    pub pskills: Vec<PSkillEntry>,
+    pub intensify: Vec<AttrIntensify>,
+    pub equip_groups: Vec<HeroEquipGroup>,
+    pub equip_effects: Vec<EquipEffectInfo>,
+    pub combination_info: HeroCombinationInfo,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeroBag {
+    pub heroes: Vec<HeroGrid>,
+    pub bag_size: i32,
+}
+
+pub struct HeroBagCodec;
+
+impl HeroBagCodec {
+    pub fn encode(value: &HeroBag) -> Vec<u8> {
+        let mut output = Vec::new();
+        for hero in &value.heroes {
+            write_bytes(&mut output, 1, &Self::encode_hero(hero));
+        }
+        if value.bag_size != 0 {
+            write_varint_field(&mut output, 2, value.bag_size as u32 as u64);
+        }
+        output
+    }
+
+    fn encode_hero(value: &HeroGrid) -> Vec<u8> {
+        let mut output = Vec::new();
+        if value.hero_id != 0 {
+            write_varint_field(&mut output, 1, u64::from(value.hero_id));
+        }
+        write_varint_field(&mut output, 2, value.template_id as u32 as u64);
+
+        let normal_states = value
+            .equip_groups
+            .iter()
+            .find(|group| group.equip_type == 1)
+            .map(|group| group.slots.as_slice())
+            .unwrap_or(&[]);
+        let mut equip_groups = value.equip_groups.clone();
+        if !equip_groups.iter().any(|group| group.equip_type == 1) {
+            equip_groups.insert(
+                0,
+                HeroEquipGroup {
+                    equip_type: 1,
+                    slots: (0..6)
+                        .map(|index| HeroEquipSlot {
+                            equip_id: value.equip_slots.get(index).copied().unwrap_or_default(),
+                            state: 0,
+                        })
+                        .collect(),
+                },
+            );
+        }
+        for group in equip_groups {
+            let mut equips_by_type = Vec::new();
+            write_varint_field(&mut equips_by_type, 1, group.equip_type as u32 as u64);
+            for index in 0..6 {
+                let slot = group
+                    .slots
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| HeroEquipSlot {
+                        equip_id: if group.equip_type == 1 {
+                            value.equip_slots.get(index).copied().unwrap_or_default()
+                        } else {
+                            0
+                        },
+                        state: normal_states
+                            .get(index)
+                            .map(|slot| slot.state)
+                            .unwrap_or_default(),
+                    });
+                let mut equip = Vec::new();
+                write_varint_field(&mut equip, 1, u64::from(slot.equip_id));
+                write_varint_field(&mut equip, 2, slot.state as u32 as u64);
+                write_bytes(&mut equips_by_type, 2, &equip);
+            }
+            write_bytes(&mut output, 3, &equips_by_type);
+        }
+
+        if value.level != 0 {
+            write_varint_field(&mut output, 4, value.level as u32 as u64);
+        }
+        write_varint_field(&mut output, 5, value.exp as u32 as u64);
+        write_varint_field(&mut output, 6, value.advance as u32 as u64);
+        if value.create_time != 0 {
+            write_varint_field(&mut output, 8, value.create_time as u32 as u64);
+        }
+        if value.cur_hp != 0 {
+            write_varint_field(&mut output, 9, value.cur_hp as u64);
+        }
+        for attr in &value.intensify {
+            let mut body = Vec::new();
+            write_varint_field(&mut body, 1, attr.attr_type as u32 as u64);
+            write_varint_field(&mut body, 2, attr.intensify_level as u32 as u64);
+            write_varint_field(&mut body, 3, attr.cur_exp as u32 as u64);
+            write_bytes(&mut output, 7, &body);
+        }
+        if value.pskills.is_empty() {
+            // Client reads at least one skill entry during hero page initialization.
+            write_bytes(
+                &mut output,
+                13,
+                &[0x08, 0xFA, 0xC1, 0x02, 0x10, 0x00, 0x18, 0x00, 0x20, 0x00],
+            );
+        } else {
+            for skill in &value.pskills {
+                let mut body = Vec::new();
+                let skill_id = if skill.pskill_id == 0 {
+                    41_210
+                } else {
+                    skill.pskill_id
+                };
+                write_varint_field(&mut body, 1, u64::from(skill_id));
+                write_varint_field(&mut body, 2, u64::from(skill.pskill_exp));
+                write_varint_field(
+                    &mut body,
+                    3,
+                    u64::from(if skill.level > 0 { skill.level } else { 1 } as u32),
+                );
+                write_varint_field(&mut body, 4, skill.replace as u32 as u64);
+                write_bytes(&mut output, 13, &body);
+            }
+        }
+        write_varint_field(&mut output, 12, u64::from(value.lock));
+        write_varint_field(&mut output, 16, value.change_name_time as u32 as u64);
+        write_varint_field(&mut output, 17, value.affection as u32 as u64);
+        write_varint_field(&mut output, 18, value.mood as u32 as u64);
+        write_varint_field(&mut output, 19, value.marry_time as u32 as u64);
+        if value.update_time != 0 {
+            write_varint_field(&mut output, 20, value.update_time as u32 as u64);
+        }
+        write_varint_field(&mut output, 21, value.marry_type as u32 as u64);
+        if value.fashioning != 0 {
+            write_varint_field(&mut output, 22, value.fashioning as u32 as u64);
+        }
+        for effect in &value.remould_effects {
+            write_varint_field(&mut output, 23, *effect as u32 as u64);
+        }
+        write_varint_field(&mut output, 24, value.remould_level as u32 as u64);
+        write_varint_field(&mut output, 25, value.adv_lv as u32 as u64);
+        for effect in &value.equip_effects {
+            let mut body = Vec::new();
+            write_varint_field(&mut body, 1, effect.effect_type as u32 as u64);
+            for effect_id in &effect.effect_ids {
+                write_varint_field(&mut body, 2, *effect_id as u32 as u64);
+            }
+            write_bytes(&mut output, 26, &body);
+        }
+        let mut combination = Vec::new();
+        write_varint_field(
+            &mut combination,
+            1,
+            value.combination_info.com_lv as u32 as u64,
+        );
+        write_varint_field(
+            &mut combination,
+            2,
+            value.combination_info.com_grade as u32 as u64,
+        );
+        write_varint_field(
+            &mut combination,
+            3,
+            u64::from(value.combination_info.combine),
+        );
+        write_varint_field(
+            &mut combination,
+            4,
+            u64::from(value.combination_info.be_combined),
+        );
+        write_bytes(&mut output, 27, &combination);
+        write_string_always(&mut output, 15, &value.name);
+        output
+    }
+}
+
+pub struct UserListCodec;
+
+impl UserListCodec {
+    pub fn encode(users: &[UserInfo]) -> Vec<u8> {
+        let mut output = Vec::new();
+        for user in users {
+            write_bytes(&mut output, 1, &PlayerUserCodec::encode(user));
+        }
+        output
+    }
+}
+
+pub struct PlayerUserCodec;
+
+impl PlayerUserCodec {
+    pub fn encode(value: &UserInfo) -> Vec<u8> {
+        let mut output = Vec::new();
+        if value.uid != 0 {
+            write_varint_field(&mut output, 1, value.uid);
+        }
+        write_string(&mut output, 2, &value.uname);
+        write_int32(&mut output, 3, value.level);
+        write_int32(&mut output, 4, value.class_id);
+        output
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BagGrid {
+    pub template_id: i32,
+    pub num: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BagInfo {
+    pub bag_type: i32,
+    pub bag_size: i32,
+    pub items: Vec<BagGrid>,
+}
+
+pub struct BagInfoCodec;
+
+impl BagInfoCodec {
+    pub fn encode(value: &BagInfo) -> Vec<u8> {
+        let mut output = Vec::new();
+        if value.bag_type != 0 {
+            write_varint_field(&mut output, 1, value.bag_type as u32 as u64);
+        }
+        if value.bag_size != 0 {
+            write_varint_field(&mut output, 2, value.bag_size as u32 as u64);
+        }
+        for item in &value.items {
+            let mut body = Vec::new();
+            if item.template_id != 0 {
+                write_varint_field(&mut body, 1, item.template_id as u32 as u64);
+            }
+            // Zero is deletion marker; always emit Num to avoid nil on Lua client.
+            write_varint_field(&mut body, 2, item.num as u32 as u64);
+            write_bytes(&mut output, 3, &body);
+        }
+        output
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FashionInfo {
+    pub sf_id: i32,
+    pub fashion_tids: Vec<i32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FashionList {
+    pub items: Vec<FashionInfo>,
+}
+
+pub struct FashionListCodec;
+
+impl FashionListCodec {
+    pub fn encode(value: &FashionList) -> Vec<u8> {
+        let mut output = Vec::new();
+        for item in &value.items {
+            let mut body = Vec::new();
+            if item.sf_id != 0 {
+                write_varint_field(&mut body, 1, item.sf_id as u32 as u64);
+            }
+            for fashion_tid in &item.fashion_tids {
+                write_varint_field(&mut body, 2, *fashion_tid as u32 as u64);
+            }
+            write_bytes(&mut output, 1, &body);
+        }
+        output
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EquipPSkill {
+    pub pskill_id: i32,
+    pub level: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EquipInfo {
+    pub equip_id: u32,
+    pub template_id: i32,
+    pub enhance_level: i32,
+    pub star: i32,
+    pub hero_id: u32,
+    pub enhance_exp: i32,
+    pub pskills: Vec<EquipPSkill>,
+    pub rise_common_equips: Vec<EquipNum>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EquipNum {
+    pub template_id: i32,
+    pub num: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EquipList {
+    pub bag_size: i32,
+    pub items: Vec<EquipInfo>,
+    pub nums: Vec<EquipNum>,
+}
+
+pub struct EquipListCodec;
+
+impl EquipListCodec {
+    pub fn encode(value: &EquipList) -> Vec<u8> {
+        let mut output = Vec::new();
+        write_varint_field(&mut output, 1, value.bag_size as u32 as u64);
+        for item in &value.items {
+            write_bytes(&mut output, 2, &Self::encode_item(item));
+        }
+        for item in &value.nums {
+            let mut body = Vec::new();
+            if item.template_id != 0 {
+                write_varint_field(&mut body, 1, item.template_id as u32 as u64);
+            }
+            // Zero is deletion marker; always emit Num so client clears stale
+            // one-click enhancement material counts without relogin.
+            write_varint_field(&mut body, 2, item.num as u32 as u64);
+            write_bytes(&mut output, 3, &body);
+        }
+        output
+    }
+
+    /// Encode one TEquipInfo payload (used by equipment operation responses).
+    pub fn encode_item(value: &EquipInfo) -> Vec<u8> {
+        let mut output = Vec::new();
+        if value.equip_id != 0 {
+            write_varint_field(&mut output, 1, u64::from(value.equip_id));
+        }
+        write_varint_field(&mut output, 2, value.template_id as u32 as u64);
+        write_varint_field(&mut output, 3, value.enhance_level as u32 as u64);
+        write_varint_field(&mut output, 4, value.star as u32 as u64);
+        write_varint_field(&mut output, 5, u64::from(value.hero_id));
+        write_varint_field(&mut output, 6, value.enhance_exp as u32 as u64);
+        for skill in &value.pskills {
+            let mut body = Vec::new();
+            if skill.pskill_id != 0 {
+                write_varint_field(&mut body, 1, skill.pskill_id as u32 as u64);
+            }
+            if skill.level != 0 {
+                write_varint_field(&mut body, 2, skill.level as u32 as u64);
+            }
+            write_bytes(&mut output, 7, &body);
+        }
+        for item in &value.rise_common_equips {
+            let mut body = Vec::new();
+            write_varint_field(&mut body, 1, item.template_id as u32 as u64);
+            write_varint_field(&mut body, 2, item.num as u32 as u64);
+            write_bytes(&mut output, 8, &body);
+        }
+        output
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BuildingInfo {
+    pub id: i32,
+    pub template_id: i32,
+    pub level: i32,
+    pub hero_ids: Vec<u32>,
+    pub productivity: i32,
+    pub produce_speed: i32,
+    pub product_count: i32,
+    pub status: i32,
+    pub last_update_time: i64,
+    pub recipe_id: i32,
+    pub item_count: i32,
+    pub last_mood_update_time: i64,
+    pub last_build_update_time: i64,
+    pub recipe_time: i32,
+    pub float_count: i32,
+    pub tactic_list: Vec<BuildingTactic>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BuildingTactic {
+    pub building_id: i32,
+    pub name: String,
+    pub hero_ids: Vec<u32>,
+    pub index: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BuildingLandInfo {
+    pub index: i32,
+    pub building_id: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UserBuildingInfo {
+    pub buildings: Vec<BuildingInfo>,
+    pub lands: Vec<BuildingLandInfo>,
+    pub worker_strength: i32,
+    pub worker_recover: i32,
+    pub food_max: i32,
+    pub electric_max: i32,
+    pub worker_update_time: i64,
+}
+
+pub struct UserBuildingInfoCodec;
+
+impl UserBuildingInfoCodec {
+    pub fn encode(value: &UserBuildingInfo) -> Vec<u8> {
+        let mut output = Vec::new();
+        for building in &value.buildings {
+            write_bytes(&mut output, 1, &Self::encode_building(building));
+        }
+        for land in &value.lands {
+            let mut body = Vec::new();
+            write_varint_field(&mut body, 1, land.index as u32 as u64);
+            write_varint_field(&mut body, 2, land.building_id as u32 as u64);
+            write_bytes(&mut output, 2, &body);
+        }
+        write_varint_field(&mut output, 3, value.worker_strength as u32 as u64);
+        write_varint_field(&mut output, 4, value.worker_recover as u32 as u64);
+        write_varint_field(&mut output, 5, 0);
+        write_varint_field(&mut output, 6, value.food_max as u32 as u64);
+        write_varint_field(&mut output, 7, 0);
+        write_varint_field(&mut output, 8, value.electric_max as u32 as u64);
+        write_varint_field(&mut output, 9, value.worker_update_time as u64);
+        write_varint_field(&mut output, 10, value.worker_update_time as u64);
+        output
+    }
+
+    fn encode_building(value: &BuildingInfo) -> Vec<u8> {
+        let mut output = Vec::new();
+        write_varint_field(&mut output, 1, value.id as u32 as u64);
+        write_varint_field(&mut output, 2, value.template_id as u32 as u64);
+        write_varint_field(&mut output, 3, value.level as u32 as u64);
+        for hero_id in &value.hero_ids {
+            write_varint_field(&mut output, 4, u64::from(*hero_id));
+        }
+        write_varint_field(&mut output, 5, value.productivity as u32 as u64);
+        write_varint_field(&mut output, 6, value.produce_speed as u32 as u64);
+        write_varint_field(&mut output, 7, value.product_count as u32 as u64);
+        write_varint_field(&mut output, 8, value.status as u32 as u64);
+        write_varint_field(&mut output, 9, value.last_update_time as u64);
+        write_varint_field(&mut output, 10, value.recipe_id as u32 as u64);
+        write_varint_field(&mut output, 11, value.item_count as u32 as u64);
+        write_varint_field(&mut output, 12, value.last_mood_update_time as u64);
+        write_varint_field(&mut output, 13, value.last_build_update_time as u64);
+        write_varint_field(&mut output, 15, value.recipe_time as u32 as u64);
+        write_varint_field(&mut output, 16, value.float_count as u32 as u64);
+        for tactic in &value.tactic_list {
+            let mut body = Vec::new();
+            write_varint_field(&mut body, 1, tactic.building_id as u32 as u64);
+            write_string_always(&mut body, 2, &tactic.name);
+            for hero_id in &tactic.hero_ids {
+                write_varint_field(&mut body, 3, u64::from(*hero_id));
+            }
+            write_varint_field(&mut body, 4, tactic.index as u32 as u64);
+            write_bytes(&mut output, 17, &body);
+        }
+        output
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FleetTactic {
+    pub tactic_name: String,
+    pub hero_ids: Vec<i32>,
+    pub mode_id: i32,
+    pub strategy_id: i32,
+    pub formation_id: i32,
+    pub tactic_type: i32,
+    pub ex_hero_ids: Vec<i32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FleetInfo {
+    pub tactics: Vec<FleetTactic>,
+    pub max_power: i32,
+    pub min_power: i32,
+}
+
+pub struct FleetInfoCodec;
+
+impl FleetInfoCodec {
+    pub fn encode(value: &FleetInfo) -> Vec<u8> {
+        let mut output = Vec::new();
+        for tactic in &value.tactics {
+            let mut body = Vec::new();
+            write_string_always(&mut body, 1, &tactic.tactic_name);
+            for hero_id in &tactic.hero_ids {
+                write_varint_field(&mut body, 2, *hero_id as u32 as u64);
+            }
+            write_varint_field(&mut body, 3, tactic.mode_id as u32 as u64);
+            write_varint_field(&mut body, 4, tactic.strategy_id as u32 as u64);
+            write_varint_field(&mut body, 5, tactic.formation_id as u32 as u64);
+            write_varint_field(&mut body, 6, tactic.tactic_type as u32 as u64);
+            for hero_id in &tactic.ex_hero_ids {
+                write_varint_field(&mut body, 7, *hero_id as u32 as u64);
+            }
+            write_bytes(&mut output, 1, &body);
+        }
+        if value.max_power != 0 {
+            write_varint_field(&mut output, 2, value.max_power as u32 as u64);
+        }
+        if value.min_power != 0 {
+            write_varint_field(&mut output, 3, value.min_power as u32 as u64);
+        }
+        output
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CopyRecordEquip {
+    pub template_id: i32,
+    pub level: i32,
+    pub star_level: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CopyRecordHero {
+    pub template_id: i32,
+    pub level: i32,
+    pub advance_level: i32,
+    pub cur_hp: u64,
+    pub equips: Vec<CopyRecordEquip>,
+    pub point: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CopyRecord {
+    pub uid: u64,
+    pub user_name: String,
+    pub level: i32,
+    pub pass_time: i32,
+    pub secret_id: i32,
+    pub strategy_id: i32,
+    pub tactics: Vec<CopyRecordHero>,
+    pub power: i32,
+    pub record_time: i32,
+    pub ex_buff: Vec<i32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CopyRecordList {
+    pub copy_id: i32,
+    pub records: Vec<CopyRecord>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CopyInfoResponse {
+    pub first: Option<CopyRecord>,
+    pub fast: Option<CopyRecord>,
+    pub atk_grad: Option<CopyRecord>,
+    pub max_ex_star: i32,
+    pub max_ex_star_first: Option<CopyRecord>,
+    pub max_ex_star_fast: Option<CopyRecord>,
+}
+
+pub struct CopyRecordListCodec;
+
+impl CopyRecordListCodec {
+    pub fn encode(value: &CopyRecordList) -> Vec<u8> {
+        let mut output = Vec::new();
+        write_varint_field(&mut output, 1, value.copy_id.max(0) as u64);
+        for record in &value.records {
+            let mut body = Vec::new();
+            write_varint_field(&mut body, 1, record.uid);
+            write_string(&mut body, 2, &record.user_name);
+            write_varint_field(&mut body, 3, record.level.max(0) as u64);
+            write_varint_field(&mut body, 4, record.pass_time.max(0) as u64);
+            write_varint_field(&mut body, 5, record.secret_id.max(0) as u64);
+            write_varint_field(&mut body, 6, record.strategy_id.max(0) as u64);
+            for hero in &record.tactics {
+                let mut hero_body = Vec::new();
+                write_varint_field(&mut hero_body, 1, hero.template_id.max(0) as u64);
+                write_varint_field(&mut hero_body, 2, hero.level.max(0) as u64);
+                write_varint_field(&mut hero_body, 3, hero.advance_level.max(0) as u64);
+                write_varint_field(&mut hero_body, 4, hero.cur_hp);
+                for equip in &hero.equips {
+                    let mut equip_body = Vec::new();
+                    write_varint_field(&mut equip_body, 1, equip.template_id.max(0) as u64);
+                    write_varint_field(&mut equip_body, 2, equip.level.max(0) as u64);
+                    write_varint_field(&mut equip_body, 3, equip.star_level.max(0) as u64);
+                    write_bytes(&mut hero_body, 5, &equip_body);
+                }
+                write_varint_field(&mut hero_body, 6, hero.point.max(0) as u64);
+                write_bytes(&mut body, 7, &hero_body);
+            }
+            write_varint_field(&mut body, 8, record.power.max(0) as u64);
+            write_varint_field(&mut body, 9, record.record_time.max(0) as u64);
+            write_bytes(&mut output, 2, &body);
+        }
+        output
+    }
+
+    pub fn decode_copy_id(payload: &[u8]) -> Option<i32> {
+        let mut reader = PbReader::new(payload);
+        while let Ok(Some((field, wire))) = reader.next_field() {
+            match (field, wire) {
+                (1, 0) => return i32::try_from(reader.read_varint().ok()?).ok(),
+                (_, wire) => reader.skip(wire).ok()?,
+            }
+        }
+        None
+    }
+}
+
+impl CopyInfoCodec {
+    pub fn encode_record_response(value: &CopyInfoResponse) -> Vec<u8> {
+        let mut output = Vec::new();
+        for (field, record) in [
+            (1, value.first.as_ref()),
+            (2, value.fast.as_ref()),
+            (3, value.atk_grad.as_ref()),
+            (5, value.max_ex_star_first.as_ref()),
+            (6, value.max_ex_star_fast.as_ref()),
+        ] {
+            if let Some(record) = record {
+                write_bytes(&mut output, field, &Self::encode_record(record));
+            }
+        }
+        if value.max_ex_star > 0 {
+            write_varint_field(&mut output, 4, value.max_ex_star as u32 as u64);
+        }
+        output
+    }
+
+    fn encode_record(record: &CopyRecord) -> Vec<u8> {
+        let mut body = Vec::new();
+        write_varint_field(&mut body, 1, record.uid);
+        write_string(&mut body, 2, &record.user_name);
+        write_varint_field(&mut body, 3, record.level.max(0) as u64);
+        write_varint_field(&mut body, 4, record.pass_time.max(0) as u64);
+        write_varint_field(&mut body, 5, record.secret_id.max(0) as u64);
+        write_varint_field(&mut body, 6, record.strategy_id.max(0) as u64);
+        for hero in &record.tactics {
+            let mut hero_body = Vec::new();
+            write_varint_field(&mut hero_body, 1, hero.template_id.max(0) as u64);
+            write_varint_field(&mut hero_body, 2, hero.level.max(0) as u64);
+            write_varint_field(&mut hero_body, 3, hero.advance_level.max(0) as u64);
+            write_varint_field(&mut hero_body, 4, hero.cur_hp);
+            for equip in &hero.equips {
+                let mut equip_body = Vec::new();
+                write_varint_field(&mut equip_body, 1, equip.template_id.max(0) as u64);
+                write_varint_field(&mut equip_body, 2, equip.level.max(0) as u64);
+                write_varint_field(&mut equip_body, 3, equip.star_level.max(0) as u64);
+                write_bytes(&mut hero_body, 5, &equip_body);
+            }
+            write_varint_field(&mut hero_body, 6, hero.point.max(0) as u64);
+            write_bytes(&mut body, 7, &hero_body);
+        }
+        write_varint_field(&mut body, 8, record.power.max(0) as u64);
+        write_varint_field(&mut body, 9, record.record_time.max(0) as u64);
+        for ex_buff in &record.ex_buff {
+            write_varint_field(&mut body, 10, *ex_buff as u32 as u64);
+        }
+        body
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PresetFleet {
+    pub name: String,
+    pub hero_ids: Vec<i32>,
+    pub ex_hero_ids: Vec<i32>,
+    pub mode_id: i32,
+    pub strategy_id: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PresetFleetInfo {
+    pub fleets: Vec<PresetFleet>,
+    pub name_num: i32,
+    pub red_dot: i32,
+}
+
+pub struct PresetFleetCodec;
+
+impl PresetFleetCodec {
+    pub fn encode(value: &PresetFleetInfo) -> Vec<u8> {
+        let mut output = Vec::new();
+        for fleet in &value.fleets {
+            let mut body = Vec::new();
+            write_string(&mut body, 1, &fleet.name);
+            for hero_id in &fleet.hero_ids {
+                write_varint_field(&mut body, 2, *hero_id as u32 as u64);
+            }
+            write_int32(&mut body, 3, fleet.mode_id);
+            write_int32(&mut body, 4, fleet.strategy_id);
+            for hero_id in &fleet.ex_hero_ids {
+                write_varint_field(&mut body, 5, *hero_id as u32 as u64);
+            }
+            write_bytes(&mut output, 1, &body);
+        }
+        write_varint_field(&mut output, 2, value.name_num.max(0) as u64);
+        write_varint_field(&mut output, 3, value.red_dot.max(0) as u64);
+        output
+    }
+
+    pub fn decode(payload: &[u8]) -> Result<PresetFleetInfo, ProtocolError> {
+        let mut reader = PbReader::new(payload);
+        let mut value = PresetFleetInfo::default();
+        while let Some((field, wire)) = reader.next_field()? {
+            match (field, wire) {
+                (1, 2) => value.fleets.push(Self::decode_fleet(reader.read_bytes()?)?),
+                (2, 0) => value.name_num = reader.read_varint()? as i32,
+                (3, 0) => value.red_dot = reader.read_varint()? as i32,
+                (_, wire) => reader.skip(wire)?,
+            }
+        }
+        Ok(value)
+    }
+
+    fn decode_fleet(payload: &[u8]) -> Result<PresetFleet, ProtocolError> {
+        let mut reader = PbReader::new(payload);
+        let mut value = PresetFleet::default();
+        while let Some((field, wire)) = reader.next_field()? {
+            match (field, wire) {
+                (1, 2) => value.name = reader.read_string()?,
+                (2, 0) => value.hero_ids.push(reader.read_varint()? as i32),
+                (3, 0) => value.mode_id = reader.read_varint()? as i32,
+                (4, 0) => value.strategy_id = reader.read_varint()? as i32,
+                (5, 0) => value.ex_hero_ids.push(reader.read_varint()? as i32),
+                (_, wire) => reader.skip(wire)?,
+            }
+        }
+        Ok(value)
+    }
+}
+
+fn decode_sample_info(payload: &[u8]) -> Result<TSampleInfo, ProtocolError> {
+    let mut reader = PbReader::new(payload);
+    let mut value = TSampleInfo::default();
+    while let Some((field, wire)) = reader.next_field()? {
+        match (field, wire) {
+            (1, 2) => value.uuid = reader.read_string()?,
+            (2, 2) => value.model = reader.read_string()?,
+            (3, 2) => value.release = reader.read_string()?,
+            (4, 2) => value.network = reader.read_string()?,
+            (5, 2) => value.platform = reader.read_string()?,
+            (6, 2) => value.pkg_name = reader.read_string()?,
+            (_, wire) => reader.skip(wire)?,
+        }
+    }
+    Ok(value)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientGameMessage {
+    pub channel: u8,
+    pub operation: u8,
+    pub session_id: i64,
+    pub state: u8,
+    pub payload: Vec<u8>,
+}
+
+pub struct ClientGameWireCodec;
+
+impl ClientGameWireCodec {
+    pub fn encode_client_request(
+        operation: u8,
+        payload: &[u8],
+        session_id: i64,
+        state: u8,
+    ) -> Vec<u8> {
+        let mut packet = Vec::with_capacity(11 + payload.len());
+        packet.extend_from_slice(&[0, operation]);
+        packet.extend_from_slice(&session_id.to_le_bytes());
+        packet.push(state);
+        packet.extend_from_slice(payload);
+        packet
+    }
+
+    pub fn decode_client_request(packet: &[u8]) -> Result<ClientGameMessage, ProtocolError> {
+        if packet.len() < 11 {
+            return Err(ProtocolError::Truncated("client game packet"));
+        }
+        Ok(ClientGameMessage {
+            channel: packet[0],
+            operation: packet[1],
+            session_id: i64::from_le_bytes(
+                packet[2..10]
+                    .try_into()
+                    .map_err(|_| ProtocolError::Invalid("invalid client session id"))?,
+            ),
+            state: packet[10],
+            payload: packet[11..].to_vec(),
+        })
+    }
+
+    pub fn encode_server_response(operation: u8, payload: &[u8]) -> Vec<u8> {
+        let mut operation_payload = Vec::new();
+        write_int32(&mut operation_payload, 1, 0);
+        write_int32(&mut operation_payload, 2, 0);
+        write_int32(&mut operation_payload, 3, i32::from(operation));
+        write_bytes(&mut operation_payload, 4, payload);
+        let mut envelope = Vec::new();
+        write_int32(&mut envelope, 1, 0);
+        write_bytes(&mut envelope, 2, &operation_payload);
+        let mut packet = Vec::with_capacity(2 + envelope.len());
+        packet.extend_from_slice(&[0, 5]);
+        packet.extend_from_slice(&envelope);
+        packet
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameLoginFrame {
+    pub operation: i32,
+    pub payload: Vec<u8>,
+}
+
+pub struct GameLoginFrameCodec;
+
+impl GameLoginFrameCodec {
+    pub fn encode(frame: &GameLoginFrame) -> Result<Vec<u8>, ProtocolError> {
+        if frame.payload.len() > MAX_FRAME_SIZE as usize {
+            return Err(ProtocolError::InvalidFrameLength(frame.payload.len() as i64));
+        }
+        let length = i32::try_from(frame.payload.len() + 4)
+            .map_err(|_| ProtocolError::InvalidFrameLength(frame.payload.len() as i64))?;
+        let mut packet = Vec::with_capacity(frame.payload.len() + 8);
+        packet.extend_from_slice(&length.to_be_bytes());
+        packet.extend_from_slice(&frame.operation.to_be_bytes());
+        packet.extend_from_slice(&frame.payload);
+        Ok(packet)
+    }
+
+    pub fn decode(packet: &[u8]) -> Result<GameLoginFrame, ProtocolError> {
+        if packet.len() < 8 {
+            return Err(ProtocolError::Truncated("game login frame"));
+        }
+        let length = i32::from_be_bytes([packet[0], packet[1], packet[2], packet[3]]);
+        if !(4..=MAX_FRAME_SIZE).contains(&length) || packet.len() < length as usize + 4 {
+            return Err(ProtocolError::InvalidFrameLength(length as i64));
+        }
+        let operation = i32::from_be_bytes([packet[4], packet[5], packet[6], packet[7]]);
+        Ok(GameLoginFrame {
+            operation,
+            payload: packet[8..4 + length as usize].to_vec(),
+        })
+    }
+
+    pub async fn write<W>(writer: &mut W, frame: &GameLoginFrame) -> Result<(), ProtocolError>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        let packet = Self::encode(frame)?;
+        writer.write_all(&packet).await?;
+        writer.flush().await?;
+        Ok(())
+    }
+
+    pub async fn read<R>(reader: &mut R) -> Result<Option<GameLoginFrame>, ProtocolError>
+    where
+        R: AsyncRead + Unpin,
+    {
+        let mut header = [0_u8; 8];
+        match reader.read(&mut header[..1]).await? {
+            0 => return Ok(None),
+            1 => {}
+            _ => unreachable!("single-byte read cannot return more than one byte"),
+        }
+        reader
+            .read_exact(&mut header[1..])
+            .await
+            .map_err(|error| match error.kind() {
+                io::ErrorKind::UnexpectedEof => ProtocolError::Truncated("game login frame header"),
+                _ => ProtocolError::Io(error),
+            })?;
+        let length = i32::from_be_bytes([header[0], header[1], header[2], header[3]]);
+        if !(4..=MAX_FRAME_SIZE).contains(&length) {
+            return Err(ProtocolError::InvalidFrameLength(length as i64));
+        }
+        let mut payload = vec![0_u8; length as usize - 4];
+        reader
+            .read_exact(&mut payload)
+            .await
+            .map_err(|error| match error.kind() {
+                io::ErrorKind::UnexpectedEof => {
+                    ProtocolError::Truncated("game login frame payload")
+                }
+                _ => ProtocolError::Io(error),
+            })?;
+        Ok(Some(GameLoginFrame {
+            operation: i32::from_be_bytes([header[4], header[5], header[6], header[7]]),
+            payload,
+        }))
+    }
+}
+
+struct PbReader<'a> {
+    data: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> PbReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, offset: 0 }
+    }
+
+    fn next_field(&mut self) -> Result<Option<(u32, u8)>, ProtocolError> {
+        if self.offset == self.data.len() {
+            return Ok(None);
+        }
+        let key = self.read_varint()?;
+        let field = (key >> 3) as u32;
+        let wire = (key & 7) as u8;
+        if field == 0 {
+            return Err(ProtocolError::Invalid("field number is zero"));
+        }
+        Ok(Some((field, wire)))
+    }
+
+    fn read_varint(&mut self) -> Result<u64, ProtocolError> {
+        let mut value = 0_u64;
+        for shift in (0..64).step_by(7) {
+            let byte = *self
+                .data
+                .get(self.offset)
+                .ok_or(ProtocolError::Truncated("varint"))?;
+            self.offset += 1;
+            value |= u64::from(byte & 0x7F) << shift;
+            if byte & 0x80 == 0 {
+                return Ok(value);
+            }
+        }
+        Err(ProtocolError::VarintTooLong)
+    }
+
+    fn read_bytes(&mut self) -> Result<&'a [u8], ProtocolError> {
+        let length = usize::try_from(self.read_varint()?)
+            .map_err(|_| ProtocolError::Invalid("length does not fit usize"))?;
+        let end = self
+            .offset
+            .checked_add(length)
+            .ok_or(ProtocolError::Invalid("length overflows"))?;
+        let value = self
+            .data
+            .get(self.offset..end)
+            .ok_or(ProtocolError::Truncated("length-delimited field"))?;
+        self.offset = end;
+        Ok(value)
+    }
+
+    fn read_string(&mut self) -> Result<String, ProtocolError> {
+        let bytes = self.read_bytes()?;
+        String::from_utf8(bytes.to_vec()).map_err(|_| ProtocolError::Invalid("string is not UTF-8"))
+    }
+
+    fn skip(&mut self, wire: u8) -> Result<(), ProtocolError> {
+        match wire {
+            0 => self.read_varint().map(|_| ()),
+            1 => self.skip_bytes(8),
+            2 => self.read_bytes().map(|_| ()),
+            5 => self.skip_bytes(4),
+            _ => Err(ProtocolError::Invalid("unsupported wire type")),
+        }
+    }
+
+    fn skip_bytes(&mut self, length: usize) -> Result<(), ProtocolError> {
+        let end = self
+            .offset
+            .checked_add(length)
+            .ok_or(ProtocolError::Invalid("field length overflows"))?;
+        if end > self.data.len() {
+            return Err(ProtocolError::Truncated("fixed-width field"));
+        }
+        self.offset = end;
+        Ok(())
+    }
+}
+
+fn write_varint_field(output: &mut Vec<u8>, field: u32, value: u64) {
+    write_varint(output, u64::from(field) << 3);
+    write_varint(output, value);
+}
+
+fn write_bytes(output: &mut Vec<u8>, field: u32, value: &[u8]) {
+    write_varint(output, (u64::from(field) << 3) | 2);
+    write_varint(output, value.len() as u64);
+    output.extend_from_slice(value);
+}
+
+fn write_fixed32_field(output: &mut Vec<u8>, field: u32, value: u32) {
+    write_varint(output, (u64::from(field) << 3) | 5);
+    output.extend_from_slice(&value.to_le_bytes());
+}
+
+fn write_string(output: &mut Vec<u8>, field: u32, value: &str) {
+    if !value.is_empty() {
+        write_bytes(output, field, value.as_bytes());
+    }
+}
+
+fn write_string_always(output: &mut Vec<u8>, field: u32, value: &str) {
+    write_bytes(output, field, value.as_bytes());
+}
+
+fn write_int32(output: &mut Vec<u8>, field: u32, value: i32) {
+    if value != 0 {
+        write_varint_field(output, field, value as u32 as u64);
+    }
+}
+
+fn write_varint(output: &mut Vec<u8>, mut value: u64) {
+    while value >= 0x80 {
+        output.push((value as u8 & 0x7F) | 0x80);
+        value >>= 7;
+    }
+    output.push(value as u8);
+}

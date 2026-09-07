@@ -1,0 +1,1768 @@
+use blueoath_protocol::*;
+use blueoath_transport::NetSocketFrameCodec;
+use serde_json::{json, Value};
+use tokio::io::{AsyncRead, AsyncWrite};
+
+use super::catalog::*;
+use super::wire::*;
+use super::*;
+
+#[path = "activity_extra_handler.rs"]
+mod activity_extra_handler;
+#[path = "activity_handler.rs"]
+mod activity_handler;
+#[path = "adventure_handler.rs"]
+mod adventure_handler;
+#[path = "base_handler.rs"]
+mod base_handler;
+#[path = "battle_handler.rs"]
+mod battle_handler;
+#[path = "boss_handler.rs"]
+mod boss_handler;
+#[path = "building_handler.rs"]
+mod building_handler;
+#[path = "buildship_handler.rs"]
+mod buildship_handler;
+#[path = "chat_handler.rs"]
+mod chat_handler;
+#[path = "commerce_handler.rs"]
+mod commerce_handler;
+#[path = "coop_handler.rs"]
+pub(super) mod coop_handler;
+#[path = "equip_handler.rs"]
+pub(crate) mod equip_handler;
+#[path = "extended_handler.rs"]
+mod extended_handler;
+#[path = "friend_handler.rs"]
+mod friend_handler;
+#[path = "guild_extension_handler.rs"]
+mod guild_extension_handler;
+#[path = "guild_handler.rs"]
+mod guild_handler;
+#[path = "guildbox_handler.rs"]
+mod guildbox_handler;
+#[path = "guildtask_handler.rs"]
+mod guildtask_handler;
+#[path = "hero_handler.rs"]
+mod hero_handler;
+#[path = "invitescore_handler.rs"]
+mod invitescore_handler;
+#[path = "legacy_handler.rs"]
+mod legacy_handler;
+#[path = "misc_extended_handler.rs"]
+mod misc_extended_handler;
+#[path = "misc_handler.rs"]
+mod misc_handler;
+#[path = "outpost_handler.rs"]
+mod outpost_handler;
+#[path = "shiptask_handler.rs"]
+mod shiptask_handler;
+#[path = "sportsmeet_handler.rs"]
+mod sportsmeet_handler;
+#[path = "teaching_handler.rs"]
+mod teaching_handler;
+#[cfg(test)]
+pub(super) use legacy_handler::pass_mini_game;
+#[path = "progression_handler.rs"]
+mod progression_handler;
+#[path = "talent_handler.rs"]
+mod talent_handler;
+#[path = "tower_handler.rs"]
+pub(super) mod tower_handler;
+
+type BattlePassDetails = (i32, i32, i32, bool, Vec<i32>, Vec<(u64, i32)>);
+
+struct GameLoginRequestContext<'state, 'account, 'scratch> {
+    state: &'state ServerState,
+    account: &'scratch mut Option<&'account mut Value>,
+    catalogs: GameLoginCatalogs<'state>,
+    pre_pushes: &'scratch mut Vec<Vec<u8>>,
+    post_pushes: &'scratch mut Vec<Vec<u8>>,
+    response_err: &'scratch mut i32,
+    response_err_msg: &'scratch mut String,
+    pass_details: &'scratch mut Option<BattlePassDetails>,
+    pass_rewards: &'scratch mut Vec<ShopReward>,
+    pass_hero_ids: &'scratch mut Vec<u64>,
+    pass_mvp_hero_id: &'scratch mut Option<u64>,
+    pass_shipwrecked_ids: &'scratch mut std::collections::HashSet<u64>,
+}
+
+pub(super) async fn process_game_login_frame_payload_with_catalog_mut<S>(
+    stream: &mut S,
+    state: &ServerState,
+    mut account: Option<&mut Value>,
+    frame: blueoath_transport::NetSocketFrame,
+    catalogs: &GameLoginCatalogs<'_>,
+) -> Result<bool, ServerError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let GameLoginCatalogs {
+        fashion: fashion_catalog,
+        equip: equip_catalog,
+        hero_level: hero_level_catalog,
+        shop: shop_catalog,
+        mails: mail_catalog,
+        handbook_behaviours,
+        hero_memories,
+        chapters: chapter_catalog,
+        tasks: task_catalog,
+        battle: battle_catalog,
+        ..
+    } = *catalogs;
+
+    // Keep immutable view independent from mutable account so profile mutations can update
+    // the same request snapshot before response pushes are encoded.
+    let account_snapshot = account.as_deref().cloned();
+    let account_view = account_snapshot.as_ref();
+    if frame.frame_type == 2 {
+        NetSocketFrameCodec::write(stream, 2, &[]).await?;
+        return Ok(true);
+    }
+    if frame.payload.is_empty() {
+        return Ok(true);
+    }
+
+    let request = TMessageCodec::decode_request(&frame.payload)?;
+    let request_args = request.args.as_deref().unwrap_or_default();
+    if std::env::var_os("BLUEOATH_TRACE_METHODS").is_some() {
+        eprintln!(
+            "game-login method={} args={} hex={} f1={} f2={} f3={}",
+            request.method,
+            request_args.len(),
+            request_args
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>(),
+            decode_varint_u64_field(request_args, 1),
+            decode_varint_u64_field(request_args, 2),
+            decode_varint_u64_field(request_args, 3)
+        );
+    }
+    let is_user_info = request.method == "user.GetUserInfo";
+    let is_user_login = request.method == "user.UserLogin";
+    let is_profile_update = matches!(
+        request.method.as_str(),
+        "user.SetUserSecretary"
+            | "user.ChangeName"
+            | "user.SetMessage"
+            | "user.SetPlayerHeadFrame"
+            | "user.SetHead"
+    );
+    let mut pre_pushes = Vec::<Vec<u8>>::new();
+    let mut post_pushes = Vec::<Vec<u8>>::new();
+    let mut pass_details = None;
+    let mut pass_rewards = Vec::<ShopReward>::new();
+    let mut pass_hero_ids = Vec::<u64>::new();
+    let mut pass_mvp_hero_id = None;
+    let mut pass_shipwrecked_ids = std::collections::HashSet::new();
+    let mut response_err = 0;
+    let mut response_err_msg = String::new();
+    let mut ret = match request.method.as_str() {
+        "player.Login" => Some(GameLoginCodec::encode_response(&TRetLogin {
+            ret: "ok".to_owned(),
+            feign_role_id: state.profile_id.clone(),
+            err_code: 0,
+        })),
+        "player.GetUserList" => Some(UserListCodec::encode(&[user_info_from_account(
+            state,
+            account_view,
+        )])),
+        "player.CreateUser" => Some(PlayerUserCodec::encode(&user_info_from_account(
+            state,
+            account_view,
+        ))),
+        _ if matches!(
+            request.method.as_str(),
+            "cachedata.CacheData"
+                | "user.GetHeadBuyCount"
+                | "user.BuyHead"
+                | "user.NewHeadUnlockedList"
+                | "hero.Marry"
+                | "hero.AddAffection"
+                | "hero.HeroCombine"
+                | "hero.HeroCombineBreak"
+                | "hero.HeroCombineQuickLevelUp"
+                | "hero.HeroCombineUpLv"
+                | "repair.RepairHero"
+                | "illustrate.VowHero"
+                | "illustrate.VowDecTime"
+                | "illustrate.AddBehaviour"
+                | "illustrate.ModiVowHeroList"
+                | "illustrate.IllustrateNew"
+                | "illustrate.EquipNew"
+                | "fashion.fashionReplaceReward"
+                | "bag.GetNormalTreasureInfo"
+                | "bag.GetSelectTreasureInfo"
+                | "copy.DotBase"
+                | "copyinfo.DotBase"
+                | "copy.FetchRewardBox"
+                | "copy.PassMiniGame"
+                | "copy.StarReward"
+                | "task.GetPtReward"
+                | "task.GetTeachingTask"
+        ) =>
+        {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            legacy_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("hero.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            hero_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        "tactic.GetHerosTactic" => Some(FleetInfoCodec::encode(&fleet_info_from_account(
+            account_view.unwrap_or(&Value::Null),
+        ))),
+        "tactic.SetHerosTactic" => {
+            let fleet = decode_fleet_info(request_args);
+            if let Some(account) = account.as_deref_mut() {
+                set_fleet_from_account(account, &fleet);
+            }
+            Some(FleetInfoCodec::encode(&fleet))
+        }
+        "presetfleet.PresetFleetsInfo" => Some(PresetFleetCodec::encode(
+            &preset_fleet_info_from_account(account_view.unwrap_or(&Value::Null)),
+        )),
+        "presetfleet.SetPresetFleets" => match PresetFleetCodec::decode(request_args) {
+            Ok(preset) if preset.fleets.len() <= 100 => {
+                if let Some(account) = account.as_deref_mut() {
+                    set_preset_fleet_from_account(account, &preset);
+                    let payload =
+                        PresetFleetCodec::encode(&preset_fleet_info_from_account(account));
+                    append_method_push(
+                        &mut post_pushes,
+                        "presetfleet.PresetFleetsInfo",
+                        payload.clone(),
+                    );
+                    Some(payload)
+                } else {
+                    Some(PresetFleetCodec::encode(&preset))
+                }
+            }
+            _ => {
+                response_err = 1;
+                response_err_msg = "preset fleet request is invalid".to_owned();
+                Some(Vec::new())
+            }
+        },
+        "user.GetUserInfo" => Some(UserInfoCodec::encode(&user_info_from_account(
+            state,
+            account_view,
+        ))),
+        "user.UserLogin" => {
+            if let Some(account) = account.as_deref_mut() {
+                advance_task_event(account, task_catalog, 1, 1, current_unix_seconds());
+                if account.get("guild").is_some() {
+                    guild_handler::push_guild_state(&mut post_pushes, account);
+                }
+                append_method_push(
+                    &mut post_pushes,
+                    "task.TaskInfo",
+                    task_info_payload(account, task_catalog),
+                );
+            }
+            Some(UserLoginCodec::encode_response("ok", "", 0))
+        }
+        "user.SetUserSecretary" => {
+            if let Some(account) = account.as_deref_mut() {
+                set_character_i64(account, "secretaryId", decode_varint_field(request_args, 1));
+            }
+            Some(Vec::new())
+        }
+        "user.ChangeName" => {
+            if let Some(value) = decode_string_field(request_args, 1) {
+                if let Some(account) = account.as_deref_mut() {
+                    set_character_string(account, "name", value);
+                }
+            }
+            Some(Vec::new())
+        }
+        "user.SetMessage" => {
+            if let Some(account) = account.as_deref_mut() {
+                set_character_string(
+                    account,
+                    "message",
+                    decode_string_field(request_args, 1).unwrap_or_default(),
+                );
+            }
+            Some(Vec::new())
+        }
+        "user.SetPlayerHeadFrame" => {
+            if let Some(account) = account.as_deref_mut() {
+                set_character_i64(account, "headFrame", decode_varint_field(request_args, 1));
+            }
+            Some(Vec::new())
+        }
+        "user.SetHead" => {
+            if let Some(account) = account.as_deref_mut() {
+                set_character_i64(account, "head", decode_varint_field(request_args, 2));
+            }
+            Some(Vec::new())
+        }
+        _ if request.method.starts_with("user.")
+            || request.method.starts_with("usersvr.")
+            || request.method.starts_with("strategy.")
+            || request.method.starts_with("supportfleet.")
+            || request.method.starts_with("presetfleet.")
+            || request.method.starts_with("milestone.")
+            || request.method.starts_with("supply.")
+            || request.method.starts_with("jopen.")
+            || request.method.starts_with("guide.") =>
+        {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            base_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("guild.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            guild_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("friend.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            friend_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("chat.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            chat_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("adventure.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            adventure_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("boss.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            boss_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("guildbox.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            guildbox_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("invitescore.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            invitescore_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if activity_handler::handles(request.method.as_str()) => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            activity_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if activity_extra_handler::handles(request.method.as_str()) => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            activity_extra_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method == "archiveCopy.IsLoad"
+            || request.method == "copyextra.AddCopyRewardCount"
+            || request.method == "copyextra.UpdateCopyExtraInfo"
+            || request.method == "prefs.SavePrefs"
+            || request.method == "statcount.GetStatCount"
+            || request.method == "sign.Sign"
+            || request.method == "miniGame.StartMiniGame"
+            || request.method == "alchemy.StartAlchemy" =>
+        {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            misc_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if (request.method.starts_with("exchange.")
+            || request.method.starts_with("foodCompose.")
+            || request.method.starts_with("battlepass.")
+            || request.method.starts_with("activitybattlepass.")
+            || request.method.starts_with("magazine.")
+            || request.method.starts_with("interactionitem."))
+            && !extended_handler::handles(request.method.as_str())
+            && !misc_extended_handler::handles(request.method.as_str()) =>
+        {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            misc_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("teachingsvr.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            teaching_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("outpost.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            outpost_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("shiptask.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            shiptask_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("sportsmeet.")
+            || request.method.starts_with("sportsmeetrank.") =>
+        {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            sportsmeet_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if extended_handler::handles(request.method.as_str()) => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            extended_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if misc_extended_handler::handles(request.method.as_str()) => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            misc_extended_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if guildtask_handler::handles(request.method.as_str()) => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            guildtask_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if guild_extension_handler::handles(request.method.as_str()) => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            guild_extension_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if misc_handler::handles(request.method.as_str()) => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            misc_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        "mail.GetMailList"
+        | "mail.OpenMail"
+        | "mail.DeleteMail"
+        | "mail.DeleteAllMail"
+        | "mail.ReceiveNewMail" => Some(encode_mail_list_response(
+            mail_catalog.unwrap_or_default(),
+            current_unix_seconds(),
+            &[],
+        )),
+        "mail.FetchItem" | "mail.FetchAllItems" => {
+            let fetch_one = request.method == "mail.FetchItem";
+            let mid = decode_varint_u64_field(request_args, 1);
+            let mut rewards = Vec::new();
+            if let Some(account) = account.as_deref_mut() {
+                for mail in mail_catalog.unwrap_or_default() {
+                    if fetch_one && mail.mid != mid {
+                        continue;
+                    }
+                    apply_mail_reward(account, mail);
+                    rewards.push(ShopReward {
+                        goods_type: mail.goods_type,
+                        item_id: mail.config_id,
+                        num: mail.num,
+                        instance_id: 0,
+                    });
+                }
+                if !rewards.is_empty() {
+                    append_method_push(
+                        &mut pre_pushes,
+                        "user.UpdateUserInfo",
+                        UserInfoCodec::encode(&user_info_from_account(state, Some(account))),
+                    );
+                    append_method_push(
+                        &mut pre_pushes,
+                        "bag.UpdateBagData",
+                        BagInfoCodec::encode(&bag_info_from_account(account)),
+                    );
+                }
+            }
+            if rewards.is_empty() {
+                response_err = 1;
+                response_err_msg = if fetch_one {
+                    "mail was not found".to_owned()
+                } else {
+                    "mail list is empty".to_owned()
+                };
+            }
+            Some(encode_mail_list_response(
+                mail_catalog.unwrap_or_default(),
+                current_unix_seconds(),
+                &rewards,
+            ))
+        }
+        _ if request.method.starts_with("shop.")
+            || request.method.starts_with("recharge.")
+            || request.method == "bag.GetBagInfo"
+            || request.method == "bag.CompositeItem"
+            || request.method == "bag.SaleBagItem"
+            || request.method == "fashion.updateData"
+            || request.method == "fashion.Equip" =>
+        {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            commerce_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("equip.")
+            || request.method.starts_with("equiptestcopy.")
+            || request.method.starts_with("equipnewtestcopy.")
+            || request.method.starts_with("equipactivity.") =>
+        {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            equip_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("building.")
+            || request.method.starts_with("build.")
+            || request.method.starts_with("buildnotes.")
+            || request.method.starts_with("discuss.") =>
+        {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            building_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("buildship.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            buildship_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("study.")
+            || request.method.starts_with("task.")
+            || request.method.starts_with("bathroom.") =>
+        {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            progression_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("matchsvr.")
+            || request.method.starts_with("matchsvr_")
+            || request.method.starts_with("room.")
+            || matches!(
+                request.method.as_str(),
+                "battle.CreateRoom"
+                    | "battle.JoinRoom"
+                    | "battle.LeaveRoom"
+                    | "battle.MatchJoin"
+                    | "battle.MatchLeave"
+                    | "battle.SendAutoMsg"
+                    | "battle.pvpMatchReady"
+                    | "battle.pvpMatchReadyTimeout"
+                    | "battle.CreateMutiBattle"
+                    | "battle.createBattleInfo"
+            ) =>
+        {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            coop_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("copy.")
+            && !matches!(
+                request.method.as_str(),
+                "copy.ChooseSfLv" | "copy.GetCopy" | "copy.UnLockCopy"
+            )
+            || request.method.starts_with("mopUp.")
+            || request.method.starts_with("dailycopy.")
+            || request.method == "copyinfo.GetCopyInfo" =>
+        {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            battle_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("talentTree.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            talent_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("tower.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            tower_handler::handle(&mut context, request.method.as_str(), request_args)
+        }
+        _ if request.method.starts_with("activityTower.") => {
+            let mut context = GameLoginRequestContext {
+                state,
+                account: &mut account,
+                catalogs: *catalogs,
+                pre_pushes: &mut pre_pushes,
+                post_pushes: &mut post_pushes,
+                response_err: &mut response_err,
+                response_err_msg: &mut response_err_msg,
+                pass_details: &mut pass_details,
+                pass_rewards: &mut pass_rewards,
+                pass_hero_ids: &mut pass_hero_ids,
+                pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            };
+            tower_handler::handle_activity(&mut context, request.method.as_str(), request_args)
+        }
+        "copy.ChooseSfLv" => {
+            let copy_id = decode_varint_field(request_args, 1);
+            let requested = decode_varint_field(request_args, 2);
+            let known_copy = chapter_catalog
+                .map(|catalog| catalog.sea.contains(&copy_id))
+                .unwrap_or(copy_id > 0);
+            if !known_copy {
+                response_err = 1;
+                response_err_msg = "sea copy is invalid".to_owned();
+                Some(Vec::new())
+            } else if !(1..=7).contains(&requested) {
+                response_err = 1;
+                response_err_msg = "sea difficulty is invalid".to_owned();
+                Some(Vec::new())
+            } else if let Some(account) = account.as_deref_mut() {
+                let level = commander_level(account);
+                if level < SEA_DIFFICULTY_UNLOCK_LEVEL && requested > 1 {
+                    response_err = 1;
+                    response_err_msg = "sea difficulty unlocks at commander level 60".to_owned();
+                    Some(Vec::new())
+                } else {
+                    set_sea_difficulty(account, requested);
+                    let fallback_catalog;
+                    let catalog = match chapter_catalog {
+                        Some(catalog) => catalog,
+                        None => {
+                            fallback_catalog = ChapterCatalog::fallback();
+                            &fallback_catalog
+                        }
+                    };
+                    let passed = completed_copy_ids(account, "seaProgress");
+                    let pass_counts = completed_copy_counts(account, "seaProgress");
+                    append_method_push(
+                        &mut post_pushes,
+                        "copy.GetCopy",
+                        CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
+                            &catalog.sea,
+                            copy_progress_max_or_initial(
+                                &catalog.sea,
+                                &passed,
+                                catalog.sea_initial,
+                            ),
+                            &passed,
+                            &pass_counts,
+                            sea_difficulty_for_account(account),
+                        ),
+                    );
+                    Some(Vec::new())
+                }
+            } else {
+                response_err = 1;
+                response_err_msg = "account is unavailable".to_owned();
+                Some(Vec::new())
+            }
+        }
+        "copy.GetCopy" => {
+            let fallback_catalog;
+            let catalog = match chapter_catalog {
+                Some(catalog) => catalog,
+                None => {
+                    fallback_catalog = ChapterCatalog::fallback();
+                    &fallback_catalog
+                }
+            };
+            let copy_type = copy_request_type(request_args);
+            let passed = account_view
+                .map(|account| match copy_type {
+                    2 => completed_copy_ids(account, "seaProgress"),
+                    _ => completed_copy_ids(account, "copyProgress"),
+                })
+                .unwrap_or_default();
+            Some(match copy_type {
+                2 => {
+                    let pass_counts = account_view
+                        .map(|account| completed_copy_counts(account, "seaProgress"))
+                        .unwrap_or_default();
+                    CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
+                        &catalog.sea,
+                        copy_progress_max_or_initial(&catalog.sea, &passed, catalog.sea_initial),
+                        &passed,
+                        &pass_counts,
+                        account_view.map(sea_difficulty_for_account).unwrap_or(1),
+                    )
+                }
+                33 => CopyInfoCodec::encode(
+                    33,
+                    &catalog.mubar,
+                    catalog.mubar.iter().copied().max().unwrap_or_default(),
+                ),
+                10 => CopyInfoCodec::encode(
+                    10,
+                    &catalog.goods_copy,
+                    catalog.goods_copy.iter().copied().max().unwrap_or_default(),
+                ),
+                24 => CopyInfoCodec::encode(
+                    24,
+                    &catalog.tower,
+                    catalog.tower.iter().copied().max().unwrap_or_default(),
+                ),
+                34 => CopyInfoCodec::encode(
+                    34,
+                    &catalog.equip_new_test,
+                    catalog
+                        .equip_new_test
+                        .iter()
+                        .copied()
+                        .max()
+                        .unwrap_or_default(),
+                ),
+                9 => CopyInfoCodec::encode(
+                    9,
+                    &catalog.daily,
+                    catalog.daily.iter().copied().max().unwrap_or_default(),
+                ),
+                _ => CopyInfoCodec::encode_with_progress(
+                    1,
+                    &catalog.plot,
+                    copy_progress_max_or_first(&catalog.plot, &passed),
+                    &passed,
+                ),
+            })
+        }
+        "copy.UnLockCopy" => {
+            let fallback_catalog;
+            let catalog = match chapter_catalog {
+                Some(catalog) => catalog,
+                None => {
+                    fallback_catalog = ChapterCatalog::fallback();
+                    &fallback_catalog
+                }
+            };
+            let passed = account_view
+                .map(|account| completed_copy_ids(account, "copyProgress"))
+                .unwrap_or_default();
+            Some(CopyInfoCodec::encode_with_progress(
+                1,
+                &catalog.plot,
+                copy_progress_max_or_first(&catalog.plot, &passed),
+                &passed,
+            ))
+        }
+        _ => None,
+    };
+    // Every route emitted by JP client must complete its callback. Some legacy
+    // routes have no local state model yet; persist call for later parity work
+    // and return valid empty protobuf payload instead of dropping response.
+    if ret.is_none() && is_known_client_route(&request.method) {
+        if let Some(account) = account.as_deref_mut() {
+            account["lastCompatRoute"] = json!({
+                "method": request.method,
+                "args": request_args,
+                "time": current_unix_seconds(),
+            });
+        }
+        ret = Some(Vec::new());
+    }
+    if is_user_login {
+        let now = current_unix_seconds();
+        let fallback_catalog;
+        let catalog = match chapter_catalog {
+            Some(catalog) => catalog,
+            None => {
+                fallback_catalog = ChapterCatalog::fallback();
+                &fallback_catalog
+            }
+        };
+        let max_id = |ids: &[i32]| ids.iter().copied().max().unwrap_or_default();
+        let plot_progress = account_view
+            .map(|account| completed_copy_ids(account, "copyProgress"))
+            .unwrap_or_default();
+        let sea_progress = account_view
+            .map(|account| completed_copy_ids(account, "seaProgress"))
+            .unwrap_or_default();
+        let sea_difficulty = account_view.map(sea_difficulty_for_account).unwrap_or(1);
+        let mut pushes = vec![
+            (
+                "user.UpdateUserInfo",
+                UserInfoCodec::encode(&user_info_from_account(state, account_view)),
+            ),
+            (
+                "guide.GuideInfo",
+                GuideInfoCodec::encode_initial_progress_completed(),
+            ),
+            (
+                "copy.GetCopy",
+                CopyInfoCodec::encode_with_progress(
+                    1,
+                    &catalog.plot,
+                    copy_progress_max_or_first(&catalog.plot, &plot_progress),
+                    &plot_progress,
+                ),
+            ),
+            (
+                "copy.GetCopy",
+                CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
+                    &catalog.sea,
+                    copy_progress_max_or_initial(&catalog.sea, &sea_progress, catalog.sea_initial),
+                    &sea_progress,
+                    &completed_copy_counts(account_view.unwrap_or(&Value::Null), "seaProgress"),
+                    sea_difficulty,
+                ),
+            ),
+            (
+                "copy.GetCopy",
+                CopyInfoCodec::encode(33, &catalog.mubar, max_id(&catalog.mubar)),
+            ),
+            (
+                "copy.GetCopy",
+                CopyInfoCodec::encode(9, &catalog.daily, max_id(&catalog.daily)),
+            ),
+            (
+                "dailycopy.UpdateDailyCopyData",
+                DailyCopyCodec::encode_with_progress(
+                    &catalog.daily_chapters,
+                    &catalog.daily_groups,
+                    &daily_copy_progress_from_account(account_view, now),
+                    &daily_copy_group_progress_from_account(account_view, "groups", now),
+                    &daily_copy_group_progress_from_account(account_view, "extraGroups", now),
+                ),
+            ),
+            (
+                "illustrate.IllustrateInfo",
+                illustrate_info_payload(
+                    account_view.unwrap_or(&Value::Null),
+                    handbook_behaviours,
+                    hero_memories,
+                ),
+            ),
+            ("illustrate.OldIllustrateInfo", Vec::new()),
+            (
+                "illustrate.Memory",
+                story_memory_payload(chapter_catalog.map(|catalog| catalog.memories.as_slice())),
+            ),
+        ];
+        if !catalog.equip_new_test.is_empty() {
+            pushes.push((
+                "copy.GetCopy",
+                CopyInfoCodec::encode(34, &catalog.equip_new_test, max_id(&catalog.equip_new_test)),
+            ));
+            pushes.push((
+                "equipnewtestcopy.UpdateEquipNewData",
+                equip_handler::equip_new_test_copy_payload(account_view.unwrap_or(&Value::Null)),
+            ));
+        }
+        for (method, payload) in pushes {
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: method.to_owned(),
+                ret: Some(payload),
+                time: now,
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+        }
+        let goods_copy_push = TMessageCodec::encode_response(&TResponse {
+            method: "goodscopy.UpdateData".to_owned(),
+            ret: Some(goods_copy_snapshot_payload(
+                account_view.unwrap_or(&Value::Null),
+                chapter_catalog,
+            )),
+            time: now,
+            ..TResponse::default()
+        });
+        post_pushes.push(goods_copy_push);
+        let talent_catalog = current_talent_catalog();
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "talentTree.TalentTreeAllList".to_owned(),
+            ret: Some(talent_tree_payload(
+                account_view.unwrap_or(&Value::Null),
+                &talent_catalog,
+            )),
+            time: now,
+            ..TResponse::default()
+        });
+        post_pushes.push(push);
+    }
+    let trace_ret_len = ret.as_ref().map(Vec::len).unwrap_or_default();
+    let trace_method = request.method.clone();
+    let trace_err_msg = response_err_msg.clone();
+    let trace_ret_hex = if trace_method == "copy.StartBase" {
+        ret.as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    } else {
+        String::new()
+    };
+    let response = TMessageCodec::encode_response(&TResponse {
+        err: response_err,
+        err_msg: response_err_msg,
+        method: request.method,
+        ret,
+        callback_handler: request.callback_handler,
+        time: current_unix_seconds(),
+        token: request.token,
+        is_response: 1,
+        ..TResponse::default()
+    });
+    if std::env::var_os("BLUEOATH_TRACE_METHODS").is_some() {
+        eprintln!(
+            "game-login result method={} err={} msg={} ret={} pre_pushes={} post_pushes={}",
+            trace_method,
+            response_err,
+            trace_err_msg,
+            trace_ret_len,
+            pre_pushes.len(),
+            post_pushes.len()
+        );
+        if trace_method == "copy.StartBase" {
+            eprintln!("game-login StartBase ret_hex={trace_ret_hex}");
+        }
+    }
+    for push in pre_pushes {
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
+    }
+    NetSocketFrameCodec::write(stream, 0, &response).await?;
+    if is_profile_update {
+        if let Some(account) = account.as_deref() {
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "user.UpdateUserInfo".to_owned(),
+                ret: Some(UserInfoCodec::encode(&user_info_from_account(
+                    state,
+                    Some(account),
+                ))),
+                time: current_unix_seconds(),
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+        }
+    }
+    if is_user_info {
+        if let Some(account) = account.as_deref() {
+            // Match the C# post-GetUserInfo bootstrap prefix. These state snapshots must
+            // arrive before inventory pushes: the client enters MainStage and reads them
+            // synchronously from its login state machine.
+            let now = current_unix_seconds();
+            let mut login_time = Vec::new();
+            append_varint_field(&mut login_time, 1, u64::from(now));
+            append_varint_field(&mut login_time, 2, u64::from(now.saturating_sub(3600)));
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "user.UpdateLoginTime".to_owned(),
+                ret: Some(login_time),
+                time: now,
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+
+            let mut server_time = Vec::new();
+            append_varint_field(&mut server_time, 1, u64::from(now));
+            append_varint_field(&mut server_time, 2, u64::from(now));
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "user.UpdateSvrTime".to_owned(),
+                ret: Some(server_time),
+                time: now,
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "user.GetUserInfo".to_owned(),
+                ret: Some(UserInfoCodec::encode(&user_info_from_account(
+                    state,
+                    Some(account),
+                ))),
+                time: now,
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+
+            for (method, ret) in [
+                ("build.BuildsInfo", construction_info_payload(account, now)),
+                ("bathroom.BathroomInfo", bathroom_info_payload(account)),
+                ("study.GetStudyInfo", study_info_payload(account, now)),
+                // TaskInfo: explicit teaching-stage row + daily count. Repeated task groups
+                // may be empty when this Rust profile has no task catalog; persisted teaching
+                // reward ids are retained so the client does not re-offer claimed rewards.
+                ("task.TaskInfo", task_info_payload(account, task_catalog)),
+            ] {
+                let push = TMessageCodec::encode_response(&TResponse {
+                    method: method.to_owned(),
+                    ret: Some(ret),
+                    time: now,
+                    ..TResponse::default()
+                });
+                NetSocketFrameCodec::write(stream, 0, &push).await?;
+            }
+
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "bag.UpdateBagData".to_owned(),
+                ret: Some(BagInfoCodec::encode(&bag_info_from_account(account))),
+                time: current_unix_seconds(),
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "fashion.updateData".to_owned(),
+                ret: Some(FashionListCodec::encode(&fashion_list_from_account(
+                    account,
+                    fashion_catalog,
+                ))),
+                time: current_unix_seconds(),
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "equip.UpdateEquipBagData".to_owned(),
+                ret: Some(EquipListCodec::encode(&equip_list_from_account(
+                    account,
+                    equip_catalog,
+                ))),
+                time: current_unix_seconds(),
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "hero.UpdateHeroBagData".to_owned(),
+                ret: Some(HeroBagCodec::encode(&hero_bag_from_account(account))),
+                time: current_unix_seconds(),
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "building.UpdateBuildingInfo".to_owned(),
+                ret: Some(UserBuildingInfoCodec::encode(&building_info_from_account(
+                    account,
+                    current_unix_seconds(),
+                ))),
+                time: current_unix_seconds(),
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "tactic.GetHerosTactic".to_owned(),
+                ret: Some(FleetInfoCodec::encode(&fleet_info_from_account(account))),
+                time: current_unix_seconds(),
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "shop.UpdateShopInfo".to_owned(),
+                ret: Some(shop_info_payload(shop_catalog)),
+                time: current_unix_seconds(),
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "recharge.RechargeInfo".to_owned(),
+                ret: Some(vec![0x1A, 0x00]),
+                time: current_unix_seconds(),
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "buildship.BuildShipInfo".to_owned(),
+                ret: Some(buildship_info_payload(
+                    Some(account),
+                    current_unix_seconds(),
+                )),
+                time: current_unix_seconds(),
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "presetfleet.PresetFleetsInfo".to_owned(),
+                ret: Some(PresetFleetCodec::encode(&preset_fleet_info_from_account(
+                    account,
+                ))),
+                time: current_unix_seconds(),
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+            for (method, ret) in [
+                (
+                    "illustrate.IllustrateInfo",
+                    illustrate_info_payload(account, handbook_behaviours, hero_memories),
+                ),
+                ("illustrate.OldIllustrateInfo", Vec::new()),
+                (
+                    "illustrate.Memory",
+                    story_memory_payload(
+                        chapter_catalog.map(|catalog| catalog.memories.as_slice()),
+                    ),
+                ),
+            ] {
+                let push = TMessageCodec::encode_response(&TResponse {
+                    method: method.to_owned(),
+                    ret: Some(ret),
+                    time: now,
+                    ..TResponse::default()
+                });
+                NetSocketFrameCodec::write(stream, 0, &push).await?;
+            }
+            let talent_catalog = current_talent_catalog();
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "talentTree.TalentTreeAllList".to_owned(),
+                ret: Some(talent_tree_payload(account, &talent_catalog)),
+                time: now,
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+        }
+    }
+    if let Some((copy_id, grade, battle_time, _first_pass, ex_buffs, exp_rewards)) = pass_details {
+        if let Some(account) = account {
+            record_battle_pass(
+                account,
+                copy_id,
+                grade,
+                battle_time,
+                battle_catalog,
+                &ex_buffs,
+            );
+            if battle_task_progress_enabled(battle_catalog, copy_id) {
+                advance_task_event(account, task_catalog, 2, 1, current_unix_seconds());
+            }
+            // Client task/achievement goals encode exact clear targets in goal[1]. Keep
+            // progression scoped to current copy instead of advancing every same-event row.
+            for event_type in [17, 24, 900] {
+                advance_task_event_with_param(
+                    account,
+                    task_catalog,
+                    event_type,
+                    copy_id,
+                    1,
+                    current_unix_seconds(),
+                );
+            }
+            // Battle completion grants configured commander and ship experience. Apply
+            // level-up rollover immediately so full XP no longer sticks at current level.
+            let (commander_base_exp, ship_base_exp) =
+                battle_copy_experience(battle_catalog, copy_id);
+            let (evaluation_exp_multiplier, _) =
+                battle_evaluation_multipliers(battle_catalog, grade);
+            let commander_exp = scale_reward(
+                i64::from(commander_base_exp),
+                state.commander_exp_multiplier * evaluation_exp_multiplier,
+            )
+            .clamp(0, i64::from(i32::MAX)) as i32;
+            add_commander_battle_exp(account, commander_exp, COMMANDER_LEVEL_CATALOG.get());
+            let ship_exp = exp_rewards.first().map_or_else(
+                || {
+                    scale_reward(
+                        i64::from(ship_base_exp),
+                        state.ship_exp_multiplier * evaluation_exp_multiplier,
+                    )
+                    .clamp(0, i64::from(i32::MAX)) as i32
+                },
+                |(_, value)| *value,
+            );
+            add_ship_battle_exp(account, &pass_hero_ids, ship_exp, hero_level_catalog);
+            let settlement_changed = battle_catalog
+                .and_then(|catalog| catalog.settlement_by_copy.get(&copy_id).copied())
+                .is_some_and(|rule| {
+                    apply_battle_settlement(
+                        account,
+                        &pass_hero_ids,
+                        pass_mvp_hero_id,
+                        &pass_shipwrecked_ids,
+                        rule,
+                        state.affection_multiplier,
+                    )
+                });
+            let copy_type = battle_catalog
+                .and_then(|catalog| catalog.copies.get(&copy_id))
+                .map(|copy| copy.copy_type)
+                .unwrap_or(1);
+            let specialized_event = match copy_type {
+                9 => Some(3),     // daily copy
+                33 => Some(3105), // special sea / material operation
+                _ => None,
+            };
+            if let Some(event_type) = specialized_event {
+                advance_task_event(account, task_catalog, event_type, 1, current_unix_seconds());
+            }
+            let first_rewards = std::mem::take(&mut pass_rewards);
+            if !first_rewards.is_empty() {
+                append_shop_update_pushes(
+                    &mut post_pushes,
+                    state,
+                    account,
+                    first_rewards[0],
+                    fashion_catalog,
+                    equip_catalog,
+                );
+            }
+            if ship_exp > 0 || settlement_changed {
+                append_method_push(
+                    &mut post_pushes,
+                    "hero.UpdateHeroBagData",
+                    HeroBagCodec::encode(&hero_bag_from_account(account)),
+                );
+            }
+            append_method_push(
+                &mut post_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_account(account)),
+            );
+            let now = current_unix_seconds();
+            let fallback_catalog;
+            let catalog = match chapter_catalog {
+                Some(catalog) => catalog,
+                None => {
+                    fallback_catalog = ChapterCatalog::fallback();
+                    &fallback_catalog
+                }
+            };
+            let payload = match copy_type {
+                2 => {
+                    let passed = completed_copy_ids(account, "seaProgress");
+                    let pass_counts = completed_copy_counts(account, "seaProgress");
+                    CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
+                        &catalog.sea,
+                        copy_progress_max_or_initial(&catalog.sea, &passed, catalog.sea_initial),
+                        &passed,
+                        &pass_counts,
+                        sea_difficulty_for_account(account),
+                    )
+                }
+                33 => CopyInfoCodec::encode(
+                    33,
+                    &catalog.mubar,
+                    catalog.mubar.iter().copied().max().unwrap_or_default(),
+                ),
+                10 => CopyInfoCodec::encode(
+                    10,
+                    &catalog.goods_copy,
+                    catalog.goods_copy.iter().copied().max().unwrap_or_default(),
+                ),
+                24 => CopyInfoCodec::encode(
+                    24,
+                    &catalog.tower,
+                    catalog.tower.iter().copied().max().unwrap_or_default(),
+                ),
+                9 => DailyCopyCodec::encode_with_progress(
+                    &catalog.daily_chapters,
+                    &catalog.daily_groups,
+                    &daily_copy_progress_from_account(Some(account), now),
+                    &daily_copy_group_progress_from_account(Some(account), "groups", now),
+                    &daily_copy_group_progress_from_account(Some(account), "extraGroups", now),
+                ),
+                _ => {
+                    let passed = completed_copy_ids(account, "copyProgress");
+                    CopyInfoCodec::encode_with_progress(
+                        1,
+                        &catalog.plot,
+                        copy_progress_max_or_first(&catalog.plot, &passed),
+                        &passed,
+                    )
+                }
+            };
+            let user_push = TMessageCodec::encode_response(&TResponse {
+                method: "user.UpdateUserInfo".to_owned(),
+                ret: Some(UserInfoCodec::encode(&user_info_from_account(
+                    state,
+                    Some(account),
+                ))),
+                time: now,
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &user_push).await?;
+            let task_push = TMessageCodec::encode_response(&TResponse {
+                method: "task.TaskInfo".to_owned(),
+                ret: Some(task_info_payload(account, task_catalog)),
+                time: now,
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &task_push).await?;
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: "copy.GetCopy".to_owned(),
+                ret: Some(payload),
+                time: now,
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+            if copy_type == 10 {
+                append_method_push(
+                    &mut post_pushes,
+                    "goodscopy.UpdateData",
+                    goods_copy_snapshot_payload(account, chapter_catalog),
+                );
+            }
+        }
+    }
+    for push in post_pushes {
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
+    }
+    Ok(true)
+}
+
+fn is_known_client_route(method: &str) -> bool {
+    const PREFIXES: &[&str] = &[
+        "hero.",
+        "user.",
+        "usersvr.",
+        "strategy.",
+        "supportfleet.",
+        "presetfleet.",
+        "milestone.",
+        "supply.",
+        "jopen.",
+        "guide.",
+        "guild.",
+        "illustrate.",
+        "friend.",
+        "shop.",
+        "bag.",
+        "recharge.",
+        "equip.",
+        "equiptestcopy.",
+        "equipnewtestcopy.",
+        "equipactivity.",
+        "building.",
+        "build.",
+        "buildnotes.",
+        "discuss.",
+        "buildship.",
+        "study.",
+        "task.",
+        "bathroom.",
+        "matchsvr.",
+        "matchsvr_",
+        "room.",
+        "copy.",
+        "mopUp.",
+        "dailycopy.",
+        "talentTree.",
+        "tower.",
+        "activityTower.",
+        "teachingsvr.",
+        "outpost.",
+        "activitybirthday.",
+        "activitychristmasshop.",
+        "activitycodeexchange.",
+        "activityextract.",
+        "activityextractur.",
+        "activityfashion.",
+        "activitypapercut.",
+        "activitysecretcopy.",
+        "activitySSR.",
+        "activitySSRrolls.",
+        "activityvalentineloveletter.",
+        "activityVideo.",
+        "adventure.",
+        "bigactivity.",
+        "boss.",
+        "chat.",
+        "guildbigactivity.",
+        "guildbigactivityrank.",
+        "guildbox.",
+        "guildOffer.",
+        "guildofferrank.",
+        "guildtask.",
+        "guildwar.",
+        "heroawaken.",
+        "invitescore.",
+        "shiptask.",
+        "sportsmeet.",
+        "sportsmeetrank.",
+        "worldevent.",
+        "worldeventrank.",
+        "exchange.",
+        "foodCompose.",
+        "battlepass.",
+        "activitybattlepass.",
+        "magazine.",
+        "interactionitem.",
+        "battle.",
+    ];
+    const EXACT: &[&str] = &[
+        "GetSvrTime",
+        "player.Login",
+        "player.GetUserInfo",
+        "player.GetUserList",
+        "player.CreateUser",
+        "cachedata.CacheData",
+        "archiveCopy.IsLoad",
+        "copyextra.AddCopyRewardCount",
+        "copyextra.UpdateCopyExtraInfo",
+        "prefs.SavePrefs",
+        "statcount.GetStatCount",
+        "sign.Sign",
+        "miniGame.StartMiniGame",
+        "alchemy.StartAlchemy",
+        "repair.RepairHero",
+        "fashion.fashionReplaceReward",
+        "bag.GetBagInfo",
+        "bag.GetNormalTreasureInfo",
+        "bag.GetSelectTreasureInfo",
+        "copyinfo.GetCopyInfo",
+    ];
+    EXACT.contains(&method) || PREFIXES.iter().any(|prefix| method.starts_with(prefix))
+}

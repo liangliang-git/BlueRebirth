@@ -1,0 +1,13 @@
+{
+  "port": 0,
+  "gameLoginPort": 0,
+  "clientPath": "C:\\Users\\zhanl\\Desktop\\日服\\blueoath",
+  "dropMultiplier": 10.0,
+  "shipExpMultiplier": 10.0,
+  "commanderExpMultiplier": 10.0,
+  "shipStatMultiplier": 10.0,
+  "moodRecoveryMultiplier": 10.0,
+  "affectionMultiplier": 10.0,
+  "buildingOilMultiplier": 10.0,
+  "buildingGoldMultiplier": 10.0
+}

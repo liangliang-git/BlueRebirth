@@ -1,0 +1,131 @@
+# 配置工具链说明（SQLite ↔ Excel ↔ C# 类）
+
+> 本文档整理本会话开发的两组配置工具：① `config_*.db` 与 Excel 的双向转换；② 配置 JSON 结构到 C# 强类型类的生成。所有工具都基于仓库已确认的解码规则，且默认不破坏原始客户端文件（反导前自动备份）。
+
+## 1. 背景与前提
+
+游戏客户端的 SQLite 配置位于：
+
+| 客户端 | 目录 |
+| --- | --- |
+| jp-1.4.0 | `blueoath\blueoath\blueoath_Data\StreamingAssets\config` |
+| cn-1.5.20 | `苍蓝誓约\clsy\clsy_Data\StreamingAssets\config` |
+
+每张 `config_*.db` 内只有一张表 `DBObject(id, indexid, jsonbytes)`：
+
+- `id`：`varchar primary key not null`（业务行主键，字符串，可为空串）。
+- `indexid`：`varchar`（可空，业务行恒为非 NULL，空串或普通值）。
+- `jsonbytes`：`blob`，明文 JSON 逐字节 `XOR 0x55` 得到。
+
+```text
+decoded[i] = encoded[i] XOR 0x55     // 解码（可逆，编码用同一操作）
+```
+
+每张表另有一行 `id='nill'`、`indexid=NULL` 的元数据行：其 `jsonbytes` 解密后是 32 位 hex 字符串（非 JSON、非简单内容 MD5），工具按原始字节保真往返，不重新计算。
+
+## 2. 功能一：SQLite ↔ Excel 双向转换
+
+实现：`src\BlueOath.Tools\ConfigExcelTool.cs`（依赖 `Microsoft.Data.Sqlite` + `ClosedXML`）。
+
+### 2.1 命令
+
+```powershell
+# 导出：所有 config_*.db -> 每表一个 .xlsx
+dotnet run --project src\BlueOath.Tools\BlueOath.Tools.csproj -- --config-excel --region=jp [--output=<目录>]
+
+# 反导：.xlsx -> 配置数据库（默认原位写回，写回前自动备份）
+dotnet run --project src\BlueOath.Tools\BlueOath.Tools.csproj -- --config-excel-import --region=jp --input=<目录或单个.xlsx> [--output=<目录>] [--no-backup]
+
+# 整目录快照备份
+dotnet run --project src\BlueOath.Tools\BlueOath.Tools.csproj -- --config-excel-backup --region=jp [--output=<目录>]
+
+# 自检（临时目录内完成一次导出/反导字节级回环验证）
+dotnet run --project src\BlueOath.Tools\BlueOath.Tools.csproj -- --config-excel-self-test
+```
+
+通用选项：`--region=jp|cn`（默认 `jp`）、`--config-root=<目录>`（直接指定任意 config 目录，跳过 region 映射）。
+
+### 2.2 Excel 格式
+
+导出目录内每个表一个 `.xlsx`（文件名 `config_<表>.xlsx`），含三个工作表：
+
+- `data`：业务行，JSON 已**展开为表头列**。前两列为数据库键 `_id` / `_indexid`，其余每列对应一个 JSON 字段（列名即原 JSON 字段名，`id` 字段与数据库 `_id` 列互不冲突）。增删行即增删配置。
+- `_schema`：字段类型说明，列 `header` / `field` / `type`（`type` 为推断出的 C# 风格类型）。导入时据此把单元格值还原为正确的 JSON 类型。
+- `_meta`：元数据行（`id='nill'`），列 `id` / `indexid` / `jsonbytes_base64`。base64 保存的是**已解密**字节，一般无需改动。
+
+单元格取值规则：
+
+| JSON 值 | 单元格表示 |
+| --- | --- |
+| 整数 | 数字单元格（如 `100`） |
+| 浮点 | 数字单元格（如 `1.5`） |
+| 字符串 | 文本单元格；空字符串写作 `""` |
+| 布尔 | 文本 `true` / `false` |
+| 数组 / 数组套数组 / 结构不明 | JSON 文本（如 `[1,2,3]`、`[[1,2],[3]]`，空数组为 `[]`） |
+| 字段缺失 | 空单元格（反导时省略该键） |
+
+目录根另生成 `_manifest.json`（`schemaVersion = 2.0`），记录 `region`、`xorKey`、每表源库 SHA-256 与行数，供审计核对。
+
+**兼容性**：反导同时支持旧版单列 `json` 格式（`data` 表为 `id` / `indexid` / `json` 三列），旧导出的 Excel 可直接导入。
+
+### 2.3 备份
+
+- 反导默认**原位写回**，覆盖前把将被覆盖的 `.db` 复制到 config 目录旁的 `config-backup\<时间戳>\`；`--no-backup` 可关闭。
+- `--config-excel-backup` 做一次性全量快照。
+- 反导也可 `--output=<暂存目录>` 先落盘验证，确认无误后再原位部署。
+
+### 2.4 设计要点
+
+- 业务行与元数据行分离；元数据按原始字节 base64 往返，避免破坏整表校验哈希。
+- 保留空 `id` 边界（实测 `config_pskill_dict_buff_cb_con` 等 4 张表存在 `id=''` 的合法业务行）。
+- 反导为**全量重建**：按 Excel 内容重建 DB（原 schema `DBObject` 表 + `DBObject_indexid` 索引），临时文件写好后原子替换。
+- `id` 在主键上唯一，反导会检测重复 `id` 并报错。
+- 展开成列后依赖 `_schema` 类型信息区分「字符串 vs 数组」等歧义（如字符串值恰好以 `[` 开头时仍按字符串还原）。
+
+### 2.5 验证
+
+- `--config-excel-self-test` 通过（覆盖空字符串、空数组、数组套数组、以 `[` 开头的字符串、DB `id` 与 JSON `id` 不一致、整浮混用、字段缺失等用例）。
+- jp 全量（497 表 / 316166 业务行 / 497 元数据行）：导出→反导后 **497/497 表 JSON 值一致**，仅 2 个字符串单元内的 `\r\n` 被 xlsx 规范化为 `\n`（见 2.6），元数据行字节级一致。
+
+### 2.6 已知限制
+
+- **换行符规范化**：xlsx 单元格无法保留 `\r\n`，往返后字符串内的 CRLF 会变为 LF。实测仅 `config_language`、`config_navmesh` 各 1 个单元格受影响（大段文本/OBJ 网格数据），对客户端解析无影响。
+- 数组/嵌套结构以 JSON 文本形式存在于单元格中，编辑时按 JSON 语法填写。
+
+## 3. 一键脚本
+
+| 脚本 | 作用 | 输出/输入位置 |
+| --- | --- | --- |
+| `export-config.bat [jp\|cn]` | 一键导出 | `<仓库>\excel` |
+| `import-config.bat [jp\|cn]` | 一键反导（自动备份） | 读 `<仓库>\excel` |
+
+两个脚本都是薄封装，实际调用 `tools\config-excel.ps1`（参数 `-Action export|import|backup|selftest`、`-Region jp|cn`、可选 `-InputPath` / `-OutputPath`）。
+
+实现注记：脚本局部变量避开 PowerShell 自动变量 `$input`（改用 `$InputPath`），否则 `-Input` 赋值会被忽略、导致反导误读全量目录。
+
+## 4. 数据观察（jp-1.4.0）
+
+跨全表字段结构扫描结论：
+
+- **无嵌套对象**：plain object 字段 0 个、array-of-object 字段 0 个 —— 因此生成器无需产出嵌套类，结构全为标量与数组。
+- 数组套数组字段 162 个（如 `config_achievement.reward`、`config_chapter.mubarcopy_data`）。
+- 混合类型字段 115 个：其中 113 个为 `{int, float}`（归为 `double`），2 个为 `{array, int}`（归为 `object?`）。
+
+## 5. 文件清单
+
+| 文件 | 状态 | 说明 |
+| --- | --- | --- |
+| `src\BlueOath.Tools\ConfigExcelTool.cs` | 新增 | SQLite ↔ Excel 转换（导出/反导/备份/自检），展开 JSON 为列 |
+| `src\BlueOath.Tools\ConfigSchema.cs` | 保留 | Excel 工具共享类型推断 |
+| `src\BlueOath.Tools\Program.cs` | 修改 | 接入 `--config-excel*` 分发 |
+| `src\BlueOath.Tools\BlueOath.Tools.csproj` | 修改 | 新增 `ClosedXML` 依赖 |
+| `tools\config-excel.ps1` | 保留 | 共享 PowerShell 脚本（export/import/backup/selftest） |
+| `export-config.bat` / `import-config.bat` | 新增 | 一键导出 / 反导（输出到 `<仓库>\excel`） |
+| `.gitignore` | 修改 | 忽略 `/excel/`、`/config-excel/` |
+| `README.md` | 修改 | 补充客户端配置数据库小节与用法说明 |
+
+## 7. 注意事项
+
+- 反导会**原位覆盖**配置数据库；务必先运行一次 `--config-excel-backup` 或 `export` 保留原始快照（原始客户端文件不在 Git 管理中）。
+- `_meta` 表内的 `nill` 哈希按原始字节保留，未做重算；若客户端对整表内容做完整性校验，修改配置后该哈希可能需要相应更新（当前未确认校验机制）。
+- 生成的 `Config*.cs` 为结构骨架（`object?` / 可空引用类型），复杂字段可按需手动细化类型。

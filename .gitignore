@@ -1,0 +1,49 @@
+# ---- Build artifacts ----
+**/bin/
+**/obj/
+target/
+target-*
+**/target/
+**/target-*
+.vs/
+*.user
+*.suo
+.idea/
+
+# ---- Python cache ----
+__pycache__/
+*.pyc
+
+# ---- Logs / dumps ----
+*.log
+*.dmp
+*.pdb
+
+# ---- Game clients (original binaries, NOT source) ----
+/blueoath/
+/苍蓝誓约/
+
+# ---- Reverse-engineering artifacts (regenerable via Il2CppDumper) ----
+/il2cppdump/
+
+# ---- Runtime / temp artifacts ----
+/runtime/
+/server/
+/tmp-server/
+/config-excel/
+/excel/
+/config-backup/
+/release/
+/lua_tools/
+
+# ---- Native build outputs and backups ----
+/client-injector/native/bin-x86/
+/client-injector/native/build-x86/
+/client-injector/native/build-nmake-x86-*/
+/client-injector/native/_backup/
+
+# ---- Local Codex / developer runtime state ----
+/.appdata/
+/.dotnet-home/
+/.nuget-packages/
+/.codex-nuget.config
