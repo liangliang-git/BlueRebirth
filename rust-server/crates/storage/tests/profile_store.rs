@@ -252,7 +252,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 19);
+    assert_eq!(version, 20);
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
@@ -474,6 +474,20 @@ fn typed_repository_transaction_commits_domain_mutation() {
         }],
         ..Default::default()
     });
+    account.guild_box.progress = 12;
+    account.guild_box.anonymous = true;
+    account.guild_box.points_box_count = 3;
+    account
+        .guild_box
+        .share_boxes
+        .push(blueoath_domain::GuildBoxItemState {
+            box_id: 77,
+            end_time: 1000,
+            box_uid: 10,
+            is_picked: false,
+            recharge_id: 5,
+            recharge_name: "recharge".to_owned(),
+        });
     account.battle.active = Some(BattleSession {
         chapter_id: ChapterId::new(3).unwrap(),
         copy_id: CopyId::new(300).unwrap(),
@@ -575,6 +589,11 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(guild.name, "Typed Fleet");
     assert_eq!(guild.members[0].contribute, 7);
     assert_eq!(guild.applications[0].quality, 4);
+    assert_eq!(loaded.guild_box.progress, 12);
+    assert!(loaded.guild_box.anonymous);
+    assert_eq!(loaded.guild_box.points_box_count, 3);
+    assert_eq!(loaded.guild_box.share_boxes[0].box_id, 77);
+    assert_eq!(loaded.guild_box.share_boxes[0].recharge_name, "recharge");
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())

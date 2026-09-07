@@ -375,6 +375,25 @@ pub struct GuildState {
     pub applications: Vec<GuildApplicationState>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuildBoxItemState {
+    pub box_id: u64,
+    pub end_time: u64,
+    pub box_uid: u64,
+    pub is_picked: bool,
+    pub recharge_id: u32,
+    pub recharge_name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuildBoxState {
+    pub progress: u64,
+    pub anonymous: bool,
+    pub points_box_count: u32,
+    pub share_boxes: Vec<GuildBoxItemState>,
+    pub task_boxes: Vec<GuildBoxItemState>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatMessageState {
     pub id: u64,
@@ -565,6 +584,8 @@ pub struct AccountState {
     pub social: SocialState,
     #[serde(default)]
     pub guild: Option<GuildState>,
+    #[serde(default)]
+    pub guild_box: GuildBoxState,
     #[serde(default)]
     pub chat: ChatState,
     #[serde(default)]

@@ -2,8 +2,9 @@ use blueoath_domain::{
     AccountRepository, AccountState, ActivityTowerState, BathroomHeroState, ChapterId,
     CharacterState, ChatBarrageState, ChatMessageState, ConstructionJobState,
     ConstructionProjectState, CopyId, CurrencyKind, EquipId, EquipmentState, FleetId, FleetRecord,
-    GuildApplicationState, GuildMemberState, GuildState, HeroId, HeroState, NewAccountFactory,
-    PresetFleetState, ProfileId, ProfileState, RepositoryError, TemplateId, TowerRewardState,
+    GuildApplicationState, GuildBoxItemState, GuildMemberState, GuildState, HeroId, HeroState,
+    NewAccountFactory, PresetFleetState, ProfileId, ProfileState, RepositoryError, TemplateId,
+    TowerRewardState,
 };
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -969,6 +970,20 @@ impl ProfileStore {
                     }
                     _ => {}
                 }
+            } else if activity_id == "guildBox" {
+                match progress_kind.as_str() {
+                    "progress" => account.guild_box.progress = value,
+                    "anonymous" => account.guild_box.anonymous = value != 0,
+                    "pointsBoxCount" => {
+                        account.guild_box.points_box_count =
+                            u32::try_from(value).map_err(|_| {
+                                StorageError::InvalidTypedAccount(
+                                    "guild box count is too large".to_owned(),
+                                )
+                            })?;
+                    }
+                    _ => {}
+                }
             } else if activity_id == "buildShip" {
                 let mut parts = progress_kind.split(':');
                 match parts.next() {
@@ -1370,6 +1385,30 @@ impl ProfileStore {
             }
             account.guild = Some(guild);
         }
+        let mut statement = connection.prepare(
+            "SELECT box_kind, box_id, end_time, box_uid, is_picked, recharge_id, recharge_name
+             FROM guild_box_items WHERE profile_id = ?1 ORDER BY box_kind, box_id",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                GuildBoxItemState {
+                    box_id: row.get::<_, i64>(1)? as u64,
+                    end_time: row.get::<_, i64>(2)? as u64,
+                    box_uid: row.get::<_, i64>(3)? as u64,
+                    is_picked: row.get::<_, i64>(4)? != 0,
+                    recharge_id: row.get::<_, i64>(5)? as u32,
+                    recharge_name: row.get(6)?,
+                },
+            ))
+        })? {
+            let (kind, item) = row?;
+            if kind == "share" {
+                account.guild_box.share_boxes.push(item);
+            } else if kind == "task" {
+                account.guild_box.task_boxes.push(item);
+            }
+        }
         account
             .validate()
             .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
@@ -1558,6 +1597,49 @@ impl ProfileStore {
                         application.name,
                         typed_i64(application.time, "guild application time")?,
                         typed_i64(application.quality, "guild application quality")?,
+                    ],
+                )?;
+            }
+        }
+        for (kind, value) in [
+            ("progress", account.guild_box.progress),
+            ("anonymous", u64::from(account.guild_box.anonymous)),
+            (
+                "pointsBoxCount",
+                u64::from(account.guild_box.points_box_count),
+            ),
+        ] {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'guildBox', ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    kind,
+                    typed_i64(value, "guild box state")?,
+                    timestamp(),
+                ],
+            )?;
+        }
+        for (kind, items) in [
+            ("share", &account.guild_box.share_boxes),
+            ("task", &account.guild_box.task_boxes),
+        ] {
+            for item in items {
+                transaction.execute(
+                    "INSERT INTO guild_box_items(
+                        profile_id, box_kind, box_id, end_time, box_uid, is_picked,
+                        recharge_id, recharge_name
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        profile.id.as_str(),
+                        kind,
+                        typed_i64(item.box_id, "guild box id")?,
+                        typed_i64(item.end_time, "guild box end time")?,
+                        typed_i64(item.box_uid, "guild box uid")?,
+                        i64::from(item.is_picked),
+                        typed_i64(item.recharge_id, "guild box recharge id")?,
+                        item.recharge_name,
                     ],
                 )?;
             }
@@ -2412,6 +2494,7 @@ fn clear_normalized_account(
     profile_id: &str,
 ) -> Result<(), StorageError> {
     for table in [
+        "guild_box_items",
         "guild_applications",
         "guild_members",
         "guilds",
@@ -2554,6 +2637,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0017_drop_json_accounts.sql"),
     include_str!("../../../migrations/0018_typed_tower_state.sql"),
     include_str!("../../../migrations/0019_guild_typed_state.sql"),
+    include_str!("../../../migrations/0020_guild_box_typed_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {
