@@ -4,6 +4,18 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
+pub(super) fn handle_typed(account: &blueoath_domain::AccountState, method: &str) -> HandlerResult {
+    match method {
+        "hero.GetHeroInfo" | "hero.GetHeroInfoByHeroIdArray" => {
+            HandlerResult::Reply(Response::raw(
+                method,
+                HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+            ))
+        }
+        _ => HandlerResult::Empty,
+    }
+}
+
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
@@ -707,5 +719,40 @@ fn handle_legacy<'state, 'account, 'scratch>(
             Some(Vec::new())
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_hero_info_reads_normalized_hero_state() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("hero-typed").unwrap(),
+            "Captain",
+        );
+        let hero_id = blueoath_domain::HeroId::new(7).unwrap();
+        account.dock.heroes.insert(
+            hero_id,
+            blueoath_domain::HeroState {
+                id: hero_id,
+                template_id: blueoath_domain::TemplateId::new(70).unwrap(),
+                level: 8,
+                exp: 9,
+                mood: 10,
+                affection: 11,
+                hp: 12,
+                locked: true,
+                equip_slots: Vec::new(),
+            },
+        );
+        let result = handle_typed(&account, "hero.GetHeroInfo");
+        let HandlerResult::Reply(response) = result else {
+            panic!("typed hero info must reply");
+        };
+        let hero_payload = response.payload;
+        assert!(hero_payload.len() > 2);
+        assert_eq!(decode_varint_u64_field(&hero_payload, 2), 200);
     }
 }

@@ -152,6 +152,37 @@ pub(super) fn hero_bag_from_account(account: &Value) -> HeroBag {
     }
 }
 
+pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountState) -> HeroBag {
+    let heroes = account
+        .dock
+        .heroes
+        .values()
+        .map(|hero| HeroGrid {
+            hero_id: u32::try_from(hero.id.get()).unwrap_or(u32::MAX),
+            template_id: i32::try_from(hero.template_id.get()).unwrap_or(i32::MAX),
+            level: i32::try_from(hero.level).unwrap_or(i32::MAX),
+            exp: i32::try_from(hero.exp).unwrap_or(i32::MAX),
+            affection: i32::try_from(hero.affection).unwrap_or(i32::MAX),
+            cur_hp: i64::try_from(hero.hp).unwrap_or(i64::MAX),
+            mood: i32::try_from(hero.mood).unwrap_or(i32::MAX),
+            equip_slots: hero
+                .equip_slots
+                .iter()
+                .map(|slot| {
+                    slot.map(|id| u32::try_from(id.get()).unwrap_or(u32::MAX))
+                        .unwrap_or(0)
+                })
+                .collect(),
+            lock: hero.locked,
+            ..HeroGrid::default()
+        })
+        .collect();
+    HeroBag {
+        heroes,
+        bag_size: 200,
+    }
+}
+
 fn equip_groups_from_hero(hero: &Value) -> Vec<HeroEquipGroup> {
     let normal_ids = hero
         .get("equipSlots")
