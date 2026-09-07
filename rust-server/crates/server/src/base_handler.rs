@@ -1,8 +1,26 @@
 use serde_json::{json, Value};
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
+    context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    let payload = handle_legacy(context, method, request_args);
+    if *context.response_err != 0 {
+        HandlerResult::Error(GameError::Internal(context.response_err_msg.clone()))
+    } else {
+        match payload {
+            Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
+            None => HandlerResult::Empty,
+        }
+    }
+}
+
+fn handle_legacy<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
@@ -897,7 +915,18 @@ pub(super) fn other_user_payload(
 
 #[cfg(test)]
 mod tests {
+    use crate::common::response::HandlerResult;
+
     use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
+    }
 
     #[test]
     fn mini_game_scores_are_idempotent_and_sum_by_chapter() {
