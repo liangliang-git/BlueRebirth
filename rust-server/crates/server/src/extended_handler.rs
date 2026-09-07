@@ -440,6 +440,9 @@ pub(super) fn handle_typed_world_event(
     let catalog = gameplay_catalog();
     match method {
         "worldevent.Progress" => reply(method, typed_world_event_server_progress_payload(account)),
+        "worldevent.UserProgress" => {
+            reply(method, typed_world_event_user_progress_payload(account))
+        }
         "worldevent.UserStage" => reply(method, typed_world_event_stage_payload(account)),
         "worldeventrank.Rank" => reply(method, typed_world_event_rank_payload(account)),
         "worldevent.StageReward" => {
@@ -530,6 +533,19 @@ fn typed_world_event_stage_payload(account: &blueoath_domain::AccountState) -> V
     for stage in &account.world_event.stages {
         append_varint_field(&mut output, 1, *stage);
     }
+    output
+}
+
+fn typed_world_event_user_progress_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(
+        &mut output,
+        1,
+        account
+            .world_event
+            .user_progress
+            .max(account.world_event.progress),
+    );
     output
 }
 
