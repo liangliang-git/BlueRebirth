@@ -1384,6 +1384,128 @@ pub(super) struct SelectedTreasure {
 pub(super) type BuildDropEntry = (i32, i32, i32, i32, i32);
 pub(super) type BuildFormulaRow = (Vec<i64>, Vec<i64>, Vec<i64>, Vec<i32>);
 
+impl BuildShipCatalog {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        for (&pool_id, entries) in &self.pools {
+            if pool_id <= 0 || entries.is_empty() {
+                return Err(format!("build drop pool {pool_id} is invalid"));
+            }
+            for &(goods_type, item_id, amount, min_count, weight) in entries {
+                if goods_type <= 0 || item_id <= 0 || amount < 0 || min_count < 0 || weight < 0 {
+                    return Err(format!(
+                        "build drop entry in pool {pool_id} is invalid: {goods_type}:{item_id}:{amount}:{min_count}:{weight}"
+                    ));
+                }
+                if goods_type == 4 && !self.pools.contains_key(&item_id) {
+                    return Err(format!(
+                        "build drop pool {pool_id} references missing nested pool {item_id}"
+                    ));
+                }
+            }
+        }
+
+        fn visit(
+            catalog: &BuildShipCatalog,
+            pool_id: i32,
+            visiting: &mut std::collections::HashSet<i32>,
+            visited: &mut std::collections::HashSet<i32>,
+        ) -> Result<(), String> {
+            if visited.contains(&pool_id) {
+                return Ok(());
+            }
+            if !visiting.insert(pool_id) {
+                return Err(format!("build drop pool cycle includes {pool_id}"));
+            }
+            if let Some(entries) = catalog.pools.get(&pool_id) {
+                for &(goods_type, item_id, ..) in entries {
+                    if goods_type == 4 {
+                        visit(catalog, item_id, visiting, visited)?;
+                    }
+                }
+            }
+            visiting.remove(&pool_id);
+            visited.insert(pool_id);
+            Ok(())
+        }
+
+        let mut visiting = std::collections::HashSet::new();
+        let mut visited = std::collections::HashSet::new();
+        for &pool_id in self.pools.keys() {
+            visit(self, pool_id, &mut visiting, &mut visited)?;
+        }
+
+        for (&pool_id, &drop_id) in &self.extract_to_drop {
+            if pool_id <= 0 || drop_id <= 0 || !self.pools.contains_key(&drop_id) {
+                return Err(format!(
+                    "build extract pool {pool_id} references missing drop {drop_id}"
+                ));
+            }
+        }
+        for (&(pool_id, count), &drop_id) in &self.box_drop_by_pool_count {
+            if pool_id <= 0 || count <= 0 || drop_id <= 0 || !self.pools.contains_key(&drop_id) {
+                return Err(format!(
+                    "build box reward ({pool_id}, {count}) references missing drop {drop_id}"
+                ));
+            }
+        }
+        for (&(pool_id, count), &(goods_type, item_id, amount)) in &self.reward_by_pool_count {
+            if pool_id <= 0 || count <= 0 || goods_type <= 0 || item_id <= 0 || amount <= 0 {
+                return Err(format!(
+                    "build milestone reward ({pool_id}, {count}) is invalid"
+                ));
+            }
+        }
+        for (&pool_id, extract_type) in &self.extract_type_by_pool {
+            if pool_id <= 0 || *extract_type <= 0 {
+                return Err(format!("build extract type for pool {pool_id} is invalid"));
+            }
+        }
+        for (&pool_id, costs) in self.expend_by_pool.iter().chain(&self.ten_expend_by_pool) {
+            if pool_id <= 0 || costs.is_empty() {
+                return Err(format!("build cost for pool {pool_id} is invalid"));
+            }
+            if costs.iter().any(|(goods_type, item_id, amount)| {
+                *goods_type <= 0 || *item_id <= 0 || *amount <= 0
+            }) {
+                return Err(format!("build cost for pool {pool_id} is invalid"));
+            }
+        }
+        for (&template_id, defaults) in &self.ship_defaults {
+            if template_id <= 0 || defaults.is_empty() || defaults.iter().any(|id| *id <= 0) {
+                return Err(format!("build ship defaults for {template_id} are invalid"));
+            }
+        }
+        for (&template_id, &value) in self.ship_build_time.iter().chain(&self.ship_quality) {
+            if template_id <= 0 || value <= 0 {
+                return Err(format!(
+                    "build ship catalog value for {template_id} is invalid"
+                ));
+            }
+        }
+        for (&item_id, &drop_id) in &self.treasure_drop_by_item {
+            if item_id <= 0 || drop_id <= 0 {
+                return Err(format!(
+                    "treasure {item_id} references missing drop {drop_id}"
+                ));
+            }
+        }
+        for (&item_id, selected) in &self.selected_treasure_by_item {
+            if item_id <= 0
+                || (selected.drop_id <= 0 && selected.options.is_empty())
+                || selected
+                    .options
+                    .iter()
+                    .any(|(goods_type, config_id, amount)| {
+                        *goods_type <= 0 || *config_id <= 0 || *amount <= 0
+                    })
+            {
+                return Err(format!("selected treasure {item_id} is invalid"));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub(super) struct BuildFormulaCatalogRuntime(pub(super) Vec<BuildFormulaRow>);
 
@@ -1410,8 +1532,8 @@ use super::{json_i32, json_i32_array, mix_build_draw_roll, ShopReward};
 #[cfg(test)]
 mod validation_tests {
     use super::{
-        BattleCatalog, BattleCopy, ChapterCatalog, ChapterStarRewards, GameplayCatalog,
-        TaskCatalog, TaskDefinition,
+        BattleCatalog, BattleCopy, BuildShipCatalog, ChapterCatalog, ChapterStarRewards,
+        GameplayCatalog, TaskCatalog, TaskDefinition,
     };
 
     #[test]
@@ -1467,5 +1589,20 @@ mod validation_tests {
             ..TaskDefinition::default()
         });
         assert!(tasks.validate_references().is_err());
+    }
+
+    #[test]
+    fn build_drop_cycle_is_rejected() {
+        let mut catalog = BuildShipCatalog::default();
+        catalog.pools.insert(10, vec![(4, 20, 1, 0, 1)]);
+        catalog.pools.insert(20, vec![(4, 10, 1, 0, 1)]);
+        assert!(catalog.validate().is_err());
+    }
+
+    #[test]
+    fn build_extract_reference_is_required() {
+        let mut catalog = BuildShipCatalog::default();
+        catalog.extract_to_drop.insert(10, 20);
+        assert!(catalog.validate().is_err());
     }
 }

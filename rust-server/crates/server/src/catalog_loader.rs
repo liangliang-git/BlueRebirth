@@ -3124,6 +3124,7 @@ mod validation_tests {
         let battle = load_battle_catalog(Some(&config_dir));
         let tasks = load_task_catalog(Some(&config_dir));
         let gameplay = load_gameplay_catalog(Some(&config_dir));
+        let build_ship = load_build_ship_catalog(Some(&config_dir));
 
         chapters.validate().unwrap();
         chapters.validate_references(&gameplay).unwrap();
@@ -3132,5 +3133,6 @@ mod validation_tests {
         tasks.validate_references().unwrap();
         gameplay.validate().unwrap();
         gameplay.validate_references().unwrap();
+        build_ship.validate().unwrap();
     }
 }

@@ -73,6 +73,11 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
     let _ = COMMANDER_LEVEL_CATALOG
         .get_or_init(|| load_commander_level_catalog(config.client_path.as_ref()));
     let _ = SUPPORT_CATALOG.get_or_init(|| load_support_catalog(config.client_path.as_ref()));
+    BUILD_SHIP_CATALOG
+        .get()
+        .expect("build ship catalog initialized")
+        .validate()
+        .map_err(ServerError::Catalog)?;
     GAMEPLAY_CATALOG
         .get()
         .expect("gameplay catalog initialized")
