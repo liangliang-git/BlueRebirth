@@ -125,6 +125,28 @@ pub struct CopyAttackRequest {
     pub enemy_id: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyMiniGamePassRequest {
+    pub copy_id: i32,
+    pub battle_time: i32,
+}
+
+impl Decode for CopyMiniGamePassRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let copy_id = required_field(&fields, 1, "mini-game pass is missing copy id")?;
+        let battle_time = optional_i32(&fields, 12, "mini-game pass has duplicate battle time")?;
+        let result = optional_u64(&fields, 19, "mini-game pass has duplicate result")?;
+        if copy_id <= 0 || result == 0 {
+            return Err(ProtocolError::Invalid("mini-game pass request is invalid"));
+        }
+        Ok(Self {
+            copy_id,
+            battle_time,
+        })
+    }
+}
+
 impl Decode for CopyAttackRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

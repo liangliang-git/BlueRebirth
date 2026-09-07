@@ -282,12 +282,12 @@ pub(super) fn handle_typed_with_catalog(
             }
         }
         "copy.PassMiniGame" => {
-            let copy_id = decode_varint_field(request_args, 1);
-            if copy_id <= 0 || decode_varint_field(request_args, 19) == 0 {
+            let Ok(request) = CopyMiniGamePassRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "mini-game pass request is invalid",
                 ));
-            }
+            };
+            let copy_id = request.copy_id;
             if battle_catalog.is_some_and(|catalog| !catalog.copies.contains_key(&copy_id)) {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "mini-game copy is not configured",
@@ -336,8 +336,7 @@ pub(super) fn handle_typed_with_catalog(
                 .push(blueoath_domain::CopyRecordState {
                     copy_id: copy_id_typed,
                     hero_ids,
-                    pass_time: u64::try_from(decode_varint_field(request_args, 12).max(1))
-                        .unwrap_or(1),
+                    pass_time: u64::try_from(request.battle_time.max(1)).unwrap_or(1),
                     secret_id: 0,
                     strategy_id: 0,
                     power: 0,
@@ -350,7 +349,7 @@ pub(super) fn handle_typed_with_catalog(
                     copy_id,
                     first_pass,
                     3,
-                    decode_varint_field(request_args, 12),
+                    request.battle_time,
                     if first_pass { &rewards } else { &[] },
                 ),
             ))
