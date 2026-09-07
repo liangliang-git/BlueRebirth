@@ -137,12 +137,6 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             let Some(account) = account.as_deref_mut() else {
                 return HandlerResult::Error(GameError::AccountUnavailable);
             };
-            let now = current_unix_seconds();
-            account["lastGuildAction"] = json!({
-                "method": method,
-                "args": request_args,
-                "time": now,
-            });
             if method == "guild.Upgrade" {
                 let level = account
                     .get("guild")

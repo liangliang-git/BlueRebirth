@@ -1,5 +1,3 @@
-use serde_json::json;
-
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
@@ -79,14 +77,9 @@ pub(super) fn handle<'state, 'account, 'scratch>(
         | "teachingsvr.Delete"
         | "teachingsvr.Appraise"
         | "teachingsvr.PersonalInfo" => {
-            let Some(account) = account.as_deref_mut() else {
+            let Some(_account) = account.as_deref_mut() else {
                 return HandlerResult::Error(GameError::AccountUnavailable);
             };
-            account["lastTeachingAction"] = json!({
-                "method": method,
-                "args": request_args,
-                "time": current_unix_seconds(),
-            });
             HandlerResult::PushOnly
         }
         _ => HandlerResult::Empty,

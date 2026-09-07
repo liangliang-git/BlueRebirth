@@ -155,40 +155,19 @@ pub(super) fn handle<'state, 'account, 'scratch>(
         | "battlepass.BuyPassType"
         | "activitybattlepass.BuyPassType"
         | "battlepass.BuyPassLevel"
-        | "activitybattlepass.BuyPassLevel" => {
-            account["lastBattlePassAction"] = json!({
-                "method": method,
-                "args": request_args,
-                "time": current_unix_seconds(),
-            });
-            HandlerResult::PushOnly
-        }
+        | "activitybattlepass.BuyPassLevel" => HandlerResult::PushOnly,
         "magazine.Magazine" => HandlerResult::PushOnly,
         "magazine.AddHero"
         | "magazine.Vote"
         | "magazine.FetchMagazineReward"
-        | "magazine.UnLock" => {
-            account["lastMagazineAction"] = json!({
-                "method": method,
-                "args": request_args,
-                "time": current_unix_seconds(),
-            });
-            HandlerResult::PushOnly
-        }
+        | "magazine.UnLock" => HandlerResult::PushOnly,
         "interactionitem.GetItemReward"
         | "interactionitem.BuyChristmasFurniture"
         | "interactionitem.GetSpringPaperFlowerReward"
         | "interactionitem.SetCrystalBallToy"
         | "interactionitem.SetBagItemVisible"
         | "interactionitem.SetMutexBagGroupState"
-        | "interactionitem.SetPosterState" => {
-            account["lastInteractionItemAction"] = json!({
-                "method": method,
-                "args": request_args,
-                "time": current_unix_seconds(),
-            });
-            HandlerResult::PushOnly
-        }
+        | "interactionitem.SetPosterState" => HandlerResult::PushOnly,
         "bigactivity.GetBigActivityInfo"
         | "bigactivity.GetBigActivityRank"
         | "bigactivity.GetBigActivityRankEx"

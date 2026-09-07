@@ -281,14 +281,9 @@ pub(super) fn handle<'state, 'account, 'scratch>(
         }
         "discuss.HeroLike" => reply(method, encode_discuss_empty()),
         "discuss.Discuss" | "discuss.Like" | "discuss.Dislike" => {
-            let Some(account) = account.as_deref_mut() else {
+            let Some(_account) = account.as_deref_mut() else {
                 return HandlerResult::Error(GameError::AccountUnavailable);
             };
-            account["lastDiscussAction"] = serde_json::json!({
-                "method": method,
-                "args": request_args,
-                "time": current_unix_seconds(),
-            });
             reply(method, encode_discuss_empty())
         }
         "build.BuildingByFormula" => {
