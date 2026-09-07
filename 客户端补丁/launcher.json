@@ -1,0 +1,23 @@
+{
+  "region": "jp",
+  "serverIp": "127.0.0.1",
+  "httpPort": 7080,
+  "gameLoginPort": 7201,
+  "kcpGameLoginPort": 7201,
+  "redirectPort": 10173,
+  "startLocalServer": true,
+  "stopServerOnExit": false,
+  "startupTimeoutSeconds": 20,
+  "profileId": "local-player",
+  "clientRoot": "..\\blueoath",
+  "nativeRoot": "client-patch\\native",
+  "serverExecutable": "server\\blueoath-server.exe",
+  "serverConfig": "server\\server.json",
+  "serverData": "server\\catalog\\data",
+  "logFile": "launcher.log",
+  "logLevel": "info",
+  "gameHash": "8AEE607813A759E047D81C2428990609322DE072437DD4597F80E8E3FAD1D404",
+  "redirect": true,
+  "allowUntrusted": true,
+  "bypassSdk": false
+}
