@@ -195,25 +195,26 @@ pub(super) fn handle_typed_with_catalog(
                     ));
                 }
             }
-            if BattleService::start(
+            let remaining_fleet_ids = battle_session_fleet_ids(request.copy_id, battle_catalog)
+                .into_iter()
+                .filter_map(|id| u32::try_from(id).ok())
+                .collect::<Vec<_>>();
+            if BattleService::start_with_context(
                 account,
-                blueoath_domain::ChapterId::new(request.copy_id.max(1) as u64).unwrap(),
-                copy_id,
-                fleet_id,
-                u64::from(current_unix_seconds()),
+                BattleStartContext {
+                    chapter_id: blueoath_domain::ChapterId::new(request.copy_id.max(1) as u64)
+                        .unwrap(),
+                    copy_id,
+                    fleet_id,
+                    hero_ids: hero_ids.clone(),
+                    remaining_fleet_ids,
+                    started_at: u64::from(current_unix_seconds()),
+                    expires_at: u64::from(current_unix_seconds()).saturating_add(1_800),
+                },
             )
             .is_err()
             {
                 return HandlerResult::Error(GameError::InvalidState("battle cannot start"));
-            }
-            if let Some(active) = account.battle.active.as_mut() {
-                active.expires_at = u64::from(current_unix_seconds()).saturating_add(1_800);
-                active.hero_ids = hero_ids;
-                active.remaining_fleet_ids =
-                    battle_session_fleet_ids(request.copy_id, battle_catalog)
-                        .into_iter()
-                        .filter_map(|id| u32::try_from(id).ok())
-                        .collect();
             }
             HandlerResult::Reply(Response::raw(
                 method,
@@ -486,19 +487,27 @@ pub(super) fn handle_typed_with_catalog(
                     .unwrap_or_else(|| blueoath_domain::FleetId::new(1).unwrap())
             });
             let now = u64::from(current_unix_seconds());
-            if BattleService::start(account, chapter_id, copy_id, fleet_id, now).is_err() {
+            let remaining_fleet_ids = battle_session_fleet_ids(request.copy_id, battle_catalog)
+                .into_iter()
+                .filter_map(|id| u32::try_from(id).ok())
+                .collect::<Vec<_>>();
+            if BattleService::start_with_context(
+                account,
+                BattleStartContext {
+                    chapter_id,
+                    copy_id,
+                    fleet_id,
+                    hero_ids: hero_ids.clone(),
+                    remaining_fleet_ids,
+                    started_at: now,
+                    expires_at: now.saturating_add(1_800),
+                },
+            )
+            .is_err()
+            {
                 return HandlerResult::Error(GameError::InvalidState(
                     "daily copy battle cannot start",
                 ));
-            }
-            if let Some(active) = account.battle.active.as_mut() {
-                active.expires_at = now.saturating_add(1_800);
-                active.hero_ids = hero_ids.clone();
-                active.remaining_fleet_ids =
-                    battle_session_fleet_ids(request.copy_id, battle_catalog)
-                        .into_iter()
-                        .filter_map(|id| u32::try_from(id).ok())
-                        .collect();
             }
             let chapter_id = blueoath_domain::ChapterId::new(request.chapter_id as u64)
                 .expect("validated daily copy chapter");

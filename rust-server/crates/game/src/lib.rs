@@ -73,6 +73,17 @@ impl ProgressService {
 
 pub struct BattleService;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BattleStartContext {
+    pub chapter_id: ChapterId,
+    pub copy_id: CopyId,
+    pub fleet_id: FleetId,
+    pub hero_ids: Vec<HeroId>,
+    pub remaining_fleet_ids: Vec<u32>,
+    pub started_at: u64,
+    pub expires_at: u64,
+}
+
 impl BattleService {
     pub fn start(
         account: &mut AccountState,
@@ -81,27 +92,69 @@ impl BattleService {
         fleet_id: FleetId,
         now: u64,
     ) -> Result<(), GameServiceError> {
+        let hero_ids = account
+            .fleet
+            .fleets
+            .get(&fleet_id)
+            .map(|fleet| fleet.members.clone())
+            .ok_or(GameServiceError::FleetNotConfigured(fleet_id))?;
+        Self::start_with_context(
+            account,
+            BattleStartContext {
+                chapter_id,
+                copy_id,
+                fleet_id,
+                hero_ids,
+                remaining_fleet_ids: Vec::new(),
+                started_at: now,
+                expires_at: now,
+            },
+        )
+    }
+
+    pub fn start_with_context(
+        account: &mut AccountState,
+        context: BattleStartContext,
+    ) -> Result<(), GameServiceError> {
         if account.battle.active.is_some() {
             return Err(GameServiceError::BattleAlreadyActive);
         }
-        if !account.fleet.fleets.contains_key(&fleet_id) {
-            return Err(GameServiceError::FleetNotConfigured(fleet_id));
+        if !account.fleet.fleets.contains_key(&context.fleet_id) {
+            return Err(GameServiceError::FleetNotConfigured(context.fleet_id));
         }
-        let fleet = &account.fleet.fleets[&fleet_id];
-        for hero_id in &fleet.members {
+        if context
+            .hero_ids
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != context.hero_ids.len()
+            || context.remaining_fleet_ids.contains(&0)
+            || context
+                .remaining_fleet_ids
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != context.remaining_fleet_ids.len()
+            || context.expires_at < context.started_at
+        {
+            return Err(GameServiceError::Domain(DomainError::InvalidState(
+                "battle session context is invalid",
+            )));
+        }
+        for hero_id in &context.hero_ids {
             if !account.dock.heroes.contains_key(hero_id) {
                 return Err(GameServiceError::HeroNotOwned(*hero_id));
             }
         }
         account.battle.active = Some(BattleSession {
-            chapter_id,
-            copy_id,
-            current_fleet: fleet_id.get() as u32,
-            started_at: now,
-            expires_at: now,
+            chapter_id: context.chapter_id,
+            copy_id: context.copy_id,
+            current_fleet: context.fleet_id.get() as u32,
+            started_at: context.started_at,
+            expires_at: context.expires_at,
             revision: 0,
-            remaining_fleet_ids: Vec::new(),
-            hero_ids: fleet.members.clone(),
+            remaining_fleet_ids: context.remaining_fleet_ids,
+            hero_ids: context.hero_ids,
             attack_count: 0,
         });
         Ok(())
@@ -190,5 +243,28 @@ mod tests {
             BattleService::settle(&mut account, copy_id, true),
             Err(GameServiceError::BattleNotActive)
         );
+    }
+
+    #[test]
+    fn battle_service_persists_typed_session_context() {
+        let mut account = account();
+        let hero_id = HeroId::new(7).unwrap();
+        BattleService::start_with_context(
+            &mut account,
+            BattleStartContext {
+                chapter_id: ChapterId::new(3).unwrap(),
+                copy_id: CopyId::new(4).unwrap(),
+                fleet_id: FleetId::new(1).unwrap(),
+                hero_ids: vec![hero_id],
+                remaining_fleet_ids: vec![1, 2],
+                started_at: 10,
+                expires_at: 20,
+            },
+        )
+        .unwrap();
+        let session = account.battle.active.as_ref().unwrap();
+        assert_eq!(session.hero_ids, vec![hero_id]);
+        assert_eq!(session.remaining_fleet_ids, vec![1, 2]);
+        assert_eq!(session.expires_at, 20);
     }
 }

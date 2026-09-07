@@ -61,7 +61,9 @@ pub(crate) use account_defaults::default_account_snapshot;
 use account_defaults::{user_info_from_account, user_info_from_typed_account};
 use account_state::*;
 use battle_state::*;
-pub use blueoath_game::{BattleService, ProgressService, ResourceService, RewardService};
+pub use blueoath_game::{
+    BattleService, BattleStartContext, ProgressService, ResourceService, RewardService,
+};
 #[cfg(test)]
 pub(crate) use bootstrap::bootstrap_response;
 use bootstrap::{
