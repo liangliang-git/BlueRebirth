@@ -1,6 +1,8 @@
 #[cfg(test)]
 use serde_json::Value;
 
+use crate::common::response::Response;
+
 use super::*;
 
 #[cfg(test)]
@@ -116,12 +118,7 @@ pub(super) fn encode_quality_buy_goods_response(
 }
 
 pub(super) fn append_method_push(pushes: &mut Vec<Vec<u8>>, method: &str, ret: Vec<u8>) {
-    pushes.push(TMessageCodec::encode_response(&TResponse {
-        method: method.to_owned(),
-        ret: Some(ret),
-        time: current_unix_seconds(),
-        ..TResponse::default()
-    }));
+    pushes.push(Response::new(method, ret).encode_push(current_unix_seconds()));
 }
 
 #[cfg(test)]

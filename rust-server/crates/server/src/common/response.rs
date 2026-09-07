@@ -43,6 +43,15 @@ impl Response {
         })
     }
 
+    pub fn encode_push(self, time: u32) -> Vec<u8> {
+        TMessageCodec::encode_response(&TResponse {
+            method: self.method,
+            ret: Some(self.payload),
+            time,
+            ..TResponse::default()
+        })
+    }
+
     pub fn raw(method: impl Into<String>, payload: impl Into<Vec<u8>>) -> Self {
         Self::new(method, payload.into())
     }
@@ -114,6 +123,7 @@ impl ResponseEffects {
 #[cfg(test)]
 mod tests {
     use super::{HandlerResult, Response, ResponseEffects};
+    use blueoath_protocol::TMessageCodec;
 
     #[test]
     fn response_effects_map_domain_failure_to_client_fields() {
@@ -131,6 +141,16 @@ mod tests {
             Response::raw("user.GetInfo", [1, 2, 3].to_vec()),
             Response::new("user.GetInfo", vec![1, 2, 3])
         );
+    }
+
+    #[test]
+    fn push_response_uses_server_push_envelope() {
+        let encoded = Response::raw("user.UpdateUserInfo", [1, 2, 3].to_vec()).encode_push(42);
+        let decoded = TMessageCodec::decode_response(&encoded).expect("push response");
+        assert_eq!(decoded.method, "user.UpdateUserInfo");
+        assert_eq!(decoded.ret, Some(vec![1, 2, 3]));
+        assert_eq!(decoded.time, 42);
+        assert_eq!(decoded.callback_handler, 0);
     }
 
     #[test]
