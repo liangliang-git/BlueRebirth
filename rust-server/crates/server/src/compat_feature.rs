@@ -14,8 +14,32 @@ use super::*;
 const HP_COEFFICIENT: i64 = 10_000_000_000;
 const OATH_RING_TEMPLATE: i32 = 10_180;
 
+fn consume_typed_item(
+    account: &mut blueoath_domain::AccountState,
+    item_id: i32,
+    amount: u64,
+) -> bool {
+    let Some(template_id) = blueoath_domain::TemplateId::new(item_id.max(0) as u64).ok() else {
+        return false;
+    };
+    let Some(current) = account.inventory.items.get_mut(&template_id) else {
+        return false;
+    };
+    if *current < amount {
+        return false;
+    }
+    *current -= amount;
+    if *current == 0 {
+        account.inventory.items.remove(&template_id);
+    }
+    true
+}
+
 pub(super) fn handles_typed(method: &str) -> bool {
-    matches!(method, "hero.Marry" | "repair.RepairHero")
+    matches!(
+        method,
+        "hero.Marry" | "hero.AddAffection" | "repair.RepairHero"
+    )
 }
 
 pub(super) fn handle_typed(
@@ -23,6 +47,7 @@ pub(super) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
+    affection_catalog: Option<&AffectionCatalog>,
     pre_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
     if method == "hero.Marry" {
@@ -98,6 +123,79 @@ pub(super) fn handle_typed(
             UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
         );
         return HandlerResult::PushOnly;
+    }
+    if method == "hero.AddAffection" {
+        let hero_id = decode_varint_u64_field(request_args, 1);
+        let item_id = decode_varint_field(request_args, 2);
+        let requested = decode_varint_field(request_args, 3).clamp(1, 99) as u64;
+        let Some(exp_per_item) = affection_catalog
+            .and_then(|catalog| catalog.exp_by_item.get(&item_id))
+            .copied()
+            .filter(|exp| *exp > 0)
+        else {
+            return HandlerResult::Error(GameError::InvalidState(
+                "affection item configuration was not found",
+            ));
+        };
+        let Some(hero) = account
+            .dock
+            .heroes
+            .values()
+            .find(|hero| hero.id.get() == hero_id)
+        else {
+            return HandlerResult::Error(GameError::NotFound("hero"));
+        };
+        let marry_time = account
+            .activities
+            .progress
+            .get(&format!("compat:hero:{hero_id}:marryTime"))
+            .copied()
+            .unwrap_or_default();
+        let max_affection = if marry_time > 0 { 2_000_000 } else { 1_000_000 };
+        let current = hero.affection.min(max_affection);
+        let room = max_affection.saturating_sub(current);
+        let available = blueoath_domain::TemplateId::new(item_id.max(0) as u64)
+            .ok()
+            .and_then(|template_id| account.inventory.items.get(&template_id).copied())
+            .unwrap_or_default();
+        let count = requested
+            .min(available)
+            .min(room.div_ceil(u64::from(exp_per_item as u32)));
+        if count == 0 {
+            return HandlerResult::Error(GameError::InvalidState("affection gift cannot be used"));
+        }
+        let count_i32 = i32::try_from(count).unwrap_or(i32::MAX);
+        if !consume_typed_item(
+            account,
+            item_id,
+            u64::try_from(count_i32).unwrap_or_default(),
+        ) {
+            return HandlerResult::Error(GameError::InvalidState(
+                "affection gift cannot be consumed",
+            ));
+        }
+        let gained = count
+            .saturating_mul(u64::from(exp_per_item as u32))
+            .min(room);
+        if let Some(hero) = account
+            .dock
+            .heroes
+            .values_mut()
+            .find(|hero| hero.id.get() == hero_id)
+        {
+            hero.affection = current.saturating_add(gained);
+        }
+        pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
+        append_method_push(
+            pre_pushes,
+            "bag.UpdateBagData",
+            BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+        );
+        let mut output = Vec::new();
+        append_varint_field(&mut output, 1, 0);
+        append_varint_field(&mut output, 2, hero_id);
+        append_varint_field(&mut output, 3, current.saturating_add(gained));
+        return HandlerResult::Reply(Response::raw(method, output));
     }
     if method != "repair.RepairHero" {
         return HandlerResult::Error(GameError::InvalidRequest(

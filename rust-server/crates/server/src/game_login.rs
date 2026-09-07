@@ -217,6 +217,7 @@ where
                 typed_account.as_mut().expect("typed compat account"),
                 request.method.as_str(),
                 request_args,
+                catalogs.affection,
                 &mut pre_pushes,
             );
             if let HandlerResult::Error(error) = &result {
