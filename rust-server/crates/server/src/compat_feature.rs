@@ -86,16 +86,15 @@ pub(super) fn handle_typed(
             .find(|hero| hero.id.get() == *hero_id)
             .is_some_and(|hero| hero.hp < HP_COEFFICIENT as u64)
     });
-    if total_cost > 0 {
-        if account
+    if total_cost > 0
+        && account
             .resources
             .debit(blueoath_domain::CurrencyKind::Gold, total_cost)
             .is_err()
-        {
-            return HandlerResult::Error(GameError::InsufficientResource(
-                blueoath_domain::CurrencyKind::Gold,
-            ));
-        }
+    {
+        return HandlerResult::Error(GameError::InsufficientResource(
+            blueoath_domain::CurrencyKind::Gold,
+        ));
     }
     if changed {
         for hero_id in hero_ids {
