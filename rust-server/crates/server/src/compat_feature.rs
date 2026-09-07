@@ -78,6 +78,14 @@ pub(super) fn handle_typed(
             blueoath_domain::CurrencyKind::Gold,
         ));
     }
+    let changed = hero_ids.iter().any(|hero_id| {
+        account
+            .dock
+            .heroes
+            .values()
+            .find(|hero| hero.id.get() == *hero_id)
+            .is_some_and(|hero| hero.hp < HP_COEFFICIENT as u64)
+    });
     if total_cost > 0 {
         if account
             .resources
@@ -88,6 +96,8 @@ pub(super) fn handle_typed(
                 blueoath_domain::CurrencyKind::Gold,
             ));
         }
+    }
+    if changed {
         for hero_id in hero_ids {
             if let Some(hero) = account
                 .dock
