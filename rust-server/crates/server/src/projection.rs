@@ -1507,14 +1507,30 @@ pub(super) fn daily_copy_progress_from_typed_account(
     } else {
         std::collections::BTreeMap::new()
     };
-    challenge_times
+    let chapter_ids = challenge_times
+        .keys()
+        .chain(account.daily_copy.select_ex.keys())
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    chapter_ids
         .into_iter()
-        .filter_map(|(chapter_id, challenge_times)| {
+        .filter_map(|chapter_id| {
             Some(DailyCopyProgress {
                 chapter_id: i32::try_from(chapter_id.get()).ok()?,
-                challenge_times: i32::try_from(challenge_times).unwrap_or(i32::MAX),
+                challenge_times: i32::try_from(
+                    challenge_times
+                        .get(&chapter_id)
+                        .copied()
+                        .unwrap_or_default(),
+                )
+                .unwrap_or(i32::MAX),
                 pass_copy: Vec::new(),
-                select_ex: false,
+                select_ex: account
+                    .daily_copy
+                    .select_ex
+                    .get(&chapter_id)
+                    .copied()
+                    .unwrap_or(false),
                 ex_star: 0,
             })
         })

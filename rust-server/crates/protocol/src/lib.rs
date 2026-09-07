@@ -633,6 +633,29 @@ impl Decode for FriendUpdateUserStateRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DailyCopySelectExRequest {
+    pub chapter_id: i32,
+    pub select_ex: bool,
+}
+
+impl Decode for DailyCopySelectExRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let chapter_id = required_field(&fields, 1, "daily copy select is missing chapter")?;
+        let select_ex = optional_i32(&fields, 2, "daily copy select has duplicate flag")? != 0;
+        if chapter_id <= 0 {
+            return Err(ProtocolError::Invalid(
+                "daily copy select chapter is invalid",
+            ));
+        }
+        Ok(Self {
+            chapter_id,
+            select_ex,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeroLockRequest {
     pub hero_id: u64,
     pub locked: bool,

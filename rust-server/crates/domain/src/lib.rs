@@ -253,6 +253,8 @@ pub struct BattleProgressState {
 pub struct DailyCopyState {
     pub reset_day: u32,
     pub challenge_times: BTreeMap<ChapterId, u32>,
+    #[serde(default)]
+    pub select_ex: BTreeMap<ChapterId, bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

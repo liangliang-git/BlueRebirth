@@ -139,6 +139,10 @@ fn typed_social_relations_round_trip_through_normalized_storage() {
     let (store, root) = store();
     let profile_id = ProfileId::new("typed-social").unwrap();
     let mut account = NewAccountFactory::create(profile_id.clone(), "Captain");
+    let chapter = ChapterId::new(1).unwrap();
+    account.daily_copy.reset_day = 42;
+    account.daily_copy.challenge_times.insert(chapter, 3);
+    account.daily_copy.select_ex.insert(chapter, true);
     account.social.friends.insert(42);
     account.social.pending.insert(43);
     account.social.blacklist.insert(44);
@@ -147,6 +151,7 @@ fn typed_social_relations_round_trip_through_normalized_storage() {
     store.create(&account).unwrap();
     let loaded = store.load_typed_account(&profile_id).unwrap().unwrap();
     assert_eq!(loaded.social, account.social);
+    assert_eq!(loaded.daily_copy, account.daily_copy);
 
     let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
     let relation_count: i64 = connection

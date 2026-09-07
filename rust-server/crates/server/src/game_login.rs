@@ -37,6 +37,8 @@ mod commerce_handler;
 mod compat_feature;
 #[path = "coop_handler.rs"]
 pub(super) mod coop_handler;
+#[path = "daily_copy_handler.rs"]
+mod daily_copy_handler;
 #[path = "equip_handler.rs"]
 pub(crate) mod equip_handler;
 #[path = "extended_handler.rs"]
@@ -1307,6 +1309,54 @@ where
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
             let result = coop_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                handler_error = Some(error.clone());
+            }
+            result.into_payload()
+        }
+        "dailycopy.GetData" | "dailycopy.SelectEx" => {
+            let result = if let Some(typed) = typed_account.as_mut() {
+                let result = daily_copy_handler::handle_typed(
+                    typed,
+                    chapter_catalog,
+                    request.method.as_str(),
+                    request_args,
+                    &mut post_pushes,
+                );
+                if matches!(result, HandlerResult::PushOnly | HandlerResult::Error(_)) {
+                    result
+                } else {
+                    let mut context = GameLoginRequestContext {
+                        state,
+                        account: &mut account,
+                        catalogs: *catalogs,
+                        pre_pushes: &mut pre_pushes,
+                        post_pushes: &mut post_pushes,
+                        handler_error: &mut handler_error,
+                        pass_details: &mut pass_details,
+                        pass_rewards: &mut pass_rewards,
+                        pass_hero_ids: &mut pass_hero_ids,
+                        pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                        pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                    };
+                    battle_handler::handle(&mut context, request.method.as_str(), request_args)
+                }
+            } else {
+                let mut context = GameLoginRequestContext {
+                    state,
+                    account: &mut account,
+                    catalogs: *catalogs,
+                    pre_pushes: &mut pre_pushes,
+                    post_pushes: &mut post_pushes,
+                    handler_error: &mut handler_error,
+                    pass_details: &mut pass_details,
+                    pass_rewards: &mut pass_rewards,
+                    pass_hero_ids: &mut pass_hero_ids,
+                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                };
+                battle_handler::handle(&mut context, request.method.as_str(), request_args)
+            };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
