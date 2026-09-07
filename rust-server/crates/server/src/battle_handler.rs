@@ -19,17 +19,17 @@ pub(super) fn handle_typed_copy_star_reward(
     task_catalog: Option<&TaskCatalog>,
     pre_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
-    let chapter_id = decode_varint_field(request_args, 1);
-    let mut indexes = decode_repeated_varint_field(request_args, 3)
-        .into_iter()
-        .filter(|index| *index > 0)
-        .collect::<Vec<_>>();
-    if indexes.is_empty() {
-        let index = decode_varint_field(request_args, 2);
-        if index > 0 {
-            indexes.push(index);
-        }
-    }
+    let Ok(request) = CopyStarRewardRequest::decode(request_args) else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "copy star reward request is invalid",
+        ));
+    };
+    let chapter_id = request.chapter_id;
+    let indexes: Vec<i64> = request
+        .indexes
+        .iter()
+        .map(|index| i64::from(*index))
+        .collect();
     let Some(chapter_rewards) =
         chapter_catalog.and_then(|catalog| catalog.star_rewards_by_chapter.get(&chapter_id))
     else {
@@ -424,13 +424,20 @@ pub(super) fn handle_typed_with_catalog(
                 FleetInfoCodec::encode(&fleet_info_from_typed_account(account)),
             ))
         }
-        "copyinfo.GetCopyInfo" => HandlerResult::Reply(Response::raw(
-            method,
-            CopyInfoCodec::encode_record_response(&copy_info_response_from_typed_account(
-                account,
-                decode_varint_field(request_args, 1),
-            )),
-        )),
+        "copyinfo.GetCopyInfo" => {
+            let Ok(request) = CopyIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "copy info request is invalid",
+                ));
+            };
+            HandlerResult::Reply(Response::raw(
+                method,
+                CopyInfoCodec::encode_record_response(&copy_info_response_from_typed_account(
+                    account,
+                    request.copy_id,
+                )),
+            ))
+        }
         "dailycopy.CopyEnter" => {
             let Ok(request) = DailyCopyEnterRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
@@ -540,10 +547,17 @@ pub(super) fn handle_typed_with_catalog(
             account.battle.active = None;
             HandlerResult::Reply(Response::raw(method, request_args.to_vec()))
         }
-        "copy.GetRandomFactors" => HandlerResult::Reply(Response::raw(
-            method,
-            encode_random_factor_payload(decode_varint_field(request_args, 1), battle_catalog),
-        )),
+        "copy.GetRandomFactors" => {
+            let Ok(request) = CopyIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "copy random factor request is invalid",
+                ));
+            };
+            HandlerResult::Reply(Response::raw(
+                method,
+                encode_random_factor_payload(request.copy_id, battle_catalog),
+            ))
+        }
         _ => {
             if method != "copy.AttackBase" {
                 return HandlerResult::Empty;

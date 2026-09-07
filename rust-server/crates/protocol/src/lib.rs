@@ -131,6 +131,56 @@ pub struct CopyMiniGamePassRequest {
     pub battle_time: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyStarRewardRequest {
+    pub chapter_id: i32,
+    pub indexes: Vec<i32>,
+}
+
+impl Decode for CopyStarRewardRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let chapter_id = required_field(&fields, 1, "copy star reward is missing chapter id")?;
+        let mut indexes = fields
+            .get(&3)
+            .into_iter()
+            .flatten()
+            .map(|value| to_i32(*value, "copy star reward index is out of range"))
+            .collect::<Result<Vec<_>, _>>()?;
+        if indexes.is_empty() {
+            let index = optional_i32(&fields, 2, "copy star reward has duplicate index")?;
+            if index > 0 {
+                indexes.push(index);
+            }
+        }
+        if chapter_id <= 0 || indexes.is_empty() || indexes.iter().any(|index| *index <= 0) {
+            return Err(ProtocolError::Invalid(
+                "copy star reward request is invalid",
+            ));
+        }
+        Ok(Self {
+            chapter_id,
+            indexes,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyIdRequest {
+    pub copy_id: i32,
+}
+
+impl Decode for CopyIdRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let copy_id = required_field(&fields, 1, "copy request is missing copy id")?;
+        if copy_id <= 0 {
+            return Err(ProtocolError::Invalid("copy request copy id is invalid"));
+        }
+        Ok(Self { copy_id })
+    }
+}
+
 impl Decode for CopyMiniGamePassRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
