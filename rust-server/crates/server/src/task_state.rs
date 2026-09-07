@@ -83,6 +83,57 @@ pub(super) fn can_grant_typed_task_reward(
     false
 }
 
+pub(super) fn can_grant_typed_task_rewards(
+    account: &blueoath_domain::AccountState,
+    rewards: &[ShopReward],
+) -> bool {
+    let mut currencies = std::collections::BTreeMap::<blueoath_domain::CurrencyKind, u64>::new();
+    let mut items = std::collections::BTreeMap::<blueoath_domain::TemplateId, u64>::new();
+    for reward in rewards {
+        let Ok(amount) = u64::try_from(reward.num) else {
+            return false;
+        };
+        if amount == 0 {
+            return false;
+        }
+        if reward.goods_type == 5 {
+            let Some(currency) = typed_currency(reward.item_id) else {
+                return false;
+            };
+            let current = account.resources.amount(currency).get();
+            let extra = currencies.get(&currency).copied().unwrap_or_default();
+            let Some(next) = current
+                .checked_add(extra)
+                .and_then(|value| value.checked_add(amount))
+            else {
+                return false;
+            };
+            currencies.insert(currency, next.saturating_sub(current));
+        } else if matches!(reward.goods_type, 1 | 6) {
+            let Ok(template_id) = blueoath_domain::TemplateId::new(reward.item_id as u64) else {
+                return false;
+            };
+            let current = account
+                .inventory
+                .items
+                .get(&template_id)
+                .copied()
+                .unwrap_or_default();
+            let extra = items.get(&template_id).copied().unwrap_or_default();
+            let Some(next) = current
+                .checked_add(extra)
+                .and_then(|value| value.checked_add(amount))
+            else {
+                return false;
+            };
+            items.insert(template_id, next.saturating_sub(current));
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
 pub(super) fn typed_task_claimed(account: &blueoath_domain::AccountState, task_id: u64) -> bool {
     account.tasks.claimed.contains(&task_id)
 }

@@ -3,7 +3,7 @@ use blueoath_protocol::{
     CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode,
     FriendSearchRequest, FriendTargetRequest, ProtocolError, SeaDifficultyRequest,
     SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
-    SetSecretaryRequest, TaskRewardRequest,
+    SetSecretaryRequest, TaskAllRewardRequest, TaskRewardRequest,
 };
 
 #[test]
@@ -164,6 +164,12 @@ fn decodes_typed_task_reward_request() {
     assert_eq!(request.task_id, 101);
     assert_eq!(request.task_type, 1);
     assert!(TaskRewardRequest::decode(&[]).is_err());
+    assert_eq!(
+        TaskAllRewardRequest::decode(&[0x08, 2])
+            .unwrap()
+            .reward_type,
+        2
+    );
 }
 
 #[test]

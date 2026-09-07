@@ -10,6 +10,9 @@ pub(super) fn handle_typed(
     task_catalog: Option<&TaskCatalog>,
     post_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
+    if method == "task.TaskAllReward" {
+        return handle_all_rewards(account, state, request_args, task_catalog, post_pushes);
+    }
     if !matches!(
         method,
         "task.TaskReward"
@@ -98,6 +101,91 @@ pub(super) fn handle_typed(
     HandlerResult::Reply(Response::raw(
         method,
         encode_task_reward(request.task_id as i32, &rewards),
+    ))
+}
+
+fn handle_all_rewards(
+    account: &mut blueoath_domain::AccountState,
+    state: &ServerState,
+    request_args: &[u8],
+    task_catalog: Option<&TaskCatalog>,
+    post_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    let Ok(request) = TaskAllRewardRequest::decode(request_args) else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "task all reward request is invalid",
+        ));
+    };
+    let Some(catalog) = task_catalog else {
+        return HandlerResult::Error(GameError::CatalogUnavailable);
+    };
+    let allowed_types: &[i32] = if request.reward_type == 2 {
+        &[5]
+    } else {
+        &[1, 2, 3, 4]
+    };
+    let mut claims = Vec::<(u64, Vec<ShopReward>)>::new();
+    for definition in &catalog.definitions {
+        let task_id = definition.id as u64;
+        if !allowed_types.contains(&definition.task_type)
+            || typed_task_claimed(account, task_id)
+            || !typed_task_completed(account, task_id, definition.goal)
+            || !typed_task_visible(account, catalog, definition)
+        {
+            continue;
+        }
+        let mut rewards = task_rewards(Some(catalog), definition.task_type, definition.id);
+        if definition.medal_id > 0 {
+            rewards.push(ShopReward {
+                goods_type: 16,
+                item_id: definition.medal_id,
+                num: 1,
+                instance_id: 0,
+            });
+        }
+        if rewards.is_empty()
+            || rewards.iter().any(|reward| {
+                reward.goods_type == 16
+                    || (reward.goods_type != 5 && !matches!(reward.goods_type, 1 | 6))
+            })
+        {
+            continue;
+        }
+        claims.push((task_id, rewards));
+    }
+    let all_rewards = claims
+        .iter()
+        .flat_map(|(_, rewards)| rewards.iter().copied())
+        .collect::<Vec<_>>();
+    if !can_grant_typed_task_rewards(account, &all_rewards) {
+        return HandlerResult::Error(GameError::InvalidState(
+            "typed task rewards cannot be granted",
+        ));
+    }
+    for (task_id, rewards) in &claims {
+        for reward in rewards {
+            let _ = grant_typed_task_reward(account, reward);
+        }
+        complete_typed_task(account, *task_id);
+    }
+    append_method_push(
+        post_pushes,
+        "task.TaskInfo",
+        task_info_payload_from_typed_account(account, Some(catalog)),
+    );
+    append_method_push(
+        post_pushes,
+        "bag.UpdateBagData",
+        BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+    );
+    append_method_push(
+        post_pushes,
+        "user.UpdateUserInfo",
+        UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+    );
+    HandlerResult::Reply(Response::raw(
+        "task.TaskAllReward",
+        encode_task_reward_list(&all_rewards),
     ))
 }
 

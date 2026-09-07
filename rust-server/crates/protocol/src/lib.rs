@@ -177,6 +177,24 @@ pub struct TaskRewardRequest {
     pub task_type: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskAllRewardRequest {
+    pub reward_type: u32,
+}
+
+impl Decode for TaskAllRewardRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let reward_type = u32::try_from(optional_u64(
+            &fields,
+            1,
+            "task all reward has duplicate type",
+        )?)
+        .map_err(|_| ProtocolError::Invalid("task all reward type is out of range"))?;
+        Ok(Self { reward_type })
+    }
+}
+
 impl Decode for TaskRewardRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
