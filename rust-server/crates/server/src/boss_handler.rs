@@ -1,20 +1,27 @@
 use serde_json::{json, Value};
 
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     _request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let state = context.state;
-    let account = context.account.as_deref_mut()?;
+    let Some(account) = context.account.as_deref_mut() else {
+        return HandlerResult::Error(GameError::AccountUnavailable);
+    };
     match method {
-        "boss.GetBossData" | "boss.UpdateBossData" => Some(boss_payload(account)),
-        "boss.GetBossUserDamageRankList" => Some(user_rank_payload(state, account)),
-        "boss.GetBossGuildDamageRankList" => Some(guild_rank_payload(account)),
-        _ => None,
+        "boss.GetBossData" | "boss.UpdateBossData" => reply(method, boss_payload(account)),
+        "boss.GetBossUserDamageRankList" => reply(method, user_rank_payload(state, account)),
+        "boss.GetBossGuildDamageRankList" => reply(method, guild_rank_payload(account)),
+        _ => HandlerResult::Empty,
     }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
 }
 
 fn boss_state_mut(account: &mut Value) -> &mut Value {
