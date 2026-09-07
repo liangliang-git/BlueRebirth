@@ -1262,6 +1262,30 @@ pub(super) fn daily_copy_progress_from_account(
         .collect()
 }
 
+pub(super) fn daily_copy_progress_from_typed_account(
+    account: &blueoath_domain::AccountState,
+    now: u32,
+) -> Vec<DailyCopyProgress> {
+    let reset_day = (u64::from(now) + 8 * 60 * 60) / 86_400;
+    let challenge_times = if u64::from(account.daily_copy.reset_day) == reset_day {
+        account.daily_copy.challenge_times.clone()
+    } else {
+        std::collections::BTreeMap::new()
+    };
+    challenge_times
+        .into_iter()
+        .filter_map(|(chapter_id, challenge_times)| {
+            Some(DailyCopyProgress {
+                chapter_id: i32::try_from(chapter_id.get()).ok()?,
+                challenge_times: i32::try_from(challenge_times).unwrap_or(i32::MAX),
+                pass_copy: Vec::new(),
+                select_ex: false,
+                ex_star: 0,
+            })
+        })
+        .collect()
+}
+
 pub(super) fn daily_copy_group_progress_from_account(
     account: Option<&Value>,
     key: &str,

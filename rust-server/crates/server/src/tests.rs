@@ -15,39 +15,39 @@ use super::{
     completed_copy_ids, construction_info_payload, consume_bag_item,
     consume_hero_skill_upgrade_materials, copy_progress_max_or_first, copy_progress_max_or_initial,
     copy_request_type, daily_copy_group_progress_from_account, daily_copy_progress_from_account,
-    decode_hero_add_exp_request, decode_mop_up_arg, decode_repeated_message_field,
-    decode_repeated_varint_field, decode_varint_field, default_account_snapshot,
-    dismantle_equip_state, draw_build_drop_reward_with_roll, draw_build_ship_reward_with_roll,
-    draw_copy_drop_with_seed, draw_draw_count, draw_sr_build_reward_with_roll,
-    encode_hero_add_exp_response, encode_mail_list_response, encode_retire_hero_response,
-    enhance_bind_equip_state, enhance_equip_state, equip_list_from_account, expand_build_drop,
-    fashion_equip_state, fashion_list_from_account, finish_building_state, finish_study_state,
-    fleet_info_from_account, fleet_info_from_typed_account, hero_advance_max_level_state,
-    hero_advance_mub_state, hero_advance_state, hero_auto_equip_state, hero_auto_unequip_state,
-    hero_change_equip_state, hero_equip_binding_state, hero_equip_effect_state,
-    hero_equip_lock_transplant_state, hero_intensify_state, hero_remould_state,
-    illustrate_info_payload, illustrate_info_payload_for_templates, json_i32,
-    load_affection_catalog, load_battle_catalog, load_chapter_catalog, load_equip_catalog,
-    load_server_shop_goods, load_ship_break_catalog, load_ship_intensify_catalog,
-    load_ship_stat_catalog, load_shop_catalog, load_task_catalog, mark_battle_fleet_passed,
-    mop_up_pass_rets, mop_up_payload, mop_up_payload_with_pass_rets, normalize_daily_copy_state,
-    normalize_task_state, prepare_local_request, preset_fleet_info_from_account,
-    process_game_login_frame_with_catalog_mut, process_game_login_frame_with_catalogs_typed_mut,
-    receive_construction, record_battle_pass, renovate_equip_state, resolve_study_skill_id,
-    return_shop_buy_response, scale_reward, sea_difficulty_for_account,
-    set_preset_fleet_from_account, set_sea_difficulty, settle_mop_up, settle_mop_up_with_config,
-    settle_support_state, ship_attributes_for_hero, ship_attributes_for_template,
-    shop_costs_from_value, shop_info_payload, start_construction, start_study_state,
-    start_support_state, story_memory_payload, study_info_payload, study_skill_state,
-    sync_achievement_points, task_completed, task_info_payload, update_bathroom_state,
-    update_building_assignments, update_mop_up_state, validate_battle_attack, BattleCatalog,
-    BattleCopy, BattleEnemy, BattleFleetReward, BuildShipCatalog, BuildingCatalog, ChapterCatalog,
-    CommanderLevelCatalog, EquipCatalog, EquipLevelbreakRule, EquipNewTestCatalog, EquipNum,
-    EquipRenovateRule, HeroBreakdownCatalog, HeroLevelCatalog, HeroSkillUpgradeCatalog,
-    MailTemplate, ServerConfig, ServerState, ShipAdvanceCatalog, ShipBreakCatalog,
-    ShipRemouldCatalog, ShipStat, ShipStatCatalog, ShopCatalog, ShopCost, ShopGood, ShopReward,
-    SupportCatalog, SupportFleetItem, TalentCatalog, TalentNode, TaskCatalog, TaskDefinition,
-    UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
+    daily_copy_progress_from_typed_account, decode_hero_add_exp_request, decode_mop_up_arg,
+    decode_repeated_message_field, decode_repeated_varint_field, decode_varint_field,
+    default_account_snapshot, dismantle_equip_state, draw_build_drop_reward_with_roll,
+    draw_build_ship_reward_with_roll, draw_copy_drop_with_seed, draw_draw_count,
+    draw_sr_build_reward_with_roll, encode_hero_add_exp_response, encode_mail_list_response,
+    encode_retire_hero_response, enhance_bind_equip_state, enhance_equip_state,
+    equip_list_from_account, expand_build_drop, fashion_equip_state, fashion_list_from_account,
+    finish_building_state, finish_study_state, fleet_info_from_account,
+    fleet_info_from_typed_account, hero_advance_max_level_state, hero_advance_mub_state,
+    hero_advance_state, hero_auto_equip_state, hero_auto_unequip_state, hero_change_equip_state,
+    hero_equip_binding_state, hero_equip_effect_state, hero_equip_lock_transplant_state,
+    hero_intensify_state, hero_remould_state, illustrate_info_payload,
+    illustrate_info_payload_for_templates, json_i32, load_affection_catalog, load_battle_catalog,
+    load_chapter_catalog, load_equip_catalog, load_server_shop_goods, load_ship_break_catalog,
+    load_ship_intensify_catalog, load_ship_stat_catalog, load_shop_catalog, load_task_catalog,
+    mark_battle_fleet_passed, mop_up_pass_rets, mop_up_payload, mop_up_payload_with_pass_rets,
+    normalize_daily_copy_state, normalize_task_state, prepare_local_request,
+    preset_fleet_info_from_account, process_game_login_frame_with_catalog_mut,
+    process_game_login_frame_with_catalogs_typed_mut, receive_construction, record_battle_pass,
+    renovate_equip_state, resolve_study_skill_id, return_shop_buy_response, scale_reward,
+    sea_difficulty_for_account, set_preset_fleet_from_account, set_sea_difficulty, settle_mop_up,
+    settle_mop_up_with_config, settle_support_state, ship_attributes_for_hero,
+    ship_attributes_for_template, shop_costs_from_value, shop_info_payload, start_construction,
+    start_study_state, start_support_state, story_memory_payload, study_info_payload,
+    study_skill_state, sync_achievement_points, task_completed, task_info_payload,
+    update_bathroom_state, update_building_assignments, update_mop_up_state,
+    validate_battle_attack, BattleCatalog, BattleCopy, BattleEnemy, BattleFleetReward,
+    BuildShipCatalog, BuildingCatalog, ChapterCatalog, CommanderLevelCatalog, EquipCatalog,
+    EquipLevelbreakRule, EquipNewTestCatalog, EquipNum, EquipRenovateRule, HeroBreakdownCatalog,
+    HeroLevelCatalog, HeroSkillUpgradeCatalog, MailTemplate, ServerConfig, ServerState,
+    ShipAdvanceCatalog, ShipBreakCatalog, ShipRemouldCatalog, ShipStat, ShipStatCatalog,
+    ShopCatalog, ShopCost, ShopGood, ShopReward, SupportCatalog, SupportFleetItem, TalentCatalog,
+    TalentNode, TaskCatalog, TaskDefinition, UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
 };
 use blueoath_domain::{FleetId, FleetRecord, HeroId, NewAccountFactory, ProfileId, TemplateId};
 use blueoath_protocol::{
@@ -173,6 +173,18 @@ fn typed_building_projection_reads_normalized_building_rows() {
     assert_eq!(building.buildings[0].template_id, 41);
     assert_eq!(building.buildings[0].level, 4);
     assert_eq!(building.lands[0].index, 6);
+}
+
+#[test]
+fn typed_daily_copy_projection_resets_stale_challenge_counts() {
+    let mut account = NewAccountFactory::create(ProfileId::new("typed-daily").unwrap(), "Daily");
+    account.daily_copy.reset_day = 0;
+    account
+        .daily_copy
+        .challenge_times
+        .insert(blueoath_domain::ChapterId::new(7).unwrap(), 4);
+
+    assert!(daily_copy_progress_from_typed_account(&account, 86_400).is_empty());
 }
 
 #[test]

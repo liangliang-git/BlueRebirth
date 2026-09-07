@@ -1158,6 +1158,27 @@ where
             }
             result.into_payload()
         }
+        "dailycopy.UpdateDailyCopyData" => {
+            if let Some(typed) = typed_account.as_ref() {
+                let fallback_catalog;
+                let catalog = match chapter_catalog {
+                    Some(catalog) => catalog,
+                    None => {
+                        fallback_catalog = ChapterCatalog::fallback();
+                        &fallback_catalog
+                    }
+                };
+                Some(DailyCopyCodec::encode_with_progress(
+                    &catalog.daily_chapters,
+                    &catalog.daily_groups,
+                    &daily_copy_progress_from_typed_account(typed, current_unix_seconds()),
+                    &[],
+                    &[],
+                ))
+            } else {
+                None
+            }
+        }
         _ if method.is_family(MethodFamily::Copy)
             && !matches!(
                 request.method.as_str(),
