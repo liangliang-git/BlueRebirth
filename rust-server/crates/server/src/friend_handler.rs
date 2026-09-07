@@ -7,7 +7,6 @@ pub(super) fn handle_typed(
     state: &ServerState,
     method: &str,
     request_args: &[u8],
-    _pre_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
     match method {
         "friend.GetFriendMainData" => reply(method, typed_friend_main_payload(state, account)),
@@ -227,7 +226,7 @@ mod tests {
         append_varint_field(&mut args, 1, 42);
 
         assert!(matches!(
-            handle_typed(&mut account, &state, "friend.Apply", &args, &mut Vec::new(),),
+            handle_typed(&mut account, &state, "friend.Apply", &args),
             HandlerResult::PushOnly
         ));
         assert!(account.social.pending.contains(&42));
@@ -238,7 +237,6 @@ mod tests {
                 &state,
                 "friend.Accept",
                 &args,
-                &mut Vec::new(),
             ),
             HandlerResult::PushOnly
         ));
@@ -251,7 +249,6 @@ mod tests {
                 &state,
                 "friend.SetBlack",
                 &args,
-                &mut Vec::new(),
             ),
             HandlerResult::PushOnly
         ));
@@ -270,7 +267,6 @@ mod tests {
             &state,
             "friend.GetFriendMainData",
             &[],
-            &mut Vec::new(),
         );
         let HandlerResult::Reply(response) = result else {
             panic!("expected friend projection reply");

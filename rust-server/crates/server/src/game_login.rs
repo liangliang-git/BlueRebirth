@@ -880,7 +880,6 @@ where
                     state,
                     request.method.as_str(),
                     request_args,
-                    &mut pre_pushes,
                 )
             } else {
                 HandlerResult::Error(GameError::InvalidRequest("friend requires typed account"))
@@ -1134,6 +1133,7 @@ where
         _ if method.is_family(MethodFamily::SportsMeet)
             || method.is_family(MethodFamily::SportsMeetRank) =>
         {
+            let mut sportsmeet_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
                 sportsmeet_handler::handle_typed(
@@ -1142,13 +1142,19 @@ where
                     catalog,
                     request.method.as_str(),
                     request_args,
-                    &mut pre_pushes,
+                    &mut sportsmeet_effects,
                 )
             } else {
                 HandlerResult::Error(GameError::InvalidRequest(
                     "sports meet requires typed account",
                 ))
             };
+            apply_response_effects(
+                sportsmeet_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }

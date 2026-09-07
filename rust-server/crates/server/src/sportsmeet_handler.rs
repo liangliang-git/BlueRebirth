@@ -1,6 +1,6 @@
 use super::catalog::GameplayCatalog;
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 pub(super) fn handle_typed(
@@ -9,7 +9,7 @@ pub(super) fn handle_typed(
     catalog: &GameplayCatalog,
     method: &str,
     request_args: &[u8],
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     match method {
         "sportsmeet.GetSportsTickCount" => reply(method, tick_count_payload_typed(account)),
@@ -25,11 +25,11 @@ pub(super) fn handle_typed(
                 catalog,
                 method,
                 Some(points),
-                pre_pushes,
+                effects,
             )
         }
         "sportsmeet.ReceiveAllPointsReward" => {
-            receive_points_reward_typed(server_state, account, catalog, method, None, pre_pushes)
+            receive_points_reward_typed(server_state, account, catalog, method, None, effects)
         }
         "sportsmeetrank.GetOwnerRankData" => reply(method, owner_rank_payload_typed(account)),
         "sportsmeetrank.GetAttackBeeRank" => reply(method, rank_payload_typed(account, 2)),
@@ -76,7 +76,7 @@ fn receive_points_reward_typed(
     catalog: &GameplayCatalog,
     method: &str,
     requested_points: Option<u64>,
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let points_to_receive = if let Some(points) = requested_points {
         if points == 0
@@ -132,16 +132,14 @@ fn receive_points_reward_typed(
             ));
         }
     }
-    append_method_push(
-        pre_pushes,
+    effects.push_pre(Response::raw(
         "user.UpdateUserInfo",
         UserInfoCodec::encode(&user_info_from_typed_account(server_state, account)),
-    );
-    append_method_push(
-        pre_pushes,
+    ));
+    effects.push_pre(Response::raw(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-    );
+    ));
     reply(method, encode_rewards_list(&rewards))
 }
 
@@ -208,7 +206,7 @@ mod tests {
                 instance_id: 0,
             }],
         );
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
         assert!(matches!(
             handle_typed(
                 &state,
@@ -216,7 +214,7 @@ mod tests {
                 &catalog,
                 "sportsmeet.ReceivePointsReward",
                 &[8, 20],
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::Reply(_)
         ));
@@ -228,7 +226,7 @@ mod tests {
                 &catalog,
                 "sportsmeet.ReceivePointsReward",
                 &[8, 20],
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::Reply(_)
         ));
