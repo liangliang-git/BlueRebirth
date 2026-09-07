@@ -229,6 +229,7 @@ pub(super) fn advance_typed_task_event(
     changed
 }
 
+#[cfg(test)]
 pub(super) fn complete_task(
     account: &mut Value,
     task_type: i32,
@@ -277,6 +278,7 @@ pub(super) fn task_claimed(account: &Value, task_type: i32, task_id: i32) -> boo
         })
 }
 
+#[cfg(test)]
 pub(super) fn task_completed(account: &Value, task_type: i32, task_id: i32, goal: i32) -> bool {
     account
         .get("tasks")
@@ -295,6 +297,7 @@ pub(super) fn task_completed(account: &Value, task_type: i32, task_id: i32, goal
 
 /// Keep legacy UserInfo.AchievePoint consistent with claimed achievement records.
 /// Achievement points are derived from the client catalog, never accepted from TaskTrigger.
+#[cfg(test)]
 pub(super) fn sync_achievement_points(account: &mut Value, catalog: &TaskCatalog) -> bool {
     let points = catalog
         .definitions
