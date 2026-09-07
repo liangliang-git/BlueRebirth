@@ -1552,21 +1552,18 @@ where
             payload
         }
         _ if method.is_family(MethodFamily::TalentTree) => {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            let result = if let Some(typed) = typed_account.as_mut() {
+                talent_handler::handle_typed(
+                    typed,
+                    request.method.as_str(),
+                    request_args,
+                    &mut pre_pushes,
+                )
+            } else {
+                HandlerResult::Error(GameError::InvalidRequest(
+                    "talent tree requires typed account",
+                ))
             };
-            let result =
-                talent_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -1897,12 +1894,13 @@ where
         });
         post_pushes.push(goods_copy_push);
         let talent_catalog = current_talent_catalog();
+        let talent_payload = typed_account
+            .as_deref()
+            .map(|account| talent_tree_payload_typed(account, &talent_catalog))
+            .unwrap_or_default();
         let push = TMessageCodec::encode_response(&TResponse {
             method: "talentTree.TalentTreeAllList".to_owned(),
-            ret: Some(talent_tree_payload(
-                account_view.unwrap_or(&Value::Null),
-                &talent_catalog,
-            )),
+            ret: Some(talent_payload),
             time: now,
             ..TResponse::default()
         });
@@ -2157,9 +2155,12 @@ where
                 NetSocketFrameCodec::write(stream, 0, &push).await?;
             }
             let talent_catalog = current_talent_catalog();
+            let talent_payload = typed_account_view
+                .map(|typed| talent_tree_payload_typed(typed, &talent_catalog))
+                .unwrap_or_default();
             let push = TMessageCodec::encode_response(&TResponse {
                 method: "talentTree.TalentTreeAllList".to_owned(),
-                ret: Some(talent_tree_payload(account, &talent_catalog)),
+                ret: Some(talent_payload),
                 time: now,
                 ..TResponse::default()
             });
@@ -2412,7 +2413,6 @@ fn legacy_only_method(method: &str) -> bool {
             | MethodFamily::ShipTask
             | MethodFamily::SportsMeet
             | MethodFamily::SportsMeetRank
-            | MethodFamily::TalentTree
             | MethodFamily::Bathroom
             | MethodFamily::Battle
             | MethodFamily::BattlePass

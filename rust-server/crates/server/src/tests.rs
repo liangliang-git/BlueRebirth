@@ -5,7 +5,7 @@ use super::{
     add_bag_item, add_building_state, adjust_character_i64, advance_task_event,
     advance_task_event_with_param, append_bytes_field, append_message_field, append_varint_field,
     apply_hero_breakdown_rewards, apply_mail_reward, apply_shop_good, apply_strategy_state,
-    apply_talent_change, auto_select_enhancement_materials, bag_info_from_account,
+    apply_talent_change_typed, auto_select_enhancement_materials, bag_info_from_account,
     bag_info_from_typed_account, bag_item_count, bathroom_info_payload,
     battle_attack_payload_with_damage, battle_copy_passed, battle_enemy_ids,
     battle_pass_payload_with_experience, battle_pass_payload_with_rewards,
@@ -3277,19 +3277,23 @@ fn talent_unlock_and_upgrade_follow_chain_and_consume_configured_costs() {
             ..TalentNode::default()
         },
     );
-    let mut account = json!({
-        "character": {},
-        "bag": {"items": [{"templateId": 60000, "num": 5}]}
-    });
-    apply_talent_change(&mut account, &catalog, 10).unwrap();
-    assert_eq!(bag_item_count(&account, 60000), 3);
+    let mut account = NewAccountFactory::create(ProfileId::new("talent").unwrap(), "Talent");
+    account
+        .inventory
+        .items
+        .insert(TemplateId::new(60000).unwrap(), 5);
+    apply_talent_change_typed(&mut account, &catalog, 10).unwrap();
+    assert_eq!(account.inventory.items[&TemplateId::new(60000).unwrap()], 3);
     assert_eq!(
-        apply_talent_change(&mut account, &catalog, 12),
+        apply_talent_change_typed(&mut account, &catalog, 12),
         Err("talent is not the next level")
     );
-    assert_eq!(bag_item_count(&account, 60000), 3);
-    apply_talent_change(&mut account, &catalog, 11).unwrap();
-    assert_eq!(bag_item_count(&account, 60000), 0);
+    assert_eq!(account.inventory.items[&TemplateId::new(60000).unwrap()], 3);
+    apply_talent_change_typed(&mut account, &catalog, 11).unwrap();
+    assert!(!account
+        .inventory
+        .items
+        .contains_key(&TemplateId::new(60000).unwrap()));
 }
 
 #[test]

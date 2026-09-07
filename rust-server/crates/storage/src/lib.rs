@@ -935,6 +935,10 @@ impl ProfileStore {
                     "recordInviteScoreVersion" => account.invite_score.record_version = value,
                     _ => {}
                 }
+            } else if activity_id == "talent" {
+                if let Ok(root) = progress_kind.parse::<u64>() {
+                    account.talents.active.insert(root, value);
+                }
             } else {
                 account
                     .activities
@@ -1824,6 +1828,19 @@ impl ProfileStore {
                     activity_id,
                     progress_kind,
                     typed_i64(*value, "activity progress")?,
+                    timestamp(),
+                ],
+            )?;
+        }
+        for (root, active) in &account.talents.active {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'talent', ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    root.to_string(),
+                    typed_i64(*active, "talent state")?,
                     timestamp(),
                 ],
             )?;

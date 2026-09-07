@@ -707,20 +707,141 @@ pub(super) fn compute_talent_target(
     (target_id, pre, is_operate)
 }
 
-pub(super) fn talent_state(account: &Value) -> std::collections::BTreeMap<i32, i32> {
+pub(super) fn talent_tree_payload_typed(
+    account: &blueoath_domain::AccountState,
+    catalog: &TalentCatalog,
+) -> Vec<u8> {
+    let mut out = Vec::new();
+    for root in &catalog.roots {
+        let reached = account
+            .talents
+            .active
+            .get(&u64::try_from(*root).unwrap_or_default())
+            .and_then(|id| i32::try_from(*id).ok());
+        let (id, pre, operate) = compute_talent_target(catalog, *root, reached);
+        append_message_field(&mut out, 1, &encode_talent_data(id, &pre, operate));
+    }
+    out
+}
+
+pub(super) fn talent_data_payload_typed(
+    account: &blueoath_domain::AccountState,
+    catalog: &TalentCatalog,
+    talent_id: i32,
+) -> Vec<u8> {
+    let mut ret = Vec::new();
+    if let Some(node) = catalog.nodes.get(&talent_id) {
+        let root = if node.belong_talent > 0 {
+            node.belong_talent
+        } else {
+            talent_id
+        };
+        let reached = account
+            .talents
+            .active
+            .get(&u64::try_from(root).unwrap_or_default())
+            .and_then(|id| i32::try_from(*id).ok());
+        append_message_field(
+            &mut ret,
+            1,
+            &encode_talent_data(
+                talent_id,
+                &node.precondition,
+                i32::from(reached == Some(talent_id)),
+            ),
+        );
+    }
+    ret
+}
+
+pub(super) fn apply_talent_change_typed(
+    account: &mut blueoath_domain::AccountState,
+    catalog: &TalentCatalog,
+    talent_id: i32,
+) -> Result<(i32, Vec<i32>, i32), &'static str> {
+    let node = catalog.nodes.get(&talent_id).ok_or("talent is invalid")?;
+    let root = if node.belong_talent > 0 {
+        node.belong_talent
+    } else {
+        talent_id
+    };
+    let root_key = u64::try_from(root).map_err(|_| "talent is invalid")?;
+    let reached = account
+        .talents
+        .active
+        .get(&root_key)
+        .and_then(|id| i32::try_from(*id).ok());
+    if let Some(current) = reached {
+        if current == talent_id {
+            return Err("talent is already active");
+        }
+        if catalog.nodes.get(&current).map(|node| node.next_talent) != Some(talent_id) {
+            return Err("talent is not the next level");
+        }
+    } else if root != talent_id {
+        return Err("talent root is not unlocked");
+    }
+    for (goods_type, item_id, amount) in &node.costs {
+        let amount = u64::try_from(*amount).map_err(|_| "talent cost is invalid")?;
+        let available = if *goods_type == 5 {
+            talent_currency(*item_id)
+                .map(|kind| account.resources.amount(kind).get())
+                .ok_or("talent currency is unsupported")?
+        } else if matches!(*goods_type, 1 | 6) {
+            let template =
+                blueoath_domain::TemplateId::new(u64::try_from(*item_id).unwrap_or_default())
+                    .map_err(|_| "talent item is invalid")?;
+            account
+                .inventory
+                .items
+                .get(&template)
+                .copied()
+                .unwrap_or_default()
+        } else {
+            return Err("unsupported talent cost type");
+        };
+        if available < amount {
+            return Err("not enough resource for talent");
+        }
+    }
+    for (goods_type, item_id, amount) in &node.costs {
+        let amount = u64::try_from(*amount).map_err(|_| "talent cost is invalid")?;
+        if *goods_type == 5 {
+            let kind = talent_currency(*item_id).ok_or("talent currency is unsupported")?;
+            account
+                .resources
+                .debit(kind, amount)
+                .map_err(|_| "not enough currency for talent")?;
+        } else {
+            let template =
+                blueoath_domain::TemplateId::new(u64::try_from(*item_id).unwrap_or_default())
+                    .map_err(|_| "talent item is invalid")?;
+            let count = account
+                .inventory
+                .items
+                .get_mut(&template)
+                .ok_or("not enough items for talent")?;
+            *count -= amount;
+            if *count == 0 {
+                account.inventory.items.remove(&template);
+            }
+        }
+    }
     account
-        .get("talent")
-        .and_then(|value| value.get("activeTalents"))
-        .and_then(Value::as_object)
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(|(root, id)| {
-                    Some((root.parse().ok()?, i32::try_from(id.as_i64()?).ok()?))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+        .talents
+        .active
+        .insert(root_key, u64::try_from(talent_id).unwrap_or_default());
+    Ok(compute_talent_target(catalog, root, Some(talent_id)))
+}
+
+fn talent_currency(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
+    match item_id {
+        1 => Some(blueoath_domain::CurrencyKind::Gold),
+        2 => Some(blueoath_domain::CurrencyKind::Diamond),
+        5 => Some(blueoath_domain::CurrencyKind::Supply),
+        30 => Some(blueoath_domain::CurrencyKind::PvePoint),
+        _ => None,
+    }
 }
 
 pub(super) fn encode_talent_data(id: i32, precondition: &[i32], is_operate: i32) -> Vec<u8> {
@@ -730,16 +851,6 @@ pub(super) fn encode_talent_data(id: i32, precondition: &[i32], is_operate: i32)
         append_varint_field(&mut out, 2, (*pre).max(0) as u64);
     }
     append_varint_field(&mut out, 3, is_operate.max(0) as u64);
-    out
-}
-
-pub(super) fn talent_tree_payload(account: &Value, catalog: &TalentCatalog) -> Vec<u8> {
-    let reached = talent_state(account);
-    let mut out = Vec::new();
-    for root in &catalog.roots {
-        let (id, pre, operate) = compute_talent_target(catalog, *root, reached.get(root).copied());
-        append_message_field(&mut out, 1, &encode_talent_data(id, &pre, operate));
-    }
     out
 }
 
@@ -755,68 +866,6 @@ pub(super) fn talent_change_payload(target: (i32, Vec<i32>, i32)) -> Vec<u8> {
 
 pub(super) fn decode_talent_id(payload: &[u8]) -> i32 {
     decode_varint_field(payload, 1)
-}
-
-pub(super) fn apply_talent_change(
-    account: &mut Value,
-    catalog: &TalentCatalog,
-    talent_id: i32,
-) -> Result<(i32, Vec<i32>, i32), &'static str> {
-    let node = catalog.nodes.get(&talent_id).ok_or("talent is invalid")?;
-    let root = if node.belong_talent > 0 {
-        node.belong_talent
-    } else {
-        talent_id
-    };
-    let reached = talent_state(account).get(&root).copied();
-    if let Some(current) = reached {
-        if current == talent_id {
-            return Err("talent is already active");
-        }
-        if catalog
-            .nodes
-            .get(&current)
-            .map(|current| current.next_talent)
-            != Some(talent_id)
-        {
-            return Err("talent is not the next level");
-        }
-    } else if root != talent_id {
-        return Err("talent root is not unlocked");
-    }
-    for (goods_type, item_id, amount) in &node.costs {
-        if *goods_type == 5 {
-            let key = currency_character_key(*item_id).ok_or("talent currency is unsupported")?;
-            if character_i64(account, key) < *amount {
-                return Err("not enough currency for talent");
-            }
-        } else if matches!(*goods_type, 1 | 6) {
-            if bag_item_count(account, *item_id) < *amount {
-                return Err("not enough items for talent");
-            }
-        } else {
-            return Err("unsupported talent cost type");
-        }
-    }
-    for (goods_type, item_id, amount) in &node.costs {
-        let amount = i32::try_from(*amount).map_err(|_| "talent cost is too large")?;
-        consume_resource(account, *goods_type, *item_id, amount);
-    }
-    let talent = account
-        .as_object_mut()
-        .ok_or("account is invalid")?
-        .entry("talent".to_owned())
-        .or_insert_with(|| json!({"activeTalents": {}}));
-    let active = talent
-        .as_object_mut()
-        .ok_or("talent state is invalid")?
-        .entry("activeTalents".to_owned())
-        .or_insert_with(|| json!({}));
-    active
-        .as_object_mut()
-        .ok_or("talent state is invalid")?
-        .insert(root.to_string(), json!(talent_id));
-    Ok(compute_talent_target(catalog, root, Some(talent_id)))
 }
 
 pub(super) fn load_shop_catalog(client_path: Option<&PathBuf>) -> ShopCatalog {
