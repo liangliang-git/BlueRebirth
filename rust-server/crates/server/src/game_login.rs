@@ -774,7 +774,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            misc_extended_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result =
+                misc_extended_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if guildtask_handler::handles(request.method.as_str()) => {
             let mut context = GameLoginRequestContext {

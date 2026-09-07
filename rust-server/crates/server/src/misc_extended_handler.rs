@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
@@ -13,7 +15,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     if GameMethod::parse(method).is_family(MethodFamily::Magazine) {
         return handle_magazine(context, catalog, method, request_args);
@@ -26,11 +28,9 @@ fn handle_magazine<'state, 'account, 'scratch>(
     catalog: &GameplayCatalog,
     method: &str,
     args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let Some(account) = context.account.as_deref_mut() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "account is unavailable".to_owned();
-        return Some(Vec::new());
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
     if method == "magazine.FetchMagazineReward" {
         let reward_key = decode_varint_field(args, 1);
@@ -66,31 +66,31 @@ fn handle_magazine<'state, 'account, 'scratch>(
         let state = magazine_state_mut(account);
         push_unique_i32(&mut state["claimedRewards"], reward_key);
         return if rewards.is_empty() {
-            Some(magazine_payload(state))
+            reply(method, magazine_payload(state))
         } else {
-            Some(encode_rewards_list(&rewards))
+            reply(method, encode_rewards_list(&rewards))
         };
     }
     let state = magazine_state_mut(account);
     match method {
-        "magazine.GetMagazine" | "magazine.Magazine" => Some(magazine_payload(state)),
-        "magazine.UpdateMagazineInfo" => Some(magazine_update_payload(state)),
+        "magazine.GetMagazine" | "magazine.Magazine" => reply(method, magazine_payload(state)),
+        "magazine.UpdateMagazineInfo" => reply(method, magazine_update_payload(state)),
         "magazine.AddHero" => {
             let hero_id = decode_varint_field(args, 1);
             push_unique_i32(&mut state["heroes"], hero_id);
-            Some(magazine_payload(state))
+            reply(method, magazine_payload(state))
         }
         "magazine.Vote" => {
             let page_id = decode_varint_field(args, 1);
             push_unique_i32(&mut state["votes"], page_id);
-            Some(magazine_payload(state))
+            reply(method, magazine_payload(state))
         }
         "magazine.UnLock" => {
             let page_id = decode_varint_field(args, 1);
             push_unique_i32(&mut state["unlocked"], page_id);
-            Some(magazine_payload(state))
+            reply(method, magazine_payload(state))
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
 }
 
@@ -99,11 +99,9 @@ fn handle_interaction_item<'state, 'account, 'scratch>(
     catalog: &GameplayCatalog,
     method: &str,
     args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let Some(account) = context.account.as_deref_mut() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "account is unavailable".to_owned();
-        return Some(Vec::new());
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
     if matches!(
         method,
@@ -136,41 +134,45 @@ fn handle_interaction_item<'state, 'account, 'scratch>(
                 .collect::<Vec<_>>();
             let state = interaction_state_mut(account);
             push_unique_i32(&mut state["rewards"], item_id);
-            return Some(encode_rewards_list(&rewards));
+            return reply(method, encode_rewards_list(&rewards));
         }
         let state = interaction_state_mut(account);
         push_unique_i32(&mut state["rewards"], item_id);
         return if method == "interactionitem.GetItemReward" {
-            Some(encode_rewards_list(&[]))
+            reply(method, encode_rewards_list(&[]))
         } else {
-            Some(interaction_payload(state))
+            reply(method, interaction_payload(state))
         };
     }
     let state = interaction_state_mut(account);
     match method {
-        "interactionitem.RefreshInteractionItems" => Some(interaction_payload(state)),
+        "interactionitem.RefreshInteractionItems" => reply(method, interaction_payload(state)),
         "interactionitem.SetCrystalBallToy" => {
             state["crystalBallToy"] = json!(decode_varint_field(args, 1));
-            Some(interaction_payload(state))
+            reply(method, interaction_payload(state))
         }
         "interactionitem.SetBagItemVisible" => {
             let item_id = decode_varint_field(args, 1);
             let visible = decode_varint_field(args, 2) != 0;
             state["visible"][item_id.to_string()] = json!(visible);
-            Some(interaction_payload(state))
+            reply(method, interaction_payload(state))
         }
         "interactionitem.SetMutexBagGroupState" => {
             let group_id = decode_varint_field(args, 1);
             state["groups"][group_id.to_string()] = json!(decode_varint_field(args, 2));
-            Some(interaction_payload(state))
+            reply(method, interaction_payload(state))
         }
         "interactionitem.SetPosterState" => {
             let poster_id = decode_varint_field(args, 1);
             state["posters"][poster_id.to_string()] = json!(decode_varint_field(args, 2));
-            Some(interaction_payload(state))
+            reply(method, interaction_payload(state))
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
 }
 
 fn magazine_payload(state: &Value) -> Vec<u8> {
@@ -346,5 +348,21 @@ fn push_unique_i32(target: &mut Value, value: i32) {
         .any(|entry| entry.as_i64() == Some(i64::from(value)))
     {
         values.push(json!(value));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::response::HandlerResult;
+
+    use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
     }
 }
