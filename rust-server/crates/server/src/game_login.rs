@@ -1463,7 +1463,7 @@ where
             || method.is_family(MethodFamily::Task)
             || method.is_family(MethodFamily::Bathroom) =>
         {
-            let mut progression_effects = ResponseEffects::default();
+            let mut feature_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 if method.is_family(MethodFamily::Bathroom) {
                     progression_handler::handle_bathroom_typed(
@@ -1472,7 +1472,7 @@ where
                         request_args,
                         current_unix_seconds(),
                         state.mood_recovery_multiplier,
-                        &mut progression_effects,
+                        &mut feature_effects,
                     )
                 } else if method.is_family(MethodFamily::Study) {
                     progression_handler::handle_study_typed(
@@ -1480,7 +1480,7 @@ where
                         request.method.as_str(),
                         request_args,
                         current_unix_seconds(),
-                        &mut progression_effects,
+                        &mut feature_effects,
                     )
                 } else {
                     task_handler::handle_typed(
@@ -1489,7 +1489,7 @@ where
                         request.method.as_str(),
                         request_args,
                         task_catalog,
-                        &mut post_pushes,
+                        &mut feature_effects,
                     )
                 }
             } else {
@@ -1506,7 +1506,7 @@ where
                         request_args,
                         current_unix_seconds(),
                         state.mood_recovery_multiplier,
-                        &mut progression_effects,
+                        &mut feature_effects,
                     )
                 } else {
                     HandlerResult::Error(GameError::InvalidRequest(
@@ -1515,7 +1515,7 @@ where
                 }
             };
             apply_response_effects(
-                progression_effects,
+                feature_effects,
                 &mut pre_pushes,
                 &mut post_pushes,
                 &mut handler_error,

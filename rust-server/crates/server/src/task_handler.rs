@@ -1,5 +1,5 @@
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 pub(super) fn handle_typed(
@@ -8,10 +8,10 @@ pub(super) fn handle_typed(
     method: &str,
     request_args: &[u8],
     task_catalog: Option<&TaskCatalog>,
-    post_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     if method == "task.TaskAllReward" {
-        return handle_all_rewards(account, state, request_args, task_catalog, post_pushes);
+        return handle_all_rewards(account, state, request_args, task_catalog, effects);
     }
     if !matches!(
         method,
@@ -83,21 +83,18 @@ pub(super) fn handle_typed(
     }
     complete_typed_task(account, request.task_id);
 
-    append_method_push(
-        post_pushes,
+    effects.push_post(Response::raw(
         "task.TaskInfo",
         task_info_payload_from_typed_account(account, Some(catalog)),
-    );
-    append_method_push(
-        post_pushes,
+    ));
+    effects.push_post(Response::raw(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-    );
-    append_method_push(
-        post_pushes,
+    ));
+    effects.push_post(Response::raw(
         "user.UpdateUserInfo",
         UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-    );
+    ));
     HandlerResult::Reply(Response::raw(
         method,
         encode_task_reward(request.task_id as i32, &rewards),
@@ -109,7 +106,7 @@ fn handle_all_rewards(
     state: &ServerState,
     request_args: &[u8],
     task_catalog: Option<&TaskCatalog>,
-    post_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let Ok(request) = TaskAllRewardRequest::decode(request_args) else {
         return HandlerResult::Error(GameError::InvalidRequest(
@@ -168,21 +165,18 @@ fn handle_all_rewards(
         }
         complete_typed_task(account, *task_id);
     }
-    append_method_push(
-        post_pushes,
+    effects.push_post(Response::raw(
         "task.TaskInfo",
         task_info_payload_from_typed_account(account, Some(catalog)),
-    );
-    append_method_push(
-        post_pushes,
+    ));
+    effects.push_post(Response::raw(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-    );
-    append_method_push(
-        post_pushes,
+    ));
+    effects.push_post(Response::raw(
         "user.UpdateUserInfo",
         UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-    );
+    ));
     HandlerResult::Reply(Response::raw(
         "task.TaskAllReward",
         encode_task_reward_list(&all_rewards),
@@ -211,14 +205,14 @@ mod tests {
             ..TaskCatalog::default()
         };
         let state = ServerState::new("task", "Task", "test");
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
         let result = handle_typed(
             &mut account,
             &state,
             "task.TaskReward",
             &[0x08, 101, 0x10, 1],
             Some(&catalog),
-            &mut pushes,
+            &mut effects,
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert!(account.tasks.claimed.contains(&101));
@@ -229,6 +223,8 @@ mod tests {
                 .get(),
             100
         );
+        let (_, pushes, error) = effects.into_parts();
         assert_eq!(pushes.len(), 3);
+        assert!(error.is_none());
     }
 }
