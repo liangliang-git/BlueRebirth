@@ -28,6 +28,7 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "activitybirthday.BirthdayRefresh"
             | "activitybirthday.UpdateBirthdayInfo"
             | "activityVideo.GetActivityVideo"
+            | "activityVideo.SetActivityVideo"
             | "activitychristmasshop.UpdateActivityChristmasShopInfo"
     )
 }
@@ -37,6 +38,9 @@ pub(super) fn handle_typed(
     method: &str,
     request_args: &[u8],
 ) -> HandlerResult {
+    if method == "activityVideo.SetActivityVideo" {
+        return handle_typed_video_set(account, request_args);
+    }
     let progress = &mut account.activities.progress;
     match method {
         "activityextract.Get" | "activityextract.Update" => {
@@ -110,6 +114,48 @@ pub(super) fn handle_typed(
             "activity method requires typed activity rule",
         )),
     }
+}
+
+fn handle_typed_video_set(
+    account: &mut blueoath_domain::AccountState,
+    request_args: &[u8],
+) -> HandlerResult {
+    let video_id = decode_varint_field(request_args, 1).max(0) as u64;
+    if video_id == 0 {
+        return HandlerResult::Error(GameError::InvalidRequest("activity video id is invalid"));
+    }
+    let watched_key = format!("activity:activityVideo:watched:{video_id}");
+    if account.activities.progress.contains_key(&watched_key) {
+        return typed_reply(
+            "activityVideo.SetActivityVideo",
+            video_watch_ret_payload(&[]),
+        );
+    }
+    let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
+    let rewards = catalog
+        .anniversary_videos
+        .get(&(video_id as i32))
+        .and_then(|video| json_i32(video, "reward"))
+        .and_then(|reward_id| catalog.rewards_by_id.get(&reward_id))
+        .cloned()
+        .unwrap_or_default();
+    if !task_state::can_grant_typed_task_rewards(account, &rewards) {
+        return HandlerResult::Error(GameError::InvalidState(
+            "activity video reward is unsupported",
+        ));
+    }
+    for reward in &rewards {
+        if !task_state::grant_typed_task_reward(account, reward) {
+            return HandlerResult::Error(GameError::InvalidState(
+                "activity video reward is unsupported",
+            ));
+        }
+    }
+    account.activities.progress.insert(watched_key, 1);
+    typed_reply(
+        "activityVideo.SetActivityVideo",
+        video_watch_ret_payload(&rewards),
+    )
 }
 
 fn activity_key(state: &str, field: &str) -> String {
@@ -2217,5 +2263,15 @@ mod tests {
                 .get("activity:activityExtract:realDrawId"),
             Some(&1)
         );
+        let mut video = Vec::new();
+        append_varint_field(&mut video, 1, 9);
+        assert!(matches!(
+            handle_typed(&mut account, "activityVideo.SetActivityVideo", &video),
+            HandlerResult::Reply(_)
+        ));
+        assert!(account
+            .activities
+            .progress
+            .contains_key("activity:activityVideo:watched:9"));
     }
 }
