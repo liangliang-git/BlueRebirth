@@ -1,5 +1,5 @@
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 use blueoath_domain::{AccountState, GuildMemberState, GuildState};
 
@@ -8,7 +8,7 @@ pub(super) fn handle_typed(
     method: &str,
     request_args: &[u8],
     now: u32,
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     match method {
         "guild.Create" => {
@@ -33,7 +33,7 @@ pub(super) fn handle_typed(
                 GUILD_LEADER as u32,
                 now,
             ));
-            push_guild_state_typed(pre_pushes, account);
+            push_guild_state_typed(effects, account);
             HandlerResult::PushOnly
         }
         "guild.GetList" => reply(method, {
@@ -64,12 +64,11 @@ pub(super) fn handle_typed(
                 GUILD_MEMBER as u32,
                 now,
             ));
-            push_guild_state_typed(pre_pushes, account);
-            append_method_push(
-                pre_pushes,
+            push_guild_state_typed(effects, account);
+            effects.push_pre(Response::raw(
                 "guild.GetMemberList",
                 guild_member_list_payload_from_typed(account),
-            );
+            ));
             HandlerResult::PushOnly
         }
         "guild.CancelApply" => HandlerResult::PushOnly,
@@ -79,7 +78,7 @@ pub(super) fn handle_typed(
             if account.guild.take().is_none() {
                 return invalid("captain is not in a guild");
             }
-            push_guild_state_typed(pre_pushes, account);
+            push_guild_state_typed(effects, account);
             HandlerResult::PushOnly
         }
         "guild.Modify" => {
@@ -106,7 +105,7 @@ pub(super) fn handle_typed(
             if let Some(value) = request.chat_room {
                 guild.chat_room = value;
             }
-            push_guild_state_typed(pre_pushes, account);
+            push_guild_state_typed(effects, account);
             HandlerResult::PushOnly
         }
         "guild.GetInfo" => reply(method, guild_info_payload_from_typed(account)),
@@ -126,7 +125,7 @@ pub(super) fn handle_typed(
             if method == "guild.Upgrade" {
                 guild.level = guild.level.saturating_add(1).min(10);
             }
-            push_guild_state_typed(pre_pushes, account);
+            push_guild_state_typed(effects, account);
             HandlerResult::PushOnly
         }
         _ => HandlerResult::Empty,
@@ -179,17 +178,15 @@ fn new_typed_guild(
     }
 }
 
-pub(super) fn push_guild_state_typed(pre_pushes: &mut Vec<Vec<u8>>, account: &AccountState) {
-    append_method_push(
-        pre_pushes,
+pub(super) fn push_guild_state_typed(effects: &mut ResponseEffects, account: &AccountState) {
+    effects.push_pre(Response::raw(
         "guild.UpdateOurGuildData",
         guild_info_payload_from_typed(account),
-    );
-    append_method_push(
-        pre_pushes,
+    ));
+    effects.push_pre(Response::raw(
         "guild.UpdateMyGuildData",
         guild_user_info_payload_from_typed(account),
-    );
+    ));
 }
 
 fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
@@ -214,19 +211,20 @@ mod tests {
         let mut args = Vec::new();
         append_message_field(&mut args, 1, b"Typed Guild");
         append_varint_field(&mut args, 2, 3);
-        let mut pushes = Vec::new();
-        let result = handle_typed(&mut account, "guild.Create", &args, 100, &mut pushes);
+        let mut effects = ResponseEffects::default();
+        let result = handle_typed(&mut account, "guild.Create", &args, 100, &mut effects);
         assert!(matches!(result, HandlerResult::PushOnly));
         assert_eq!(account.guild.as_ref().unwrap().name, "Typed Guild");
-        assert_eq!(pushes.len(), 2);
+        assert_eq!(effects.into_parts().0.len(), 2);
 
         let mut modify = Vec::new();
         append_message_field(&mut modify, 1, b"Renamed Guild");
-        let result = handle_typed(&mut account, "guild.Modify", &modify, 101, &mut pushes);
+        let mut effects = ResponseEffects::default();
+        let result = handle_typed(&mut account, "guild.Modify", &modify, 101, &mut effects);
         assert!(matches!(result, HandlerResult::PushOnly));
         assert_eq!(account.guild.as_ref().unwrap().name, "Renamed Guild");
 
-        let result = handle_typed(&mut account, "guild.Quit", &[], 102, &mut pushes);
+        let result = handle_typed(&mut account, "guild.Quit", &[], 102, &mut effects);
         assert!(matches!(result, HandlerResult::PushOnly));
         assert!(account.guild.is_none());
     }

@@ -720,9 +720,16 @@ where
             }
             if let Some(typed) = typed_account.as_deref_mut() {
                 advance_typed_task_event(typed, task_catalog, 1, 1);
+                let mut login_effects = ResponseEffects::default();
                 if typed.guild.is_some() {
-                    guild_handler::push_guild_state_typed(&mut pre_pushes, typed);
+                    guild_handler::push_guild_state_typed(&mut login_effects, typed);
                 }
+                apply_response_effects(
+                    login_effects,
+                    &mut pre_pushes,
+                    &mut post_pushes,
+                    &mut handler_error,
+                );
                 append_typed_user_login_bootstrap(&mut pre_pushes, state, typed, chapter_catalog);
             } else {
                 #[cfg(test)]
@@ -864,17 +871,24 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::Guild) => {
+            let mut guild_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 guild_handler::handle_typed(
                     typed,
                     request.method.as_str(),
                     request_args,
                     current_unix_seconds(),
-                    &mut pre_pushes,
+                    &mut guild_effects,
                 )
             } else {
                 HandlerResult::Error(GameError::InvalidRequest("guild requires typed account"))
             };
+            apply_response_effects(
+                guild_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
