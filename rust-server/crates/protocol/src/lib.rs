@@ -2162,6 +2162,57 @@ impl Decode for BattleAutoMessageRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuildWarScoreRequest {
+    pub score: i32,
+}
+
+impl Decode for GuildWarScoreRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            score: optional_i32(&fields, 1, "guild war score has duplicate value")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuildWarBaseRequest {
+    pub base_id: i32,
+    pub stage_id: i32,
+}
+
+impl Decode for GuildWarBaseRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            base_id: optional_i32(&fields, 1, "guild war base has duplicate id")?,
+            stage_id: optional_i32(&fields, 2, "guild war stage has duplicate id")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuildOfferRequest {
+    pub task_id: i32,
+    pub task_index: i32,
+}
+
+impl Decode for GuildOfferRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let task_id = required_field(&fields, 1, "guild offer is missing task id")?;
+        let task_index = optional_i32(&fields, 2, "guild offer has duplicate index")?;
+        if task_id <= 0 {
+            return Err(ProtocolError::Invalid("guild offer task id is invalid"));
+        }
+        Ok(Self {
+            task_id,
+            task_index,
+        })
+    }
+}
+
 impl Decode for GuildTaskDonateRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

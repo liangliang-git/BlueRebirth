@@ -6,13 +6,13 @@ use blueoath_protocol::{
     CopyAttackRequest, CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
     DailyCopySelectExRequest, Decode, FriendSearchRequest, FriendTargetRequest,
     GetBarrageByIdRequest, GuildActivityPresentRequest, GuildBoxAnonymousRequest,
-    GuildBoxIdRequest, GuildTaskDonateRequest, GuildTaskIdRequest, GuildTaskMemberRequest,
-    HeroAwakenFinishRequest, HeroAwakenRewardRequest, InviteRecordVersionRequest,
-    InviteStateTypeRequest, OutpostBuildingRequest, OutpostSetHeroRequest, ProtocolError,
-    SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest,
-    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, ShipTaskCurrentShipRequest,
-    ShipTaskRewardRequest, SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest,
-    TeachingUserRequest,
+    GuildBoxIdRequest, GuildOfferRequest, GuildTaskDonateRequest, GuildTaskIdRequest,
+    GuildTaskMemberRequest, GuildWarBaseRequest, GuildWarScoreRequest, HeroAwakenFinishRequest,
+    HeroAwakenRewardRequest, InviteRecordVersionRequest, InviteStateTypeRequest,
+    OutpostBuildingRequest, OutpostSetHeroRequest, ProtocolError, SeaDifficultyRequest,
+    SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
+    SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest,
+    SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
 };
 
 #[test]
@@ -406,6 +406,24 @@ fn decodes_typed_coop_requests() {
     assert_eq!(
         BattleAutoMessageRequest::decode(&[0x08, 4]).unwrap(),
         BattleAutoMessageRequest { message_id: 4 }
+    );
+    assert_eq!(
+        GuildWarScoreRequest::decode(&[0x08, 6]).unwrap(),
+        GuildWarScoreRequest { score: 6 }
+    );
+    assert_eq!(
+        GuildWarBaseRequest::decode(&[0x08, 2, 0x10, 3]).unwrap(),
+        GuildWarBaseRequest {
+            base_id: 2,
+            stage_id: 3,
+        }
+    );
+    assert_eq!(
+        GuildOfferRequest::decode(&[0x08, 4, 0x10, 2]).unwrap(),
+        GuildOfferRequest {
+            task_id: 4,
+            task_index: 2,
+        }
     );
 }
 

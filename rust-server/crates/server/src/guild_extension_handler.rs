@@ -40,12 +40,13 @@ pub(super) fn handle_typed(
             reply(method, guildwar_reward_list_payload(catalog))
         }
         "guildwar.GetHaveScores" => {
+            let Ok(request) = GuildWarScoreRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "guild war score request is invalid",
+                ));
+            };
             let mut output = Vec::new();
-            append_varint_field(
-                &mut output,
-                1,
-                decode_varint_field(request_args, 1).max(0) as u64,
-            );
+            append_varint_field(&mut output, 1, request.score.max(0) as u64);
             append_varint_field(
                 &mut output,
                 2,
@@ -69,13 +70,15 @@ pub(super) fn handle_typed(
             reply(method, output)
         }
         "guildwar.UpdateBaseInfo" => {
-            progress.insert(
-                "guildWar:baseId".to_owned(),
-                decode_varint_field(request_args, 1).max(1) as u64,
-            );
+            let Ok(request) = GuildWarBaseRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "guild war base request is invalid",
+                ));
+            };
+            progress.insert("guildWar:baseId".to_owned(), request.base_id.max(1) as u64);
             progress.insert(
                 "guildWar:stageId".to_owned(),
-                decode_varint_field(request_args, 2).max(1) as u64,
+                request.stage_id.max(1) as u64,
             );
             reply(method, guildwar_base_payload_typed(progress))
         }
@@ -84,23 +87,23 @@ pub(super) fn handle_typed(
             reply(method, guild_offer_user_payload_typed(progress))
         }
         "guildOffer.GuildOffer" | "guildOffer.GuildOfferUser" => {
-            let task_id = decode_varint_field(request_args, 1);
-            if task_id <= 0 {
+            let Ok(request) = GuildOfferRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
-                    "guild offer task id is invalid",
+                    "guild offer request is invalid",
                 ));
-            }
+            };
+            let task_id = request.task_id;
             progress.insert(format!("guildOffer:offer:{task_id}:completed"), 1);
             HandlerResult::PushOnly
         }
         "guildOffer.AddOffer" => {
-            let task_id = decode_varint_field(request_args, 1);
-            let task_index = decode_varint_field(request_args, 2);
-            if task_id <= 0 {
+            let Ok(request) = GuildOfferRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
-                    "guild offer task id is invalid",
+                    "guild offer request is invalid",
                 ));
-            }
+            };
+            let task_id = request.task_id;
+            let task_index = request.task_index;
             let prefix = format!("guildOffer:offer:{task_id}:");
             progress
                 .entry(format!("{prefix}index"))
@@ -111,7 +114,12 @@ pub(super) fn handle_typed(
             HandlerResult::PushOnly
         }
         "guildOffer.AbandonOffer" => {
-            let task_id = decode_varint_field(request_args, 1);
+            let Ok(request) = GuildOfferRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "guild offer request is invalid",
+                ));
+            };
+            let task_id = request.task_id;
             let prefix = format!("guildOffer:offer:{task_id}:");
             progress.retain(|key, _| !key.starts_with(&prefix));
             HandlerResult::PushOnly
