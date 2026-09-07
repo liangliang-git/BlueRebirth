@@ -634,18 +634,38 @@ fn equipment_projection_keeps_rise_common_materials_and_hero_effects() {
 #[tokio::test]
 async fn teacher_rank_returns_typed_current_user_row() {
     let state = ServerState::new("teacher-rank", "Captain", "1.4.0");
-    let mut account = default_account_snapshot("teacher-rank", "Captain", 321);
-    account["character"]["uid"] = json!(321);
-    account["character"]["teacherPrestige"] = json!(123);
+    let mut account = NewAccountFactory::create(ProfileId::new("teacher-rank").unwrap(), "Captain");
+    account.character.uid = 321;
+    account
+        .activities
+        .progress
+        .insert("teacher\u{1f}prestige".to_owned(), 123);
 
-    let responses = battle_route_test_request(
-        &mut account,
+    let request = TMessageCodec::encode_request(&TRequest {
+        method: "user.TeacherRank".to_owned(),
+        args: Some(Vec::new()),
+        callback_handler: 71,
+        ..TRequest::default()
+    });
+    let (mut client, mut server) = duplex(1_048_576);
+    NetSocketFrameCodec::write(&mut client, 0, &request)
+        .await
+        .unwrap();
+    let catalogs = GameLoginCatalogs::empty();
+    process_game_login_frame_with_catalogs_typed_mut(
+        &mut server,
         &state,
-        &BattleCatalog::default(),
-        "user.TeacherRank",
-        Vec::new(),
+        None,
+        Some(&mut account),
+        &catalogs,
     )
-    .await;
+    .await
+    .unwrap();
+    drop(server);
+    let mut responses = Vec::new();
+    while let Some(frame) = NetSocketFrameCodec::read(&mut client).await.unwrap() {
+        responses.push(TMessageCodec::decode_response(&frame.payload).unwrap());
+    }
     let response = responses
         .iter()
         .find(|response| response.method == "user.TeacherRank")
