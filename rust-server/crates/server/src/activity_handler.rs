@@ -8,6 +8,243 @@ pub(super) fn handles(method: &str) -> bool {
     GameMethod::parse(method).is_family(MethodFamily::Activity)
 }
 
+pub(super) fn handles_typed(method: &str) -> bool {
+    matches!(
+        method,
+        "activityextract.Get"
+            | "activityextract.Update"
+            | "activityextract.SwitchDraw"
+            | "activityextractur.Get"
+            | "activityextractur.Update"
+            | "activityextractur.SwitchDraw"
+            | "activitySSR.GetActivitySSRInfo"
+            | "activitySSR.ActivitySSRSelect"
+            | "activitySSR.ActivitySSRRand"
+            | "activitySSR.ActivitySSRShare"
+            | "activitySSRrolls.UpdateActivityRollsInfo"
+            | "activitySSRrolls.UpdateActivityRollsInfoRPC"
+            | "activitySSRrolls.ActivityRollsSelect"
+            | "activitySSRrolls.ActivityRollsRand"
+            | "activitybirthday.BirthdayRefresh"
+            | "activitybirthday.UpdateBirthdayInfo"
+            | "activityVideo.GetActivityVideo"
+            | "activitychristmasshop.UpdateActivityChristmasShopInfo"
+    )
+}
+
+pub(super) fn handle_typed(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    let progress = &mut account.activities.progress;
+    match method {
+        "activityextract.Get" | "activityextract.Update" => {
+            typed_reply(method, typed_extract_payload(progress, "activityExtract"))
+        }
+        "activityextract.SwitchDraw" => {
+            increment_activity_value(progress, "activityExtract", "realDrawId");
+            typed_reply(method, typed_extract_payload(progress, "activityExtract"))
+        }
+        "activityextractur.Get" | "activityextractur.Update" => {
+            typed_reply(method, typed_extract_payload(progress, "activityExtractUr"))
+        }
+        "activityextractur.SwitchDraw" => {
+            increment_activity_value(progress, "activityExtractUr", "realDrawId");
+            typed_reply(method, typed_extract_payload(progress, "activityExtractUr"))
+        }
+        "activitySSR.GetActivitySSRInfo"
+        | "activitySSR.ActivitySSRSelect"
+        | "activitySSR.ActivitySSRRand"
+        | "activitySSR.ActivitySSRShare" => {
+            let state = "activitySSR";
+            match method {
+                "activitySSR.ActivitySSRSelect" => {
+                    set_activity_value(
+                        progress,
+                        state,
+                        "selectShipId",
+                        decode_varint_field(request_args, 1).max(0) as u64,
+                    );
+                }
+                "activitySSR.ActivitySSRRand" => {
+                    let selected = activity_value(progress, state, "selectShipId").max(1);
+                    set_activity_value(progress, state, "saveShipId", selected);
+                    increment_activity_value(progress, state, "daySelectCount");
+                }
+                "activitySSR.ActivitySSRShare" => {
+                    increment_activity_value(progress, state, "dayShareCount");
+                }
+                _ => {}
+            }
+            typed_reply(method, typed_ssr_payload(progress, state))
+        }
+        "activitySSRrolls.UpdateActivityRollsInfo"
+        | "activitySSRrolls.UpdateActivityRollsInfoRPC"
+        | "activitySSRrolls.ActivityRollsSelect"
+        | "activitySSRrolls.ActivityRollsRand" => {
+            let state = "activitySSRRolls";
+            match method {
+                "activitySSRrolls.ActivityRollsSelect" => {
+                    let team_id = decode_varint_field(request_args, 1).max(0);
+                    set_activity_value(progress, state, "selectTeamId", team_id as u64);
+                    set_activity_value(progress, state, "selectTeam", team_id as u64);
+                    increment_activity_value(progress, state, "daySelectCount");
+                }
+                "activitySSRrolls.ActivityRollsRand" => {
+                    let team_id = activity_value(progress, state, "selectTeamId").max(1);
+                    set_activity_value(progress, state, "saveTeam", team_id);
+                }
+                _ => {}
+            }
+            typed_reply(method, typed_rolls_payload(progress, state))
+        }
+        "activitybirthday.BirthdayRefresh" | "activitybirthday.UpdateBirthdayInfo" => {
+            typed_reply(method, typed_birthday_payload(progress))
+        }
+        "activityVideo.GetActivityVideo" => typed_reply(method, typed_video_payload(progress)),
+        "activitychristmasshop.UpdateActivityChristmasShopInfo" => {
+            typed_reply(method, typed_christmas_payload(progress))
+        }
+        _ => HandlerResult::Error(GameError::InvalidRequest(
+            "activity method requires typed activity rule",
+        )),
+    }
+}
+
+fn activity_key(state: &str, field: &str) -> String {
+    format!("activity:{state}:{field}")
+}
+
+fn typed_reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
+}
+
+fn activity_value(
+    progress: &std::collections::BTreeMap<String, u64>,
+    state: &str,
+    field: &str,
+) -> u64 {
+    progress
+        .get(&activity_key(state, field))
+        .copied()
+        .unwrap_or_default()
+}
+
+fn set_activity_value(
+    progress: &mut std::collections::BTreeMap<String, u64>,
+    state: &str,
+    field: &str,
+    value: u64,
+) {
+    progress.insert(activity_key(state, field), value);
+}
+
+fn increment_activity_value(
+    progress: &mut std::collections::BTreeMap<String, u64>,
+    state: &str,
+    field: &str,
+) {
+    let key = activity_key(state, field);
+    let value = progress.entry(key).or_default();
+    *value = value.saturating_add(1);
+}
+
+fn typed_extract_payload(
+    progress: &std::collections::BTreeMap<String, u64>,
+    state: &str,
+) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(&mut output, 1, activity_value(progress, state, "drawId"));
+    append_varint_field(
+        &mut output,
+        2,
+        activity_value(progress, state, "realDrawId"),
+    );
+    output
+}
+
+fn typed_ssr_payload(progress: &std::collections::BTreeMap<String, u64>, state: &str) -> Vec<u8> {
+    let mut output = Vec::new();
+    for (field, name) in [
+        (1, "activityId"),
+        (2, "daySelectCount"),
+        (3, "dayShareCount"),
+        (4, "selectShipId"),
+        (5, "saveShipId"),
+        (6, "rewardTime"),
+    ] {
+        append_varint_field(&mut output, field, activity_value(progress, state, name));
+    }
+    output
+}
+
+fn typed_rolls_payload(progress: &std::collections::BTreeMap<String, u64>, state: &str) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(
+        &mut output,
+        1,
+        activity_value(progress, state, "activityId"),
+    );
+    append_varint_field(
+        &mut output,
+        2,
+        activity_value(progress, state, "daySelectCount"),
+    );
+    for (field, name) in [(3, "selectTeam"), (4, "saveTeam")] {
+        let team_id = activity_value(progress, state, name);
+        if team_id > 0 {
+            let mut team = Vec::new();
+            append_varint_field(&mut team, 1, team_id);
+            append_message_field(&mut output, field, &team);
+        }
+    }
+    append_varint_field(
+        &mut output,
+        5,
+        activity_value(progress, state, "rewardTime"),
+    );
+    output
+}
+
+fn typed_birthday_payload(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(
+        &mut output,
+        1,
+        activity_value(progress, "activityBirthday", "birthdayAffair"),
+    );
+    output
+}
+
+fn typed_video_payload(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
+    let mut output = Vec::new();
+    for key in progress.keys() {
+        if let Some(id) = key
+            .strip_prefix("activity:activityVideo:watched:")
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            append_varint_field(&mut output, 1, id);
+        }
+    }
+    output
+}
+
+fn typed_christmas_payload(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(
+        &mut output,
+        3,
+        activity_value(progress, "activityChristmasShop", "crystalBallToyId"),
+    );
+    append_varint_field(
+        &mut output,
+        4,
+        activity_value(progress, "activityChristmasShop", "isGiveCrystalBall"),
+    );
+    output
+}
+
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
@@ -1939,5 +2176,46 @@ fn add_unique_i64(state: &mut Value, key: &str, value: i64) {
         .expect("activity list array");
     if !values.iter().any(|entry| entry.as_i64() == Some(value)) {
         values.push(json!(value));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_activity_state_uses_progress_map() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("activity-typed").unwrap(),
+            "Captain",
+        );
+        let mut select = Vec::new();
+        append_varint_field(&mut select, 1, 42);
+        assert!(matches!(
+            handle_typed(&mut account, "activitySSR.ActivitySSRSelect", &select),
+            HandlerResult::Reply(_)
+        ));
+        assert!(matches!(
+            handle_typed(&mut account, "activitySSR.ActivitySSRRand", &[]),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account
+                .activities
+                .progress
+                .get("activity:activitySSR:saveShipId"),
+            Some(&42)
+        );
+        assert!(matches!(
+            handle_typed(&mut account, "activityextract.SwitchDraw", &[]),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account
+                .activities
+                .progress
+                .get("activity:activityExtract:realDrawId"),
+            Some(&1)
+        );
     }
 }
