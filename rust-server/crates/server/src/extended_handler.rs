@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
@@ -17,7 +19,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     match method {
         "battlepass.GetReward" | "battlepass.GetAllReward" => {
             handle_battlepass_reward(context, method, request_args, false)
@@ -46,31 +48,54 @@ pub(super) fn handle<'state, 'account, 'scratch>(
         ),
         "battlepass.UpdateBattlePassInfo" | "activitybattlepass.UpdateBattlePassInfo" => {
             let activity = GameMethod::parse(method).is_family(MethodFamily::ActivityBattlePass);
-            Some(battlepass_info_payload(
-                context.account.as_deref()?,
-                gameplay_catalog(),
-                activity,
-            ))
+            let Some(account) = context.account.as_deref() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            reply(
+                method,
+                battlepass_info_payload(account, gameplay_catalog(), activity),
+            )
         }
         "exchange.GetExchangeInfo" | "exchange.GetExchange" => {
-            Some(exchange_info_payload(context.account.as_deref()?))
+            let Some(account) = context.account.as_deref() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            reply(method, exchange_info_payload(account))
         }
         "exchange.Exchange" => handle_exchange(context, request_args),
-        "foodCompose.GetFoodComposeData" | "foodCompose.GetFoodCompose" => Some(food_info_payload(
-            context.account.as_deref()?,
-            gameplay_catalog(),
-        )),
+        "foodCompose.GetFoodComposeData" | "foodCompose.GetFoodCompose" => {
+            let Some(account) = context.account.as_deref() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            reply(method, food_info_payload(account, gameplay_catalog()))
+        }
         "foodCompose.FoodCompose" => handle_food_compose(context, request_args),
-        "worldevent.Progress" => Some(world_event_server_progress_payload(
-            context.account.as_deref()?,
-        )),
-        "worldevent.UserStage" => Some(world_event_user_stage_payload(context.account.as_deref()?)),
+        "worldevent.Progress" => {
+            let Some(account) = context.account.as_deref() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            reply(method, world_event_server_progress_payload(account))
+        }
+        "worldevent.UserStage" => {
+            let Some(account) = context.account.as_deref() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            reply(method, world_event_user_stage_payload(account))
+        }
         "worldevent.StageReward" => handle_world_event_reward(context, request_args),
-        "worldeventrank.Rank" => Some(world_event_rank_payload(context.account.as_deref()?)),
-        "worldevent.UserProgress" => Some(world_event_user_progress_payload(
-            context.account.as_deref()?,
-        )),
-        _ => None,
+        "worldeventrank.Rank" => {
+            let Some(account) = context.account.as_deref() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            reply(method, world_event_rank_payload(account))
+        }
+        "worldevent.UserProgress" => {
+            let Some(account) = context.account.as_deref() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            reply(method, world_event_user_progress_payload(account))
+        }
+        _ => HandlerResult::Empty,
     }
 }
 
@@ -83,7 +108,7 @@ fn handle_battlepass_reward<'state, 'account, 'scratch>(
     method: &str,
     request_args: &[u8],
     activity: bool,
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let catalog = gameplay_catalog();
     let levels = if activity {
         &catalog.battlepass_activity_levels
@@ -117,9 +142,7 @@ fn handle_battlepass_reward<'state, 'account, 'scratch>(
     let mut rewards = Vec::new();
     let (response, refreshes) = {
         let Some(account) = context.account.as_deref_mut() else {
-            *context.response_err = 1;
-            *context.response_err_msg = "account is unavailable".to_owned();
-            return Some(Vec::new());
+            return HandlerResult::Error(GameError::AccountUnavailable);
         };
         let pass_type = state_i32(account, state_key, "passType").clamp(1, 2);
         for level in targets {
@@ -162,7 +185,7 @@ fn handle_battlepass_reward<'state, 'account, 'scratch>(
         append_method_push(context.pre_pushes, "user.UpdateUserInfo", user_payload);
         append_method_push(context.pre_pushes, "bag.UpdateBagData", bag_payload);
     }
-    Some(response)
+    reply(method, response)
 }
 
 fn handle_battlepass_action<'state, 'account, 'scratch>(
@@ -170,7 +193,7 @@ fn handle_battlepass_action<'state, 'account, 'scratch>(
     method: &str,
     request_args: &[u8],
     activity: bool,
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let buy_level_price = if activity {
         gameplay_catalog()
             .battlepass_activity_param
@@ -197,18 +220,14 @@ fn handle_battlepass_action<'state, 'account, 'scratch>(
     };
     let payload = {
         let Some(account) = context.account.as_deref_mut() else {
-            *context.response_err = 1;
-            *context.response_err_msg = "account is unavailable".to_owned();
-            return Some(Vec::new());
+            return HandlerResult::Error(GameError::AccountUnavailable);
         };
         if method.ends_with("BuyPassLevel") {
             let levels = decode_varint_field(request_args, 1).max(1);
             if let Some((currency_id, price_per_level)) = buy_level_price {
                 let cost = price_per_level.saturating_mul(levels);
                 if !can_consume(account, 5, currency_id, cost) {
-                    *context.response_err = 1;
-                    *context.response_err_msg = "battle pass level cost is insufficient".to_owned();
-                    return Some(Vec::new());
+                    return invalid("battle pass level cost is insufficient");
                 }
                 consume_reward(account, 5, currency_id, cost);
             }
@@ -236,14 +255,14 @@ fn handle_battlepass_action<'state, 'account, 'scratch>(
         },
         payload,
     );
-    Some(Vec::new())
+    HandlerResult::PushOnly
 }
 
 fn handle_battlepass_task_reward<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     request_args: &[u8],
     activity: bool,
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let catalog = gameplay_catalog();
     let tasks = if activity {
         &catalog.battlepass_activity_tasks
@@ -257,9 +276,7 @@ fn handle_battlepass_task_reward<'state, 'account, 'scratch>(
         "battlePass"
     };
     let Some(account) = context.account.as_deref_mut() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "account is unavailable".to_owned();
-        return Some(Vec::new());
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
     let state = battlepass_state_mut(account, state_key);
     let already_claimed = state
@@ -299,7 +316,7 @@ fn handle_battlepass_task_reward<'state, 'account, 'scratch>(
     );
     append_method_push(context.pre_pushes, "user.UpdateUserInfo", user_payload);
     append_method_push(context.pre_pushes, "bag.UpdateBagData", bag_payload);
-    Some(Vec::new())
+    HandlerResult::PushOnly
 }
 
 fn battlepass_state_mut<'a>(account: &'a mut Value, key: &str) -> &'a mut Value {
@@ -440,20 +457,16 @@ fn exchange_info_payload(account: &Value) -> Vec<u8> {
 fn handle_exchange<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let id = decode_varint_field(request_args, 1);
     let Some(config) = gameplay_catalog().exchanges.get(&id) else {
-        *context.response_err = 1;
-        *context.response_err_msg = "exchange item was not found".to_owned();
-        return Some(Vec::new());
+        return invalid("exchange item was not found");
     };
     let max_count = json_i32(config, "change_count").unwrap_or_default();
     let consume = reward_triplets(config, "item_consume");
     let rewards = reward_triplets(config, "item_reward");
     let Some(account) = context.account.as_deref_mut() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "account is unavailable".to_owned();
-        return Some(Vec::new());
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
     let current_count = account
         .get("exchangeTimes")
@@ -461,22 +474,16 @@ fn handle_exchange<'state, 'account, 'scratch>(
         .and_then(Value::as_i64)
         .unwrap_or_default();
     if max_count > 0 && current_count >= i64::from(max_count) {
-        *context.response_err = 1;
-        *context.response_err_msg = "exchange limit reached".to_owned();
-        return Some(Vec::new());
+        return invalid("exchange limit reached");
     }
     if consume.is_empty() || rewards.is_empty() {
-        *context.response_err = 1;
-        *context.response_err_msg = "exchange reward is not configured".to_owned();
-        return Some(Vec::new());
+        return invalid("exchange reward is not configured");
     }
     if consume
         .iter()
         .any(|(kind, item, amount)| !can_consume(account, *kind, *item, *amount))
     {
-        *context.response_err = 1;
-        *context.response_err_msg = "exchange cost is insufficient".to_owned();
-        return Some(Vec::new());
+        return invalid("exchange cost is insufficient");
     }
     for (kind, item, amount) in &consume {
         consume_reward(account, *kind, *item, *amount);
@@ -512,7 +519,7 @@ fn handle_exchange<'state, 'account, 'scratch>(
     let refreshes = account_refresh_payloads(context.state, account);
     append_method_push(context.pre_pushes, "user.UpdateUserInfo", refreshes.0);
     append_method_push(context.pre_pushes, "bag.UpdateBagData", refreshes.1);
-    Some(encode_rewards_list(&granted))
+    reply("exchange.Exchange", encode_rewards_list(&granted))
 }
 
 fn reward_triplets(value: &Value, key: &str) -> Vec<(i32, i32, i32)> {
@@ -555,7 +562,7 @@ fn consume_reward(account: &mut Value, kind: i32, item: i32, amount: i32) {
 fn handle_food_compose<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let material_ids = decode_repeated_varint_field(request_args, 1);
     let catalog = gameplay_catalog();
     let recipe_id = catalog
@@ -574,9 +581,7 @@ fn handle_food_compose<'state, 'account, 'scratch>(
         .map(|(id, _)| *id)
         .unwrap_or_else(|| decode_varint_field(request_args, 2));
     let Some(recipe) = catalog.food_recipes.get(&recipe_id) else {
-        *context.response_err = 1;
-        *context.response_err_msg = "food recipe was not found".to_owned();
-        return Some(Vec::new());
+        return invalid("food recipe was not found");
     };
     let materials = recipe
         .get("material")
@@ -594,17 +599,13 @@ fn handle_food_compose<'state, 'account, 'scratch>(
         .filter(|(_, item, amount)| *item > 0 && *amount > 0)
         .collect::<Vec<_>>();
     let Some(account) = context.account.as_deref_mut() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "account is unavailable".to_owned();
-        return Some(Vec::new());
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
     if materials
         .iter()
         .any(|(kind, item, amount)| !can_consume(account, *kind, *item, *amount))
     {
-        *context.response_err = 1;
-        *context.response_err_msg = "food materials are insufficient".to_owned();
-        return Some(Vec::new());
+        return invalid("food materials are insufficient");
     }
     for (kind, item, amount) in &materials {
         consume_reward(account, *kind, *item, *amount);
@@ -622,9 +623,7 @@ fn handle_food_compose<'state, 'account, 'scratch>(
         .cloned()
         .unwrap_or_default();
     if configured_rewards.is_empty() {
-        *context.response_err = 1;
-        *context.response_err_msg = "food reward was not configured".to_owned();
-        return Some(Vec::new());
+        return invalid("food reward was not configured");
     }
     let granted = configured_rewards
         .into_iter()
@@ -656,7 +655,10 @@ fn handle_food_compose<'state, 'account, 'scratch>(
     let refreshes = account_refresh_payloads(context.state, account);
     append_method_push(context.pre_pushes, "user.UpdateUserInfo", refreshes.0);
     append_method_push(context.pre_pushes, "bag.UpdateBagData", refreshes.1);
-    Some(food_reward_payload(recipe_id, &granted))
+    reply(
+        "foodCompose.FoodCompose",
+        food_reward_payload(recipe_id, &granted),
+    )
 }
 
 fn recipe_material_ids(recipe: &Value) -> Vec<i32> {
@@ -722,11 +724,11 @@ fn food_reward_payload(recipe_id: i32, rewards: &[ShopReward]) -> Vec<u8> {
 fn handle_world_event_reward<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let stage_id = decode_varint_field(request_args, 1);
     let catalog = gameplay_catalog();
     let Some((event_id, event)) = active_world_event(catalog) else {
-        return Some(encode_rewards_list(&[]));
+        return reply("worldevent.StageReward", encode_rewards_list(&[]));
     };
     let reward_id = event
         .get("server_stage_rewards")
@@ -746,9 +748,7 @@ fn handle_world_event_reward<'state, 'account, 'scratch>(
         .next()
         .unwrap_or_default();
     let Some(account) = context.account.as_deref_mut() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "account is unavailable".to_owned();
-        return Some(Vec::new());
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
     let progress = account
         .get("worldEventUserProgress")
@@ -756,7 +756,7 @@ fn handle_world_event_reward<'state, 'account, 'scratch>(
         .and_then(Value::as_i64)
         .unwrap_or_default();
     if event_id <= 0 || stage_id <= 0 || progress < i64::from(stage_id) || reward_id <= 0 {
-        return Some(encode_rewards_list(&[]));
+        return reply("worldevent.StageReward", encode_rewards_list(&[]));
     }
     let already_claimed = account
         .get("worldEventClaimedStagesByEvent")
@@ -769,7 +769,7 @@ fn handle_world_event_reward<'state, 'account, 'scratch>(
                 .any(|value| value.as_i64() == Some(i64::from(stage_id)))
         });
     if already_claimed {
-        return Some(encode_rewards_list(&[]));
+        return reply("worldevent.StageReward", encode_rewards_list(&[]));
     }
     let rewards = if reward_id > 0 {
         grant_rewards_by_id(account, catalog, reward_id, context.catalogs.fashion)
@@ -792,7 +792,15 @@ fn handle_world_event_reward<'state, 'account, 'scratch>(
     let refreshes = account_refresh_payloads(context.state, account);
     append_method_push(context.pre_pushes, "user.UpdateUserInfo", refreshes.0);
     append_method_push(context.pre_pushes, "bag.UpdateBagData", refreshes.1);
-    Some(encode_rewards_list(&rewards))
+    reply("worldevent.StageReward", encode_rewards_list(&rewards))
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
+}
+
+fn invalid(message: &'static str) -> HandlerResult {
+    HandlerResult::Error(GameError::InvalidRequest(message))
 }
 
 fn active_world_event(catalog: &GameplayCatalog) -> Option<(i32, &Value)> {
@@ -861,4 +869,20 @@ fn world_event_user_stage_payload(account: &Value) -> Vec<u8> {
         }
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::response::HandlerResult;
+
+    use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
+    }
 }
