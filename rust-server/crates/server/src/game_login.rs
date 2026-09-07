@@ -13,7 +13,7 @@ use super::common::request::RequestContext;
 use super::common::response::HandlerResult;
 #[cfg(not(test))]
 use super::common::response::Response;
-use super::router::{GameMethod, MethodFamily};
+use super::router::{GameMethod, KnownMethod, MethodFamily};
 use super::wire::*;
 use super::*;
 
@@ -312,9 +312,10 @@ where
         );
     }
     let method = GameMethod::parse(&request.method);
-    let is_user_info = method.is("user.GetUserInfo");
+    let known_method = method.known();
+    let is_user_info = known_method == Some(KnownMethod::UserGetUserInfo);
     #[cfg(test)]
-    let is_user_login = method.is("user.UserLogin");
+    let is_user_login = known_method == Some(KnownMethod::UserLogin);
     #[cfg(test)]
     let is_profile_update = matches!(
         request.method.as_str(),
@@ -406,12 +407,14 @@ where
             ));
             Some(Vec::new())
         }
-        "player.Login" => Some(GameLoginCodec::encode_response(&TRetLogin {
-            ret: "ok".to_owned(),
-            feign_role_id: state.profile_id.clone(),
-            err_code: 0,
-        })),
-        "player.GetUserList" => {
+        _ if known_method == Some(KnownMethod::PlayerLogin) => {
+            Some(GameLoginCodec::encode_response(&TRetLogin {
+                ret: "ok".to_owned(),
+                feign_role_id: state.profile_id.clone(),
+                err_code: 0,
+            }))
+        }
+        _ if known_method == Some(KnownMethod::PlayerGetUserList) => {
             let user = match typed_account.as_deref() {
                 Some(account) => user_info_from_typed_account(state, account),
                 None => {
@@ -428,7 +431,7 @@ where
             };
             Some(UserListCodec::encode(&[user]))
         }
-        "player.CreateUser" => {
+        _ if known_method == Some(KnownMethod::PlayerCreateUser) => {
             let user = match typed_account.as_deref() {
                 Some(account) => user_info_from_typed_account(state, account),
                 None => {
@@ -534,7 +537,7 @@ where
             }
             result.into_payload()
         }
-        "tactic.GetHerosTactic" => {
+        _ if known_method == Some(KnownMethod::TacticGetHeros) => {
             let fleet = match typed_account.as_deref() {
                 Some(account) => fleet_info_from_typed_account(account),
                 None => {
@@ -551,7 +554,7 @@ where
             };
             Some(FleetInfoCodec::encode(&fleet))
         }
-        "bag.GetBagInfo" => {
+        _ if known_method == Some(KnownMethod::BagGetInfo) => {
             let bag = match typed_account.as_deref() {
                 Some(account) => bag_info_from_typed_account(account),
                 None => {
@@ -568,7 +571,7 @@ where
             };
             Some(BagInfoCodec::encode(&bag))
         }
-        "tactic.SetHerosTactic" => {
+        _ if known_method == Some(KnownMethod::TacticSetHeros) => {
             let fleet = match FleetInfo::decode(request_args) {
                 Ok(fleet) => Some(fleet),
                 Err(_) => {
@@ -600,7 +603,7 @@ where
                 Some(Vec::new())
             }
         }
-        "presetfleet.PresetFleetsInfo" => {
+        _ if known_method == Some(KnownMethod::PresetFleetInfo) => {
             let preset = match typed_account.as_deref() {
                 Some(account) => preset_fleet_info_from_typed_account(account),
                 None => {
@@ -617,55 +620,59 @@ where
             };
             Some(PresetFleetCodec::encode(&preset))
         }
-        "presetfleet.SetPresetFleets" => match PresetFleetCodec::decode(request_args) {
-            Ok(preset) if preset.fleets.len() <= 100 => {
-                if let Some(typed) = typed_account.as_mut() {
-                    if !set_preset_fleet_on_typed_account(typed, &preset) {
-                        handler_error = Some(GameError::InvalidRequest(
-                            "preset fleet contains invalid or unowned hero",
-                        ));
-                        Some(Vec::new())
-                    } else {
-                        let payload =
-                            PresetFleetCodec::encode(&preset_fleet_info_from_typed_account(typed));
-                        append_method_push(
-                            &mut post_pushes,
-                            "presetfleet.PresetFleetsInfo",
-                            payload.clone(),
-                        );
-                        Some(payload)
-                    }
-                } else {
-                    #[cfg(test)]
-                    {
-                        if let Some(account) = account.as_deref_mut() {
-                            set_preset_fleet_from_account(account, &preset);
-                            let payload =
-                                PresetFleetCodec::encode(&preset_fleet_info_from_account(account));
+        _ if known_method == Some(KnownMethod::PresetFleetSet) => {
+            match PresetFleetCodec::decode(request_args) {
+                Ok(preset) if preset.fleets.len() <= 100 => {
+                    if let Some(typed) = typed_account.as_mut() {
+                        if !set_preset_fleet_on_typed_account(typed, &preset) {
+                            handler_error = Some(GameError::InvalidRequest(
+                                "preset fleet contains invalid or unowned hero",
+                            ));
+                            Some(Vec::new())
+                        } else {
+                            let payload = PresetFleetCodec::encode(
+                                &preset_fleet_info_from_typed_account(typed),
+                            );
                             append_method_push(
                                 &mut post_pushes,
                                 "presetfleet.PresetFleetsInfo",
                                 payload.clone(),
                             );
                             Some(payload)
-                        } else {
+                        }
+                    } else {
+                        #[cfg(test)]
+                        {
+                            if let Some(account) = account.as_deref_mut() {
+                                set_preset_fleet_from_account(account, &preset);
+                                let payload = PresetFleetCodec::encode(
+                                    &preset_fleet_info_from_account(account),
+                                );
+                                append_method_push(
+                                    &mut post_pushes,
+                                    "presetfleet.PresetFleetsInfo",
+                                    payload.clone(),
+                                );
+                                Some(payload)
+                            } else {
+                                Some(PresetFleetCodec::encode(&preset))
+                            }
+                        }
+                        #[cfg(not(test))]
+                        {
                             Some(PresetFleetCodec::encode(&preset))
                         }
                     }
-                    #[cfg(not(test))]
-                    {
-                        Some(PresetFleetCodec::encode(&preset))
-                    }
+                }
+                _ => {
+                    handler_error = Some(GameError::Internal(
+                        "preset fleet request is invalid".to_owned(),
+                    ));
+                    Some(Vec::new())
                 }
             }
-            _ => {
-                handler_error = Some(GameError::Internal(
-                    "preset fleet request is invalid".to_owned(),
-                ));
-                Some(Vec::new())
-            }
-        },
-        "user.GetUserInfo" => {
+        }
+        _ if known_method == Some(KnownMethod::UserGetUserInfo) => {
             let user = match typed_account.as_deref() {
                 Some(account) => user_info_from_typed_account(state, account),
                 None => {
@@ -682,7 +689,7 @@ where
             };
             Some(UserInfoCodec::encode(&user))
         }
-        "user.UserLogin" => {
+        _ if known_method == Some(KnownMethod::UserLogin) => {
             #[cfg(test)]
             let now = current_unix_seconds();
             #[cfg(test)]
@@ -1314,7 +1321,7 @@ where
         }
         _ if method.is_family(MethodFamily::Shop)
             || method.is_family(MethodFamily::Recharge)
-            || request.method == "bag.GetBagInfo"
+            || known_method == Some(KnownMethod::BagGetInfo)
             || request.method == "bag.CompositeItem"
             || request.method == "bag.SaleBagItem"
             || request.method == "fashion.updateData"

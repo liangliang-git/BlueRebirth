@@ -74,6 +74,24 @@ pub enum MethodFamily {
     Unknown,
 }
 
+/// Exact protocol routes used by core handlers.
+///
+/// Family classification remains useful for feature modules, but exact routes
+/// belong in one registry so the dispatcher does not duplicate wire strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KnownMethod {
+    PlayerLogin,
+    PlayerGetUserList,
+    PlayerCreateUser,
+    UserGetUserInfo,
+    UserLogin,
+    TacticGetHeros,
+    TacticSetHeros,
+    BagGetInfo,
+    PresetFleetInfo,
+    PresetFleetSet,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GameMethod<'a> {
     name: &'a str,
@@ -106,6 +124,22 @@ impl<'a> GameMethod<'a> {
 
     pub fn is_known(self) -> bool {
         self.family != MethodFamily::Unknown || KNOWN_EXACT_METHODS.contains(&self.name)
+    }
+
+    pub fn known(self) -> Option<KnownMethod> {
+        Some(match self.name {
+            "player.Login" => KnownMethod::PlayerLogin,
+            "player.GetUserList" => KnownMethod::PlayerGetUserList,
+            "player.CreateUser" => KnownMethod::PlayerCreateUser,
+            "user.GetUserInfo" => KnownMethod::UserGetUserInfo,
+            "user.UserLogin" => KnownMethod::UserLogin,
+            "tactic.GetHerosTactic" => KnownMethod::TacticGetHeros,
+            "tactic.SetHerosTactic" => KnownMethod::TacticSetHeros,
+            "bag.GetBagInfo" => KnownMethod::BagGetInfo,
+            "presetfleet.PresetFleetsInfo" => KnownMethod::PresetFleetInfo,
+            "presetfleet.SetPresetFleets" => KnownMethod::PresetFleetSet,
+            _ => return None,
+        })
     }
 }
 
@@ -220,7 +254,7 @@ const KNOWN_EXACT_METHODS: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::{family_for, GameMethod, MethodFamily};
+    use super::{family_for, GameMethod, KnownMethod, MethodFamily};
 
     #[test]
     fn prefers_longer_prefixes_before_shorter_prefixes() {
@@ -253,5 +287,18 @@ mod tests {
             assert_eq!(method.family(), family);
             assert!(method.is_known());
         }
+    }
+
+    #[test]
+    fn exact_core_routes_use_one_registry() {
+        assert_eq!(
+            GameMethod::parse("user.GetUserInfo").known(),
+            Some(KnownMethod::UserGetUserInfo)
+        );
+        assert_eq!(
+            GameMethod::parse("presetfleet.SetPresetFleets").known(),
+            Some(KnownMethod::PresetFleetSet)
+        );
+        assert_eq!(GameMethod::parse("user.NotARealMethod").known(), None);
     }
 }
