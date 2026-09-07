@@ -11,6 +11,164 @@ pub(super) fn handles(method: &str) -> bool {
     )
 }
 
+pub(super) fn handles_typed(method: &str) -> bool {
+    matches!(
+        GameMethod::parse(method).family(),
+        MethodFamily::GuildOffer | MethodFamily::GuildOfferRank
+    )
+}
+
+pub(super) fn handle_typed(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    let progress = &mut account.activities.progress;
+    match method {
+        "guildOffer.GetGuildOffer" => reply(method, guild_offer_payload_typed(progress)),
+        "guildOfferUser.GetGuildOfferUser" => {
+            reply(method, guild_offer_user_payload_typed(progress))
+        }
+        "guildOffer.GuildOffer" | "guildOffer.GuildOfferUser" => {
+            let task_id = decode_varint_field(request_args, 1);
+            if task_id <= 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "guild offer task id is invalid",
+                ));
+            }
+            progress.insert(format!("guildOffer:offer:{task_id}:completed"), 1);
+            HandlerResult::PushOnly
+        }
+        "guildOffer.AddOffer" => {
+            let task_id = decode_varint_field(request_args, 1);
+            let task_index = decode_varint_field(request_args, 2);
+            if task_id <= 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "guild offer task id is invalid",
+                ));
+            }
+            let prefix = format!("guildOffer:offer:{task_id}:");
+            progress
+                .entry(format!("{prefix}index"))
+                .or_insert_with(|| u64::try_from(task_index.max(0)).unwrap_or_default());
+            progress.entry(format!("{prefix}quality")).or_insert(1);
+            progress.entry(format!("{prefix}progress")).or_insert(0);
+            progress.entry(format!("{prefix}completed")).or_insert(0);
+            HandlerResult::PushOnly
+        }
+        "guildOffer.AbandonOffer" => {
+            let task_id = decode_varint_field(request_args, 1);
+            let prefix = format!("guildOffer:offer:{task_id}:");
+            progress.retain(|key, _| !key.starts_with(&prefix));
+            HandlerResult::PushOnly
+        }
+        "guildOffer.BuyOfferCount" => {
+            let count = progress
+                .entry("guildOffer:dailyBuyCount".to_owned())
+                .or_default();
+            *count = count.saturating_add(1);
+            HandlerResult::PushOnly
+        }
+        "guildOffer.GetRankList" | "guildofferrank.GetGuildRankList" => {
+            reply(method, guild_offer_rank_payload_typed(progress))
+        }
+        "guildOffer.ReceiveOfferRewardPerson"
+        | "guildOffer.ReceiveOfferRewardGuild"
+        | "guildOffer.ReceiveOfferRewardAll" => HandlerResult::Error(GameError::InvalidRequest(
+            "guild offer reward requires typed reward catalog",
+        )),
+        _ => HandlerResult::Error(GameError::InvalidRequest(
+            "guild offer method is unsupported",
+        )),
+    }
+}
+
+fn typed_offer_value(progress: &std::collections::BTreeMap<String, u64>, key: &str) -> u64 {
+    progress.get(key).copied().unwrap_or_default()
+}
+
+fn guild_offer_payload_typed(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(
+        &mut output,
+        1,
+        typed_offer_value(progress, "guildOffer:guildPoints"),
+    );
+    let mut offers = std::collections::BTreeSet::new();
+    for key in progress.keys() {
+        if let Some(task_id) = key
+            .strip_prefix("guildOffer:offer:")
+            .and_then(|key| key.split_once(':'))
+            .and_then(|(id, _)| id.parse::<u64>().ok())
+        {
+            offers.insert(task_id);
+        }
+    }
+    for task_id in offers {
+        let prefix = format!("guildOffer:offer:{task_id}:");
+        let mut offer = Vec::new();
+        append_varint_field(&mut offer, 1, task_id);
+        append_varint_field(
+            &mut offer,
+            2,
+            typed_offer_value(progress, &format!("{prefix}index")),
+        );
+        append_varint_field(
+            &mut offer,
+            3,
+            typed_offer_value(progress, &format!("{prefix}quality")).max(1),
+        );
+        append_varint_field(
+            &mut offer,
+            4,
+            typed_offer_value(progress, &format!("{prefix}progress")),
+        );
+        append_varint_field(
+            &mut offer,
+            5,
+            typed_offer_value(progress, &format!("{prefix}completed")),
+        );
+        append_message_field(&mut output, 2, &offer);
+    }
+    output
+}
+
+fn guild_offer_user_payload_typed(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(&mut output, 1, 35);
+    append_varint_field(
+        &mut output,
+        2,
+        typed_offer_value(progress, "guildOffer:dailyBuyCount"),
+    );
+    append_varint_field(
+        &mut output,
+        7,
+        typed_offer_value(progress, "guildOffer:guildPoints"),
+    );
+    append_varint_field(
+        &mut output,
+        8,
+        typed_offer_value(progress, "guildOffer:personalPoints"),
+    );
+    output
+}
+
+fn guild_offer_rank_payload_typed(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
+    let mut row = Vec::new();
+    append_varint_field(&mut row, 1, 1);
+    append_varint_field(
+        &mut row,
+        2,
+        typed_offer_value(progress, "guildOffer:guildPoints"),
+    );
+    append_varint_field(&mut row, 3, 1);
+    let mut output = Vec::new();
+    append_message_field(&mut output, 1, &row);
+    append_varint_field(&mut output, 2, 1);
+    output
+}
+
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
@@ -565,4 +723,42 @@ fn grant_rewards_by_id(
         .into_iter()
         .map(|reward| grant_reward(account, reward, current_unix_seconds(), fashion_catalog))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_guild_offer_uses_activity_progress() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("guild-offer-typed").unwrap(),
+            "Captain",
+        );
+        let mut add = Vec::new();
+        append_varint_field(&mut add, 1, 12);
+        append_varint_field(&mut add, 2, 4);
+        assert!(matches!(
+            handle_typed(&mut account, "guildOffer.AddOffer", &add),
+            HandlerResult::PushOnly
+        ));
+        assert!(account
+            .activities
+            .progress
+            .contains_key("guildOffer:offer:12:index"));
+        let HandlerResult::Reply(response) =
+            handle_typed(&mut account, "guildOffer.GetGuildOffer", &[])
+        else {
+            panic!("expected guild offer response");
+        };
+        assert_eq!(decode_repeated_message_field(&response.payload, 2).len(), 1);
+        assert!(matches!(
+            handle_typed(&mut account, "guildOffer.BuyOfferCount", &[]),
+            HandlerResult::PushOnly
+        ));
+        assert_eq!(
+            account.activities.progress.get("guildOffer:dailyBuyCount"),
+            Some(&1)
+        );
+    }
 }

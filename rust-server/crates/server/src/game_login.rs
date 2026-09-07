@@ -1130,6 +1130,19 @@ where
             }
             result.into_payload()
         }
+        _ if typed_account.is_some()
+            && guild_extension_handler::handles_typed(request.method.as_str()) =>
+        {
+            let result = guild_extension_handler::handle_typed(
+                typed_account.as_mut().expect("typed guild offer account"),
+                request.method.as_str(),
+                request_args,
+            );
+            if let HandlerResult::Error(error) = &result {
+                handler_error = Some(error.clone());
+            }
+            result.into_payload()
+        }
         _ if guild_extension_handler::handles(request.method.as_str()) => {
             let mut context = GameLoginRequestContext {
                 state,
