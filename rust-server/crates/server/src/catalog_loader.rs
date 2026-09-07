@@ -1856,7 +1856,9 @@ pub(super) fn load_building_catalog(client_path: Option<&PathBuf>) -> BuildingCa
             .collect();
     BuildingCatalog {
         capacities,
+        #[cfg(test)]
         building_configs,
+        #[cfg(test)]
         recipe_configs,
         typed_building_configs,
         typed_recipe_configs,

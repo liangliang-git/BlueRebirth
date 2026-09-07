@@ -516,6 +516,7 @@ pub(super) fn collect_building_rewards(
     rewards
 }
 
+#[cfg(test)]
 fn collect_resource_reward(
     building: &Value,
     config: Option<&Value>,
@@ -578,6 +579,7 @@ fn collect_resource_reward(
     })
 }
 
+#[cfg(test)]
 fn collect_item_reward(
     building: &Value,
     config: Option<&Value>,
@@ -631,6 +633,7 @@ fn collect_item_reward(
     })
 }
 
+#[cfg(test)]
 fn apply_building_collection_state(
     building: &mut Value,
     config: Option<&Value>,

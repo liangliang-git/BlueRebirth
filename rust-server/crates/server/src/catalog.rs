@@ -58,7 +58,9 @@ pub(super) struct CombinationCatalog {
 #[derive(Debug, Clone, Default)]
 pub(super) struct BuildingCatalog {
     pub(super) capacities: std::collections::BTreeMap<i32, usize>,
+    #[cfg(test)]
     pub(super) building_configs: std::collections::BTreeMap<i32, Value>,
+    #[cfg(test)]
     pub(super) recipe_configs: std::collections::BTreeMap<i32, Value>,
     pub(super) typed_building_configs: std::collections::BTreeMap<i32, BuildingConfig>,
     pub(super) typed_recipe_configs: std::collections::BTreeMap<i32, RecipeConfig>,
