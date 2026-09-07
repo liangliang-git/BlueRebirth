@@ -33,6 +33,8 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "activitybirthday.MakeBirthdayCake"
             | "activitybirthday.GetCakeAffairReward"
             | "activityfashion.PushActivityFashionInfo"
+            | "activityfashion.Buy"
+            | "activityfashion.Reward"
             | "activitycodeexchange.UpdateActivityCodeExgInfo"
             | "activitycodeexchange.ExchangeCode"
             | "activitycodeexchange.ExchangeReward"
@@ -58,6 +60,7 @@ pub(super) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
+    fashion_catalog: Option<&FashionList>,
 ) -> HandlerResult {
     if matches!(
         method,
@@ -71,6 +74,8 @@ pub(super) fn handle_typed(
             | "activitycodeexchange.ExchangeCode"
             | "activitycodeexchange.ExchangeReward"
             | "activitypapercut.MakePaperCut"
+            | "activityfashion.Buy"
+            | "activityfashion.Reward"
             | "activitychristmasshop.BuyBlindBox"
             | "activitychristmasshop.BuyBlindItem"
     ) {
@@ -90,6 +95,9 @@ pub(super) fn handle_typed(
                 handle_typed_code_exchange(account, method, request_args)
             }
             "activitypapercut.MakePaperCut" => handle_typed_paper_cut(account, request_args),
+            "activityfashion.Buy" | "activityfashion.Reward" => {
+                handle_typed_fashion(account, method, request_args, fashion_catalog)
+            }
             "activitychristmasshop.BuyBlindBox" | "activitychristmasshop.BuyBlindItem" => {
                 handle_typed_christmas_buy(account, method, request_args)
             }
@@ -1340,6 +1348,243 @@ fn typed_christmas_eligible_figures(
         .collect::<Vec<_>>();
     figures.sort_unstable();
     figures
+}
+
+fn typed_activity_fashion_config<'a>(
+    catalog: &'a GameplayCatalog,
+    progress: &std::collections::BTreeMap<String, u64>,
+) -> Option<&'a Value> {
+    let activity_id = activity_value(progress, "activityFashion", "activityId");
+    if activity_id > 0 {
+        if let Some(config) = catalog.activity.get(&(activity_id as i32)) {
+            if json_i32(config, "type") == Some(41) {
+                return Some(config);
+            }
+        }
+    }
+    catalog
+        .activity
+        .values()
+        .filter(|config| {
+            json_i32(config, "type") == Some(41)
+                && json_i32(config, "is_open").unwrap_or_default() > 0
+                && config
+                    .get("p14")
+                    .and_then(Value::as_array)
+                    .is_some_and(|rows| !rows.is_empty())
+        })
+        .max_by_key(|config| json_i32(config, "id").unwrap_or_default())
+}
+
+fn typed_fashion_owned(account: &blueoath_domain::AccountState, fashion_id: i32) -> bool {
+    account
+        .fashion
+        .entries
+        .values()
+        .any(|items| items.iter().any(|item| item.get() == fashion_id as u64))
+}
+
+fn can_grant_typed_fashion_reward(
+    account: &blueoath_domain::AccountState,
+    reward: &ShopReward,
+) -> bool {
+    if reward.goods_type == 18 {
+        return reward.item_id > 0;
+    }
+    task_state::can_grant_typed_task_reward(account, reward)
+}
+
+fn grant_typed_fashion_reward(
+    account: &mut blueoath_domain::AccountState,
+    fashion_catalog: Option<&FashionList>,
+    reward: &ShopReward,
+) -> bool {
+    if reward.goods_type != 18 {
+        return task_state::grant_typed_task_reward(account, reward);
+    }
+    let Ok(fashion_tid) = blueoath_domain::TemplateId::new(reward.item_id.max(0) as u64) else {
+        return false;
+    };
+    let sf_id = fashion_catalog
+        .and_then(|catalog| {
+            catalog
+                .items
+                .iter()
+                .find(|item| item.fashion_tids.contains(&reward.item_id))
+                .map(|item| item.sf_id)
+        })
+        .filter(|id| *id > 0)
+        .unwrap_or(reward.item_id) as u64;
+    account
+        .fashion
+        .entries
+        .entry(sf_id)
+        .or_default()
+        .insert(fashion_tid);
+    true
+}
+
+fn handle_typed_fashion(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    fashion_catalog: Option<&FashionList>,
+) -> HandlerResult {
+    let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
+    let snapshot = account.clone();
+    let config = typed_activity_fashion_config(catalog, &account.activities.progress);
+    let Some(config) = config else {
+        return HandlerResult::Error(GameError::CatalogUnavailable);
+    };
+    if method == "activityfashion.Reward" {
+        let index = decode_varint_field(request_args, 1);
+        let (threshold, drop_id) = match index {
+            1 => activity_fashion_milestone(config, "p2"),
+            2 => activity_fashion_milestone(config, "p3"),
+            _ => None,
+        }
+        .unwrap_or_default();
+        if threshold <= 0 || drop_id <= 0 {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "activity fashion reward index is invalid",
+            ));
+        }
+        let claim_key = format!("activity:activityFashion:specialReward:{index}");
+        if account.activities.progress.contains_key(&claim_key) {
+            return typed_reply(method, encode_rewards_list(&[]));
+        }
+        if activity_value(&account.activities.progress, "activityFashion", "buyCount")
+            < threshold as u64
+        {
+            return HandlerResult::Error(GameError::InvalidState(
+                "activity fashion milestone is not reached",
+            ));
+        }
+        let Some(reward) = activity_fashion_drop_reward(catalog, drop_id, i64::from(index)) else {
+            return HandlerResult::Error(GameError::InvalidState(
+                "activity fashion milestone reward is invalid",
+            ));
+        };
+        if !can_grant_typed_fashion_reward(account, &reward)
+            || !grant_typed_fashion_reward(account, fashion_catalog, &reward)
+        {
+            *account = snapshot;
+            return HandlerResult::Error(GameError::InvalidState(
+                "activity fashion milestone reward is unsupported",
+            ));
+        }
+        account.activities.progress.insert(claim_key, 1);
+        return typed_reply(method, encode_rewards_list(&[reward]));
+    }
+
+    let current = activity_value(&account.activities.progress, "activityFashion", "buyCount");
+    let max_count = config
+        .get("p6")
+        .and_then(Value::as_array)
+        .and_then(|values| values.first())
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let requested = decode_varint_field(request_args, 1).clamp(1, 99);
+    if max_count <= current as i64 || i64::from(requested) > max_count - current as i64 {
+        return HandlerResult::Error(GameError::InvalidState(
+            "activity fashion purchase limit reached",
+        ));
+    }
+    let gid = decode_varint_field(request_args, 2).max(0);
+    let pools = config
+        .get("p1")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_i64)
+        .filter_map(|value| i32::try_from(value).ok())
+        .collect::<Vec<_>>();
+    let Some((goods_type, item_id, unit_cost)) = activity_fashion_cost(config) else {
+        return HandlerResult::Error(GameError::InvalidState(
+            "activity fashion purchase cost is invalid",
+        ));
+    };
+    if pools.len() < 3 || (gid > 0 && !pools.contains(&gid) && gid != item_id) {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "activity fashion reward pool is invalid",
+        ));
+    }
+    let unowned_fashion = config
+        .get("p5")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_array)
+        .flatten()
+        .filter_map(Value::as_i64)
+        .filter_map(|value| i32::try_from(value).ok())
+        .find(|id| !typed_fashion_owned(account, *id));
+    let mut target_unowned = unowned_fashion.is_some();
+    let requested_pool = pools.iter().position(|pool| *pool == gid);
+    let mut rewards = Vec::new();
+    for offset in 0..requested {
+        let draw_index = current
+            .saturating_add(u64::try_from(offset).unwrap_or_default())
+            .saturating_add(1);
+        let drop_id = if draw_index >= max_count as u64 {
+            pools[2]
+        } else if let Some(pool) = requested_pool {
+            pools[pool]
+        } else if target_unowned {
+            pools[0]
+        } else {
+            pools[1]
+        };
+        let Some(reward) = activity_fashion_drop_reward(catalog, drop_id, draw_index as i64) else {
+            return HandlerResult::Error(GameError::InvalidState(
+                "activity fashion reward configuration is invalid",
+            ));
+        };
+        if unowned_fashion == Some(reward.item_id) && reward.goods_type == 18 {
+            target_unowned = false;
+        }
+        rewards.push(reward);
+    }
+    let Some(total_cost) = unit_cost.checked_mul(requested) else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "activity fashion purchase amount is invalid",
+        ));
+    };
+    if !typed_activity_can_consume(account, goods_type, item_id, total_cost)
+        || !typed_activity_consume(account, goods_type, item_id, total_cost)
+    {
+        return HandlerResult::Error(GameError::InvalidState(
+            "activity fashion purchase cost is insufficient",
+        ));
+    }
+    if rewards
+        .iter()
+        .any(|reward| !can_grant_typed_fashion_reward(account, reward))
+    {
+        *account = snapshot;
+        return HandlerResult::Error(GameError::InvalidState(
+            "activity fashion reward is unsupported",
+        ));
+    }
+    for reward in &rewards {
+        if !grant_typed_fashion_reward(account, fashion_catalog, reward) {
+            *account = snapshot;
+            return HandlerResult::Error(GameError::InvalidState("activity fashion reward failed"));
+        }
+    }
+    set_activity_value(
+        &mut account.activities.progress,
+        "activityFashion",
+        "buyCount",
+        current.saturating_add(u64::try_from(requested).unwrap_or_default()),
+    );
+    set_activity_value(
+        &mut account.activities.progress,
+        "activityFashion",
+        "lastGid",
+        gid as u64,
+    );
+    typed_reply(method, encode_rewards_list(&rewards))
 }
 
 fn typed_christmas_payload(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
@@ -3349,11 +3594,11 @@ mod tests {
         let mut select = Vec::new();
         append_varint_field(&mut select, 1, 42);
         assert!(matches!(
-            handle_typed(&mut account, "activitySSR.ActivitySSRSelect", &select),
+            handle_typed(&mut account, "activitySSR.ActivitySSRSelect", &select, None),
             HandlerResult::Reply(_)
         ));
         assert!(matches!(
-            handle_typed(&mut account, "activitySSR.ActivitySSRRand", &[]),
+            handle_typed(&mut account, "activitySSR.ActivitySSRRand", &[], None),
             HandlerResult::Reply(_)
         ));
         assert_eq!(
@@ -3364,7 +3609,7 @@ mod tests {
             Some(&42)
         );
         assert!(matches!(
-            handle_typed(&mut account, "activityextract.SwitchDraw", &[]),
+            handle_typed(&mut account, "activityextract.SwitchDraw", &[], None),
             HandlerResult::Reply(_)
         ));
         assert_eq!(
@@ -3378,7 +3623,12 @@ mod tests {
         append_varint_field(&mut feed, 1, 8);
         append_varint_field(&mut feed, 2, 3);
         assert!(matches!(
-            handle_typed(&mut account, "activitybirthday.FeedBirthdayCake", &feed),
+            handle_typed(
+                &mut account,
+                "activitybirthday.FeedBirthdayCake",
+                &feed,
+                None
+            ),
             HandlerResult::Reply(_)
         ));
         assert_eq!(
@@ -3391,7 +3641,7 @@ mod tests {
         let mut claim = Vec::new();
         append_varint_field(&mut claim, 1, 2);
         assert!(matches!(
-            handle_typed(&mut account, "activitysecretcopy.GetReward", &claim),
+            handle_typed(&mut account, "activitysecretcopy.GetReward", &claim, None),
             HandlerResult::Reply(_)
         ));
         assert!(account
@@ -3402,7 +3652,12 @@ mod tests {
         append_varint_field(&mut exchange, 1, 55);
         append_varint_field(&mut exchange, 3, 2);
         assert!(matches!(
-            handle_typed(&mut account, "activitycodeexchange.ExchangeCode", &exchange),
+            handle_typed(
+                &mut account,
+                "activitycodeexchange.ExchangeCode",
+                &exchange,
+                None
+            ),
             HandlerResult::Reply(_)
         ));
         assert_eq!(
@@ -3415,11 +3670,21 @@ mod tests {
         let mut cake = Vec::new();
         append_varint_field(&mut cake, 1, 1);
         assert!(matches!(
-            handle_typed(&mut account, "activitybirthday.MakeBirthdayCake", &cake),
+            handle_typed(
+                &mut account,
+                "activitybirthday.MakeBirthdayCake",
+                &cake,
+                None
+            ),
             HandlerResult::Error(_)
         ));
         assert!(matches!(
-            handle_typed(&mut account, "activityvalentineloveletter.GetReward", &[]),
+            handle_typed(
+                &mut account,
+                "activityvalentineloveletter.GetReward",
+                &[],
+                None,
+            ),
             HandlerResult::Error(_)
         ));
     }

@@ -321,6 +321,26 @@ impl ProfileStore {
         }
 
         let mut statement = connection.prepare(
+            "SELECT sf_id, fashion_tid
+             FROM fashion_entries WHERE profile_id = ?1 ORDER BY sf_id, fashion_tid",
+        )?;
+        let fashions = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (sf_value, fashion_value) in fashions {
+            let sf_id = positive_template_id(sf_value, "fashion sf id")?;
+            let fashion_tid = positive_template_id(fashion_value, "fashion template id")?;
+            account
+                .fashion
+                .entries
+                .entry(sf_id.get())
+                .or_default()
+                .insert(fashion_tid);
+        }
+
+        let mut statement = connection.prepare(
             "SELECT hero_id, slot_index, equip_id
              FROM hero_equip_slots WHERE profile_id = ?1 ORDER BY hero_id, slot_index",
         )?;
@@ -2248,6 +2268,19 @@ impl ProfileStore {
                 ],
             )?;
         }
+        for (sf_id, fashion_tids) in &account.fashion.entries {
+            for fashion_tid in fashion_tids {
+                transaction.execute(
+                    "INSERT INTO fashion_entries(profile_id, sf_id, fashion_tid)
+                     VALUES (?1, ?2, ?3)",
+                    params![
+                        profile.id.as_str(),
+                        typed_i64(*sf_id, "fashion sf id")?,
+                        typed_i64(fashion_tid.get(), "fashion template id")?,
+                    ],
+                )?;
+            }
+        }
         for message in &account.chat.messages {
             transaction.execute(
                 "INSERT INTO chat_messages(
@@ -3555,6 +3588,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0022_sea_progress_typed_state.sql"),
     include_str!("../../../migrations/0023_sea_difficulty_typed_state.sql"),
     include_str!("../../../migrations/0024_copy_star_rewards_typed_state.sql"),
+    include_str!("../../../migrations/0025_fashion_typed_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

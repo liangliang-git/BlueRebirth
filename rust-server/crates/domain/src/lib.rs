@@ -198,6 +198,11 @@ pub struct InventoryState {
     pub items: BTreeMap<TemplateId, u64>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FashionState {
+    pub entries: BTreeMap<u64, BTreeSet<TemplateId>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EquipmentState {
     pub id: EquipId,
@@ -733,6 +738,8 @@ pub struct AccountState {
     pub resources: ResourceLedger,
     #[serde(default)]
     pub inventory: InventoryState,
+    #[serde(default)]
+    pub fashion: FashionState,
     #[serde(default)]
     pub character: CharacterState,
     #[serde(default)]

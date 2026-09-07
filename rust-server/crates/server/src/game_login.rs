@@ -205,6 +205,7 @@ where
                 typed_account.as_mut().expect("typed activity account"),
                 request.method.as_str(),
                 request_args,
+                catalogs.fashion,
             );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
