@@ -232,24 +232,14 @@ mod tests {
         assert!(account.social.pending.contains(&42));
 
         assert!(matches!(
-            handle_typed(
-                &mut account,
-                &state,
-                "friend.Accept",
-                &args,
-            ),
+            handle_typed(&mut account, &state, "friend.Accept", &args,),
             HandlerResult::PushOnly
         ));
         assert!(!account.social.pending.contains(&42));
         assert!(account.social.friends.contains(&42));
 
         assert!(matches!(
-            handle_typed(
-                &mut account,
-                &state,
-                "friend.SetBlack",
-                &args,
-            ),
+            handle_typed(&mut account, &state, "friend.SetBlack", &args,),
             HandlerResult::PushOnly
         ));
         assert!(!account.social.friends.contains(&42));
@@ -262,12 +252,7 @@ mod tests {
         let mut account =
             NewAccountFactory::create(ProfileId::new("friend-projection").unwrap(), "Captain");
         account.social.friends.insert(42);
-        let result = handle_typed(
-            &mut account,
-            &state,
-            "friend.GetFriendMainData",
-            &[],
-        );
+        let result = handle_typed(&mut account, &state, "friend.GetFriendMainData", &[]);
         let HandlerResult::Reply(response) = result else {
             panic!("expected friend projection reply");
         };

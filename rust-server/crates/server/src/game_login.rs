@@ -910,12 +910,7 @@ where
         }
         _ if method.is_family(MethodFamily::Friend) => {
             let result = if let Some(typed) = typed_account.as_mut() {
-                friend_handler::handle_typed(
-                    typed,
-                    state,
-                    request.method.as_str(),
-                    request_args,
-                )
+                friend_handler::handle_typed(typed, state, request.method.as_str(), request_args)
             } else {
                 HandlerResult::Error(GameError::InvalidRequest("friend requires typed account"))
             };

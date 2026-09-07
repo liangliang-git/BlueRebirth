@@ -1011,7 +1011,13 @@ mod typed_tests {
             HandlerResult::Reply(_)
         ));
         assert!(matches!(
-            handle_typed(&state, &mut account, "matchsvr_7.Unknown", &[], &mut effects),
+            handle_typed(
+                &state,
+                &mut account,
+                "matchsvr_7.Unknown",
+                &[],
+                &mut effects
+            ),
             HandlerResult::Error(GameError::InvalidRequest(_))
         ));
     }

@@ -259,7 +259,7 @@ fn migration_from_schema_v6_normalizes_local_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 31);
+    assert_eq!(version, 32);
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
@@ -315,6 +315,38 @@ fn opening_store_is_idempotent_and_records_schema_version() {
         )
         .unwrap();
     assert_eq!(accounts_table, 0);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn account_revision_is_cascaded_with_profile() {
+    let (store, root) = store();
+    let profile_id = ProfileId::new("revision-cascade").unwrap();
+    let account = NewAccountFactory::create(profile_id.clone(), "Revision Captain");
+    AccountRepository::create(&store, &account).unwrap();
+
+    let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
+    let foreign_key: i64 = connection
+        .query_row(
+            r#"SELECT COUNT(*) FROM pragma_foreign_key_list('account_revisions')
+            WHERE "table" = 'profiles' AND on_delete = 'CASCADE'"#,
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(foreign_key, 1);
+    drop(connection);
+
+    store.reset(profile_id.as_str()).unwrap();
+    let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
+    let revisions: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM account_revisions WHERE profile_id = ?1",
+            [profile_id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(revisions, 0);
     let _ = std::fs::remove_dir_all(root);
 }
 

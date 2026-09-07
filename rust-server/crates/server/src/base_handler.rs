@@ -336,7 +336,10 @@ pub(super) fn handle_typed(
                 .activities
                 .progress
                 .insert(key.to_owned(), u64::from(current_unix_seconds()));
-            effects.push_pre(Response::raw("jopen.GetJopen", typed_jopen_payload(account)));
+            effects.push_pre(Response::raw(
+                "jopen.GetJopen",
+                typed_jopen_payload(account),
+            ));
             HandlerResult::PushOnly
         }
         "milestone.GetMilestone" => {
@@ -1579,7 +1582,13 @@ mod tests {
         let mut plot = Vec::new();
         append_varint_field(&mut plot, 1, 42);
         assert!(matches!(
-            handle_typed(&mut account, &state, "guide.PlotReward", &plot, &mut effects,),
+            handle_typed(
+                &mut account,
+                &state,
+                "guide.PlotReward",
+                &plot,
+                &mut effects,
+            ),
             HandlerResult::Reply(_)
         ));
         assert!(account.guide.plot_rewards.contains(&42));
@@ -1639,7 +1648,9 @@ mod tests {
         };
         assert_eq!(decode_varint_field(&response.payload, 1), 80);
         let (pre, _, _) = effects.into_parts();
-        assert!(pre.iter().any(|response| response.method == "jopen.GetJopen"));
+        assert!(pre
+            .iter()
+            .any(|response| response.method == "jopen.GetJopen"));
     }
 
     #[test]

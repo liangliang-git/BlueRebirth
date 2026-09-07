@@ -89,7 +89,13 @@ mod tests {
         let mut effects = ResponseEffects::default();
 
         assert!(matches!(
-            handle_typed(&mut account, None, "dailycopy.SelectEx", &args, &mut effects,),
+            handle_typed(
+                &mut account,
+                None,
+                "dailycopy.SelectEx",
+                &args,
+                &mut effects,
+            ),
             HandlerResult::PushOnly
         ));
         let chapter = blueoath_domain::ChapterId::new(1).unwrap();

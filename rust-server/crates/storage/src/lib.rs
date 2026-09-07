@@ -3834,6 +3834,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0029_battle_session_constraints.sql"),
     include_str!("../../../migrations/0030_daily_copy_ex_star.sql"),
     include_str!("../../../migrations/0031_local_profile_storage.sql"),
+    include_str!("../../../migrations/0032_account_revision_foreign_key.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {
