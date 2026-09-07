@@ -341,6 +341,7 @@ where
     #[cfg(test)]
     let mut pass_shipwrecked_ids = std::collections::HashSet::new();
     let mut handler_error: Option<GameError> = None;
+    #[cfg(test)]
     let mut typed_daily_copy_handled = false;
     let mut ret = match request.method.as_str() {
         _ if typed_account.is_some()
@@ -1541,7 +1542,10 @@ where
                     &mut post_pushes,
                 );
                 if matches!(result, HandlerResult::PushOnly | HandlerResult::Error(_)) {
-                    typed_daily_copy_handled = true;
+                    #[cfg(test)]
+                    {
+                        typed_daily_copy_handled = true;
+                    }
                     result
                 } else {
                     HandlerResult::Error(GameError::InvalidRequest(
@@ -2573,6 +2577,7 @@ where
             }
         }
     }
+    #[cfg(test)]
     if !typed_daily_copy_handled {
         if let (Some(typed), Some(legacy)) = (typed_account, account.as_deref()) {
             sync_typed_daily_copy_state(typed, legacy, current_unix_seconds());

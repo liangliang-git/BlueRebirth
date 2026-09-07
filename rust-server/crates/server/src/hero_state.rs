@@ -1312,6 +1312,7 @@ pub(super) fn encode_hero_bag_push(account: &Value) -> Vec<u8> {
         ..TResponse::default()
     })
 }
+#[cfg(test)]
 pub(super) fn illustrate_info_payload(
     account: &Value,
     handbook_behaviours: Option<&[i32]>,

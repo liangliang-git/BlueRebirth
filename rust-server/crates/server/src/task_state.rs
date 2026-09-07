@@ -557,6 +557,7 @@ pub(super) fn encode_task_reward_list(rewards: &[ShopReward]) -> Vec<u8> {
     out
 }
 
+#[cfg(test)]
 pub(super) fn task_info_payload(account: &Value, catalog: Option<&TaskCatalog>) -> Vec<u8> {
     let mut output = Vec::new();
     let records = account

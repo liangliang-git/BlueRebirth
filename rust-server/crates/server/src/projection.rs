@@ -382,6 +382,7 @@ pub(super) fn bag_info_from_typed_account(account: &blueoath_domain::AccountStat
     }
 }
 
+#[cfg(test)]
 pub(super) fn fashion_list_from_account(
     account: &Value,
     catalog: Option<&FashionList>,
@@ -457,6 +458,7 @@ pub(super) fn fashion_list_from_typed_account(
     FashionList { items }
 }
 
+#[cfg(test)]
 pub(super) fn equip_list_from_account(
     account: &Value,
     catalog: Option<&EquipCatalog>,
@@ -1494,6 +1496,7 @@ pub(super) fn json_i32_array(value: &Value, key: &str) -> Vec<i32> {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 pub(super) fn daily_copy_progress_from_account(
     account: Option<&Value>,
     now: u32,
@@ -1633,6 +1636,7 @@ pub(super) fn daily_copy_group_progress_from_typed_account(
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn sync_typed_daily_copy_state(
     account: &mut blueoath_domain::AccountState,
     legacy: &Value,
@@ -1729,6 +1733,7 @@ pub(super) fn sync_typed_daily_copy_state(
     changed
 }
 
+#[cfg(test)]
 pub(super) fn daily_copy_group_progress_from_account(
     account: Option<&Value>,
     key: &str,
@@ -1761,6 +1766,7 @@ pub(super) fn daily_copy_reset_required(daily: Option<&Value>, now: u32) -> bool
         .is_none_or(|stored| i64::from(stored) != reset_day as i64)
 }
 
+#[cfg(test)]
 pub(super) fn daily_copy_snapshot_payload(
     account: &Value,
     chapter_catalog: Option<&ChapterCatalog>,

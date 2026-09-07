@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 
 use super::*;
 
+#[cfg(test)]
 pub(super) fn build_project_payload(project: &Value) -> Vec<u8> {
     let mut output = Vec::new();
     if let Some(items) = project.get("items").and_then(Value::as_array) {
@@ -30,6 +31,7 @@ pub(super) fn build_project_payload(project: &Value) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 pub(super) fn build_formula_payload(value: &Value, include_hero_id: bool) -> Vec<u8> {
     let mut output = Vec::new();
     append_varint_field(
@@ -53,6 +55,7 @@ pub(super) fn build_formula_payload(value: &Value, include_hero_id: bool) -> Vec
     output
 }
 
+#[cfg(test)]
 pub(super) fn construction_info_payload(account: &Value, now: u32) -> Vec<u8> {
     let Some(construction) = account.get("construction") else {
         return Vec::new();
@@ -880,6 +883,7 @@ pub(super) fn update_bathroom_state(account: &mut Value, method: &str, args: &[u
     }
 }
 
+#[cfg(test)]
 pub(super) fn bathroom_info_payload(account: &Value) -> Vec<u8> {
     let mut output = Vec::new();
     let Some(bath) = account.get("bath") else {

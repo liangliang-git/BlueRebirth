@@ -7,10 +7,12 @@ use super::*;
 
 #[cfg(test)]
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn mop_up_payload(account: &Value, now: u32) -> Vec<u8> {
     mop_up_payload_with_pass_rets(account, now, &[])
 }
 
+#[cfg(test)]
 #[cfg(test)]
 #[cfg(test)]
 pub(super) fn mop_up_payload_with_pass_rets(
@@ -69,6 +71,7 @@ pub(super) fn mop_up_payload_with_pass_rets(
 
 #[cfg(test)]
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn completed_sweep_copy_id(account: &Value, now: u32) -> i32 {
     account
         .get("sweep")
@@ -95,6 +98,7 @@ pub(super) fn mop_up_pass_rets(copy_id: i32, rewards: &[ShopReward]) -> Vec<Vec<
     )]
 }
 
+#[cfg(test)]
 #[cfg(test)]
 #[cfg(test)]
 pub(super) fn mop_up_active_count(account: &Value, now: u32) -> usize {
@@ -170,6 +174,7 @@ pub(super) fn draw_copy_drop_with_seed(
     None
 }
 
+#[cfg(test)]
 #[cfg(test)]
 #[cfg(test)]
 pub(super) fn fleet_hero_ids(account: &Value, fleet_id: u64) -> Vec<u64> {
