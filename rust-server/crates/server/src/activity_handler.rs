@@ -1750,10 +1750,7 @@ fn video_watch_ret_payload(rewards: &[ShopReward]) -> Vec<u8> {
 }
 
 fn parameter_value(catalog: &GameplayCatalog, id: i32) -> Option<i32> {
-    catalog
-        .parameters
-        .get(&id)
-        .and_then(|value| json_i32(value, "value"))
+    catalog.parameters.get(&id).map(|config| config.value)
 }
 
 fn activity_fashion_milestone(config: &Value, key: &str) -> Option<(i32, i32)> {

@@ -665,6 +665,11 @@ pub(super) struct InteractionItemConfig {
     pub(super) drop_id: i32,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct ParameterConfig {
+    pub(super) value: i32,
+}
+
 #[derive(Clone, Debug, Default)]
 pub(super) struct GameplayCatalog {
     pub(super) rewards_by_id: std::collections::BTreeMap<i32, Vec<ShopReward>>,
@@ -675,7 +680,7 @@ pub(super) struct GameplayCatalog {
     pub(super) battlepass_param: Option<BattlePassParamConfig>,
     pub(super) battlepass_activity_param: Option<BattlePassParamConfig>,
     pub(super) activity: std::collections::BTreeMap<i32, Value>,
-    pub(super) parameters: std::collections::BTreeMap<i32, Value>,
+    pub(super) parameters: std::collections::BTreeMap<i32, ParameterConfig>,
     pub(super) activity_extract: std::collections::BTreeMap<i32, Value>,
     pub(super) activity_extract_ur: std::collections::BTreeMap<i32, Value>,
     pub(super) anniversary_videos: std::collections::BTreeMap<i32, AnniversaryVideoConfig>,

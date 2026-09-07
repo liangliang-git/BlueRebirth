@@ -1232,6 +1232,17 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
             )
         })
         .collect();
+    let parameters = rows("config_parameter.db")
+        .into_iter()
+        .map(|(id, value)| {
+            (
+                id,
+                ParameterConfig {
+                    value: json_i32(&value, "value").unwrap_or_default(),
+                },
+            )
+        })
+        .collect();
     GameplayCatalog {
         rewards_by_id: load_reward_definitions(&dir),
         battlepass_levels: battlepass_levels("config_battlepass_level.db"),
@@ -1241,7 +1252,7 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
         battlepass_param: battlepass_param("config_battlepass_param.db"),
         battlepass_activity_param: battlepass_param("config_battlepass_param_activity.db"),
         activity: rows("config_activity.db"),
-        parameters: rows("config_parameter.db"),
+        parameters,
         activity_extract: rows("config_activity_extract.db"),
         activity_extract_ur: rows("config_activity_extract_ur.db"),
         anniversary_videos,
