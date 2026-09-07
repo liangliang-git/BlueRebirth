@@ -113,7 +113,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     #[cfg(not(test))]
-    let mut account: Option<&mut Value> = None;
+    let account: Option<&mut Value> = None;
 
     let GameLoginCatalogs {
         fashion: fashion_catalog,
@@ -384,10 +384,13 @@ where
                     } else {
                         Some(FleetInfoCodec::encode(&fleet))
                     }
-                } else if let Some(account) = account.as_deref_mut() {
-                    set_fleet_from_account(account, &fleet);
-                    Some(FleetInfoCodec::encode(&fleet))
                 } else {
+                    #[cfg(test)]
+                    {
+                        if let Some(account) = account.as_deref_mut() {
+                            set_fleet_from_account(account, &fleet);
+                        }
+                    }
                     Some(FleetInfoCodec::encode(&fleet))
                 }
             } else {
@@ -420,18 +423,27 @@ where
                         );
                         Some(payload)
                     }
-                } else if let Some(account) = account.as_deref_mut() {
-                    set_preset_fleet_from_account(account, &preset);
-                    let payload =
-                        PresetFleetCodec::encode(&preset_fleet_info_from_account(account));
-                    append_method_push(
-                        &mut post_pushes,
-                        "presetfleet.PresetFleetsInfo",
-                        payload.clone(),
-                    );
-                    Some(payload)
                 } else {
-                    Some(PresetFleetCodec::encode(&preset))
+                    #[cfg(test)]
+                    {
+                        if let Some(account) = account.as_deref_mut() {
+                            set_preset_fleet_from_account(account, &preset);
+                            let payload =
+                                PresetFleetCodec::encode(&preset_fleet_info_from_account(account));
+                            append_method_push(
+                                &mut post_pushes,
+                                "presetfleet.PresetFleetsInfo",
+                                payload.clone(),
+                            );
+                            Some(payload)
+                        } else {
+                            Some(PresetFleetCodec::encode(&preset))
+                        }
+                    }
+                    #[cfg(not(test))]
+                    {
+                        Some(PresetFleetCodec::encode(&preset))
+                    }
                 }
             }
             _ => {
@@ -448,7 +460,9 @@ where
                 .unwrap_or_else(|| user_info_from_account(state, account_view)),
         )),
         "user.UserLogin" => {
+            #[cfg(test)]
             let now = current_unix_seconds();
+            #[cfg(test)]
             if let Some(account) = account.as_deref_mut() {
                 advance_task_event(account, task_catalog, 1, 1, now);
             }
@@ -458,12 +472,15 @@ where
                     guild_handler::push_guild_state_typed(&mut pre_pushes, typed);
                 }
                 append_typed_user_login_bootstrap(&mut pre_pushes, state, typed, chapter_catalog);
-            } else if let Some(account) = account.as_deref() {
-                append_method_push(
-                    &mut post_pushes,
-                    "task.TaskInfo",
-                    task_info_payload(account, task_catalog),
-                );
+            } else {
+                #[cfg(test)]
+                if let Some(account) = account.as_deref() {
+                    append_method_push(
+                        &mut post_pushes,
+                        "task.TaskInfo",
+                        task_info_payload(account, task_catalog),
+                    );
+                }
             }
             Some(UserLoginCodec::encode_response("ok", "", 0))
         }
@@ -1534,45 +1551,56 @@ where
                     );
                     Some(Vec::new())
                 }
-            } else if let Some(account) = account.as_deref_mut() {
-                let level = commander_level(account);
-                if level < SEA_DIFFICULTY_UNLOCK_LEVEL && requested > 1 {
-                    handler_error = Some(GameError::Internal(
-                        "sea difficulty unlocks at commander level 60".to_owned(),
-                    ));
-                    Some(Vec::new())
-                } else {
-                    set_sea_difficulty(account, requested);
-                    let fallback_catalog;
-                    let catalog = match chapter_catalog {
-                        Some(catalog) => catalog,
-                        None => {
-                            fallback_catalog = ChapterCatalog::fallback();
-                            &fallback_catalog
+            } else {
+                #[cfg(test)]
+                {
+                    if let Some(account) = account.as_deref_mut() {
+                        let level = commander_level(account);
+                        if level < SEA_DIFFICULTY_UNLOCK_LEVEL && requested > 1 {
+                            handler_error = Some(GameError::Internal(
+                                "sea difficulty unlocks at commander level 60".to_owned(),
+                            ));
+                            Some(Vec::new())
+                        } else {
+                            set_sea_difficulty(account, requested);
+                            let fallback_catalog;
+                            let catalog = match chapter_catalog {
+                                Some(catalog) => catalog,
+                                None => {
+                                    fallback_catalog = ChapterCatalog::fallback();
+                                    &fallback_catalog
+                                }
+                            };
+                            let passed = completed_copy_ids(account, "seaProgress");
+                            let pass_counts = completed_copy_counts(account, "seaProgress");
+                            append_method_push(
+                                &mut post_pushes,
+                                "copy.GetCopy",
+                                CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
+                                    &catalog.sea,
+                                    copy_progress_max_or_initial(
+                                        &catalog.sea,
+                                        &passed,
+                                        catalog.sea_initial,
+                                    ),
+                                    &passed,
+                                    &pass_counts,
+                                    sea_difficulty_for_account(account),
+                                ),
+                            );
+                            Some(Vec::new())
                         }
-                    };
-                    let passed = completed_copy_ids(account, "seaProgress");
-                    let pass_counts = completed_copy_counts(account, "seaProgress");
-                    append_method_push(
-                        &mut post_pushes,
-                        "copy.GetCopy",
-                        CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
-                            &catalog.sea,
-                            copy_progress_max_or_initial(
-                                &catalog.sea,
-                                &passed,
-                                catalog.sea_initial,
-                            ),
-                            &passed,
-                            &pass_counts,
-                            sea_difficulty_for_account(account),
-                        ),
-                    );
+                    } else {
+                        handler_error =
+                            Some(GameError::Internal("account is unavailable".to_owned()));
+                        Some(Vec::new())
+                    }
+                }
+                #[cfg(not(test))]
+                {
+                    handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                     Some(Vec::new())
                 }
-            } else {
-                handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
-                Some(Vec::new())
             }
         }
         "copy.GetCopy" => {
