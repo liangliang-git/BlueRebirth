@@ -410,16 +410,40 @@ where
             feign_role_id: state.profile_id.clone(),
             err_code: 0,
         })),
-        "player.GetUserList" => Some(UserListCodec::encode(&[typed_account
-            .as_deref()
-            .map(|account| user_info_from_typed_account(state, account))
-            .unwrap_or_else(|| user_info_from_account(state, account_view))])),
-        "player.CreateUser" => Some(PlayerUserCodec::encode(
-            &typed_account
-                .as_deref()
-                .map(|account| user_info_from_typed_account(state, account))
-                .unwrap_or_else(|| user_info_from_account(state, account_view)),
-        )),
+        "player.GetUserList" => {
+            let user = match typed_account.as_deref() {
+                Some(account) => user_info_from_typed_account(state, account),
+                None => {
+                    #[cfg(test)]
+                    {
+                        user_info_from_account(state, account_view)
+                    }
+                    #[cfg(not(test))]
+                    {
+                        handler_error = Some(GameError::AccountUnavailable);
+                        UserInfo::default()
+                    }
+                }
+            };
+            Some(UserListCodec::encode(&[user]))
+        }
+        "player.CreateUser" => {
+            let user = match typed_account.as_deref() {
+                Some(account) => user_info_from_typed_account(state, account),
+                None => {
+                    #[cfg(test)]
+                    {
+                        user_info_from_account(state, account_view)
+                    }
+                    #[cfg(not(test))]
+                    {
+                        handler_error = Some(GameError::AccountUnavailable);
+                        UserInfo::default()
+                    }
+                }
+            };
+            Some(PlayerUserCodec::encode(&user))
+        }
         _ if matches!(
             request.method.as_str(),
             "cachedata.CacheData"
@@ -510,17 +534,37 @@ where
             result.into_payload()
         }
         "tactic.GetHerosTactic" => {
-            let fleet = typed_account
-                .as_deref()
-                .map(fleet_info_from_typed_account)
-                .unwrap_or_else(|| fleet_info_from_account(account_view.unwrap_or(&Value::Null)));
+            let fleet = match typed_account.as_deref() {
+                Some(account) => fleet_info_from_typed_account(account),
+                None => {
+                    #[cfg(test)]
+                    {
+                        fleet_info_from_account(account_view.unwrap_or(&Value::Null))
+                    }
+                    #[cfg(not(test))]
+                    {
+                        handler_error = Some(GameError::AccountUnavailable);
+                        FleetInfo::default()
+                    }
+                }
+            };
             Some(FleetInfoCodec::encode(&fleet))
         }
         "bag.GetBagInfo" => {
-            let bag = typed_account
-                .as_deref()
-                .map(bag_info_from_typed_account)
-                .unwrap_or_else(|| bag_info_from_account(account_view.unwrap_or(&Value::Null)));
+            let bag = match typed_account.as_deref() {
+                Some(account) => bag_info_from_typed_account(account),
+                None => {
+                    #[cfg(test)]
+                    {
+                        bag_info_from_account(account_view.unwrap_or(&Value::Null))
+                    }
+                    #[cfg(not(test))]
+                    {
+                        handler_error = Some(GameError::AccountUnavailable);
+                        BagInfo::default()
+                    }
+                }
+            };
             Some(BagInfoCodec::encode(&bag))
         }
         "tactic.SetHerosTactic" => {
@@ -555,14 +599,23 @@ where
                 Some(Vec::new())
             }
         }
-        "presetfleet.PresetFleetsInfo" => Some(PresetFleetCodec::encode(
-            &typed_account
-                .as_deref()
-                .map(preset_fleet_info_from_typed_account)
-                .unwrap_or_else(|| {
-                    preset_fleet_info_from_account(account_view.unwrap_or(&Value::Null))
-                }),
-        )),
+        "presetfleet.PresetFleetsInfo" => {
+            let preset = match typed_account.as_deref() {
+                Some(account) => preset_fleet_info_from_typed_account(account),
+                None => {
+                    #[cfg(test)]
+                    {
+                        preset_fleet_info_from_account(account_view.unwrap_or(&Value::Null))
+                    }
+                    #[cfg(not(test))]
+                    {
+                        handler_error = Some(GameError::AccountUnavailable);
+                        PresetFleetInfo::default()
+                    }
+                }
+            };
+            Some(PresetFleetCodec::encode(&preset))
+        }
         "presetfleet.SetPresetFleets" => match PresetFleetCodec::decode(request_args) {
             Ok(preset) if preset.fleets.len() <= 100 => {
                 if let Some(typed) = typed_account.as_mut() {
@@ -611,12 +664,23 @@ where
                 Some(Vec::new())
             }
         },
-        "user.GetUserInfo" => Some(UserInfoCodec::encode(
-            &typed_account
-                .as_deref()
-                .map(|account| user_info_from_typed_account(state, account))
-                .unwrap_or_else(|| user_info_from_account(state, account_view)),
-        )),
+        "user.GetUserInfo" => {
+            let user = match typed_account.as_deref() {
+                Some(account) => user_info_from_typed_account(state, account),
+                None => {
+                    #[cfg(test)]
+                    {
+                        user_info_from_account(state, account_view)
+                    }
+                    #[cfg(not(test))]
+                    {
+                        handler_error = Some(GameError::AccountUnavailable);
+                        UserInfo::default()
+                    }
+                }
+            };
+            Some(UserInfoCodec::encode(&user))
+        }
         "user.UserLogin" => {
             #[cfg(test)]
             let now = current_unix_seconds();

@@ -2,11 +2,12 @@
 
 #[cfg(test)]
 use serde_json::json;
+#[cfg(test)]
 use serde_json::Value;
 
+#[cfg(test)]
 use super::*;
 
-#[cfg(test)]
 #[cfg(test)]
 pub(super) fn study_skill_state(account: &mut Value, hero_id: u64, skill_id: i32) -> bool {
     if hero_id == 0 || skill_id <= 0 {
@@ -69,6 +70,7 @@ pub(super) fn resolve_study_skill_id(
         .filter(|skill_id| *skill_id > 0)
 }
 
+#[cfg(test)]
 pub(super) fn study_info_payload(account: &Value, now: u32) -> Vec<u8> {
     let mut out = Vec::new();
     append_varint_field(&mut out, 1, 2);

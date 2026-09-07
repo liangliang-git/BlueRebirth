@@ -1,5 +1,6 @@
 #[cfg(test)]
 use serde_json::json;
+#[cfg(test)]
 use serde_json::Value;
 
 use super::*;
@@ -251,6 +252,7 @@ pub(super) fn default_account_snapshot(profile_id: &str, name: &str, now: u32) -
     })
 }
 
+#[cfg(test)]
 pub(super) fn user_info_from_account(state: &ServerState, account: Option<&Value>) -> UserInfo {
     let fallback = UserInfo {
         uid: 1,

@@ -9,11 +9,13 @@ use std::time::Instant;
 
 #[cfg(test)]
 pub(crate) use blueoath_protocol::EquipNum;
+#[cfg(test)]
+use blueoath_protocol::MedalAcquiredTime;
 use blueoath_protocol::{
     BagInfoCodec, BuildingSetHeroListRequest, ClientGameWireCodec, CopyStartRequest, Decode,
     EquipListCodec, FashionInfo, FashionList, FashionListCodec, HeroBag, HeroBagCodec, HeroGrid,
-    MailIdRequest, MedalAcquiredTime, MopUpRequest, TMessageCodec, TResponse, TRetLogin,
-    TalentIdRequest, UserInfo, UserInfoCodec,
+    MailIdRequest, MopUpRequest, TMessageCodec, TResponse, TRetLogin, TalentIdRequest, UserInfo,
+    UserInfoCodec,
 };
 use blueoath_storage::StorageError;
 use blueoath_transport::{
@@ -59,7 +61,9 @@ mod wire;
 
 #[cfg(test)]
 pub(crate) use account_defaults::default_account_snapshot;
-use account_defaults::{user_info_from_account, user_info_from_typed_account};
+#[cfg(test)]
+use account_defaults::user_info_from_account;
+use account_defaults::user_info_from_typed_account;
 use account_state::*;
 use battle_state::*;
 pub use blueoath_game::{

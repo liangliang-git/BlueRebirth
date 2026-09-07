@@ -19,6 +19,7 @@ pub(super) fn hero_array<'a>(value: &'a Value, key: &str) -> Option<&'a Vec<Valu
     value.get(key).and_then(Value::as_array)
 }
 
+#[cfg(test)]
 pub(super) fn hero_bag_from_account(account: &Value) -> HeroBag {
     let dock = account.get("dock");
     let heroes = dock
@@ -321,6 +322,7 @@ fn equip_groups_from_hero(hero: &Value) -> Vec<HeroEquipGroup> {
     groups
 }
 
+#[cfg(test)]
 pub(super) fn bag_info_from_account(account: &Value) -> BagInfo {
     // Keep zero-count rows for consumables whose client widgets cache the last
     // value.  This also repairs snapshots created before zero tombstones were
@@ -600,6 +602,7 @@ pub(super) fn equip_info_from_typed_equipment(
     }
 }
 
+#[cfg(test)]
 pub(super) fn building_info_from_account(account: &Value, now: u32) -> UserBuildingInfo {
     let building = account.get("building");
     let buildings: Vec<BuildingInfo> = building
@@ -857,6 +860,7 @@ pub(super) fn building_info_from_typed_account(
     }
 }
 
+#[cfg(test)]
 pub(super) fn fleet_info_from_account(account: &Value) -> FleetInfo {
     let fleet = account.get("fleet");
     let tactics: Vec<FleetTactic> = fleet
@@ -1291,6 +1295,7 @@ pub(super) fn apply_copy_record_to_fleet(
     Some(fleet)
 }
 
+#[cfg(test)]
 pub(super) fn preset_fleet_info_from_account(account: &Value) -> PresetFleetInfo {
     let preset = account
         .get("presetFleet")
