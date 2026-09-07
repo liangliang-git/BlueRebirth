@@ -1985,10 +1985,13 @@ where
         NetSocketFrameCodec::write(stream, 0, &push).await?;
         let push = TMessageCodec::encode_response(&TResponse {
             method: "buildship.BuildShipInfo".to_owned(),
-            ret: Some(buildship_info_payload(
-                Some(account),
-                current_unix_seconds(),
-            )),
+            ret: Some(
+                typed_account_view
+                    .map(|typed| buildship_info_payload_from_typed(typed, current_unix_seconds()))
+                    .unwrap_or_else(|| {
+                        buildship_info_payload(Some(account), current_unix_seconds())
+                    }),
+            ),
             time: current_unix_seconds(),
             ..TResponse::default()
         });
@@ -2007,7 +2010,19 @@ where
         for (method, ret) in [
             (
                 "illustrate.IllustrateInfo",
-                illustrate_info_payload(account, handbook_behaviours, hero_memories),
+                typed_account_view
+                    .map(|typed| {
+                        let template_ids = typed
+                            .dock
+                            .heroes
+                            .values()
+                            .map(|hero| hero.template_id.get() as i32)
+                            .collect::<Vec<_>>();
+                        illustrate_info_payload_for_templates(&template_ids, handbook_behaviours)
+                    })
+                    .unwrap_or_else(|| {
+                        illustrate_info_payload(account, handbook_behaviours, hero_memories)
+                    }),
             ),
             ("illustrate.OldIllustrateInfo", Vec::new()),
             (
