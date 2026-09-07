@@ -409,6 +409,7 @@ where
             result.into_payload()
         }
         _ if typed_account.is_some() && compat_feature::handles_typed(request.method.as_str()) => {
+            let mut compat_effects = ResponseEffects::default();
             let result = compat_feature::handle_typed(
                 state,
                 typed_account.as_mut().expect("typed compat account"),
@@ -416,7 +417,13 @@ where
                 request_args,
                 catalogs.affection,
                 catalogs.combination,
+                &mut compat_effects,
+            );
+            apply_response_effects(
+                compat_effects,
                 &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
             );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());

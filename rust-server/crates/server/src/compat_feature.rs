@@ -4,7 +4,7 @@
 //! modules as their request and state models are completed.
 
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 const HP_COEFFICIENT: i64 = 10_000_000_000;
@@ -89,7 +89,7 @@ pub(super) fn handle_typed(
     request_args: &[u8],
     affection_catalog: Option<&AffectionCatalog>,
     combination_catalog: Option<&CombinationCatalog>,
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     if method == "cachedata.CacheData" {
         return HandlerResult::Reply(Response::raw(method, cache_data_payload()));
@@ -140,11 +140,10 @@ pub(super) fn handle_typed(
                 ));
             }
         }
-        append_method_push(
-            pre_pushes,
+        effects.push_pre(Response::raw(
             "bag.UpdateBagData",
             BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-        );
+        ));
         let mut output = Vec::new();
         append_varint_field(&mut output, 1, 0);
         append_varint_field(&mut output, 2, 0);
@@ -176,16 +175,14 @@ pub(super) fn handle_typed(
         if !grant_typed_treasure_reward(account, &mut reward) {
             return HandlerResult::Error(GameError::InvalidState("wish hero cannot be granted"));
         }
-        append_method_push(
-            pre_pushes,
+        effects.push_pre(Response::raw(
             "hero.UpdateHeroBagData",
             HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-        );
-        append_method_push(
-            pre_pushes,
+        ));
+        effects.push_pre(Response::raw(
             "illustrate.IllustrateInfo",
             illustrate_info_payload_for_templates(&[template_id], None),
-        );
+        ));
         let mut output = Vec::new();
         append_varint_field(&mut output, 1, reward.goods_type as u64);
         append_varint_field(&mut output, 2, reward.item_id as u64);
@@ -259,11 +256,10 @@ pub(super) fn handle_typed(
                 "illustrate behaviour request is invalid",
             ));
         }
-        append_method_push(
-            pre_pushes,
+        effects.push_pre(Response::raw(
             "illustrate.IllustrateInfo",
             illustrate_info_payload_for_entries(&updated),
-        );
+        ));
         return HandlerResult::PushOnly;
     }
     if method == "illustrate.EquipNew" {
@@ -337,11 +333,10 @@ pub(super) fn handle_typed(
                 .insert(format!("compat:illustrate:vow:{hero_id}"), 1);
         }
         if !template_ids.is_empty() {
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "illustrate.IllustrateInfo",
                 illustrate_info_payload_for_templates(&template_ids, None),
-            );
+            ));
         }
         return HandlerResult::PushOnly;
     }
@@ -358,14 +353,14 @@ pub(super) fn handle_typed(
             method,
             request_args,
             combination_catalog,
-            pre_pushes,
+            effects,
         );
     }
     if matches!(
         method,
         "bag.GetNormalTreasureInfo" | "bag.GetSelectTreasureInfo"
     ) {
-        return handle_typed_treasure(account, method, request_args, pre_pushes);
+        return handle_typed_treasure(account, method, request_args, effects);
     }
     if method == "hero.Marry" {
         let Ok(request) = HeroMarryRequest::decode(request_args) else {
@@ -436,16 +431,14 @@ pub(super) fn handle_typed(
             .activities
             .progress
             .insert(married_count_key, married_count.saturating_add(1));
-        append_method_push(
-            pre_pushes,
+        effects.push_pre(Response::raw(
             "hero.UpdateHeroBagData",
             HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-        );
-        append_method_push(
-            pre_pushes,
+        ));
+        effects.push_pre(Response::raw(
             "user.UpdateUserInfo",
             UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-        );
+        ));
         return HandlerResult::PushOnly;
     }
     if method == "hero.AddAffection" {
@@ -512,16 +505,14 @@ pub(super) fn handle_typed(
         {
             hero.affection = current.saturating_add(gained);
         }
-        append_method_push(
-            pre_pushes,
+        effects.push_pre(Response::raw(
             "hero.UpdateHeroBagData",
             HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-        );
-        append_method_push(
-            pre_pushes,
+        ));
+        effects.push_pre(Response::raw(
             "bag.UpdateBagData",
             BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-        );
+        ));
         let mut output = Vec::new();
         append_varint_field(&mut output, 1, 0);
         append_varint_field(&mut output, 2, hero_id);
@@ -613,16 +604,14 @@ pub(super) fn handle_typed(
                 hero.hp = HP_COEFFICIENT as u64;
             }
         }
-        append_method_push(
-            pre_pushes,
+        effects.push_pre(Response::raw(
             "hero.UpdateHeroBagData",
             HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-        );
-        append_method_push(
-            pre_pushes,
+        ));
+        effects.push_pre(Response::raw(
             "user.UpdateUserInfo",
             UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-        );
+        ));
     }
     HandlerResult::PushOnly
 }
@@ -743,7 +732,7 @@ fn handle_typed_combination(
     method: &str,
     request_args: &[u8],
     combination_catalog: Option<&CombinationCatalog>,
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let Some(catalog) = combination_catalog else {
         return HandlerResult::Error(GameError::CatalogUnavailable);
@@ -799,11 +788,10 @@ fn handle_typed_combination(
         if deputy_id > 0 {
             set_typed_combination_value(account, deputy_id, "beCombined", main_id);
         }
-        append_method_push(
-            pre_pushes,
+        effects.push_pre(Response::raw(
             "hero.UpdateHeroBagData",
             HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-        );
+        ));
         return HandlerResult::PushOnly;
     }
 
@@ -853,16 +841,14 @@ fn handle_typed_combination(
             ));
         }
         set_typed_combination_value(account, hero_id, "level", level);
-        append_method_push(
-            pre_pushes,
+        effects.push_pre(Response::raw(
             "hero.UpdateHeroBagData",
             HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-        );
-        append_method_push(
-            pre_pushes,
+        ));
+        effects.push_pre(Response::raw(
             "bag.UpdateBagData",
             BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-        );
+        ));
         return HandlerResult::PushOnly;
     }
 
@@ -890,16 +876,14 @@ fn handle_typed_combination(
         ));
     }
     set_typed_combination_value(account, hero_id, "grade", next_star.max(0) as u64);
-    append_method_push(
-        pre_pushes,
+    effects.push_pre(Response::raw(
         "hero.UpdateHeroBagData",
         HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-    );
-    append_method_push(
-        pre_pushes,
+    ));
+    effects.push_pre(Response::raw(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-    );
+    ));
     HandlerResult::PushOnly
 }
 
@@ -1031,7 +1015,7 @@ fn handle_typed_treasure(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let Ok(request) = TreasureOpenRequest::decode(request_args) else {
         return HandlerResult::Error(GameError::InvalidRequest("treasure request is invalid"));
@@ -1129,21 +1113,18 @@ fn handle_typed_treasure(
             ));
         }
     }
-    append_method_push(
-        pre_pushes,
+    effects.push_pre(Response::raw(
         "hero.UpdateHeroBagData",
         HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-    );
-    append_method_push(
-        pre_pushes,
+    ));
+    effects.push_pre(Response::raw(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-    );
-    append_method_push(
-        pre_pushes,
+    ));
+    effects.push_pre(Response::raw(
         "equip.UpdateEquipBagData",
         EquipListCodec::encode(&equip_list_from_typed_account(account)),
-    );
+    ));
     HandlerResult::Reply(Response::raw(
         method,
         encode_treasure_response(&pending, treasure_id),
@@ -2706,7 +2687,7 @@ mod tests {
             1,
         );
         let state = ServerState::new("compat-typed", "Captain", "test");
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
         let mut marry = Vec::new();
         append_varint_field(&mut marry, 1, 1);
         append_varint_field(&mut marry, 2, 1);
@@ -2718,7 +2699,7 @@ mod tests {
                 &marry,
                 None,
                 None,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::PushOnly
         ));
@@ -2734,7 +2715,7 @@ mod tests {
                 &marry,
                 None,
                 None,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::Error(_)
         ));
@@ -2759,7 +2740,7 @@ mod tests {
                 &gift,
                 Some(&affection_catalog),
                 None,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::Reply(_)
         ));
@@ -2790,7 +2771,7 @@ mod tests {
                 &cooldown,
                 None,
                 None,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::Reply(_)
         ));
@@ -2809,7 +2790,7 @@ mod tests {
                 &illustrate,
                 None,
                 None,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::Reply(_)
         ));
@@ -2832,7 +2813,7 @@ mod tests {
                 &behaviour,
                 None,
                 None,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::PushOnly
         ));
@@ -2842,12 +2823,6 @@ mod tests {
                 .progress
                 .get("compat:illustrate:7:behaviour:101"),
             Some(&1)
-        );
-        assert_eq!(
-            TMessageCodec::decode_response(pushes.last().unwrap())
-                .unwrap()
-                .method,
-            "illustrate.IllustrateInfo"
         );
 
         let mut equip_new = Vec::new();
@@ -2860,7 +2835,7 @@ mod tests {
                 &equip_new,
                 None,
                 None,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::Reply(_)
         ));
@@ -2882,7 +2857,7 @@ mod tests {
                 &vow_list,
                 None,
                 None,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::PushOnly
         ));
@@ -2917,7 +2892,7 @@ mod tests {
                 &relation,
                 None,
                 Some(&combination_catalog),
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::PushOnly
         ));
@@ -2931,7 +2906,7 @@ mod tests {
                 &level_up,
                 None,
                 Some(&combination_catalog),
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::PushOnly
         ));
@@ -2984,10 +2959,14 @@ mod tests {
                 &vow,
                 None,
                 None,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::Reply(_)
         ));
         assert_eq!(account.dock.heroes.len(), 3);
+        let (pre, _, _) = effects.into_parts();
+        assert!(pre
+            .iter()
+            .any(|response| response.method == "illustrate.IllustrateInfo"));
     }
 }
