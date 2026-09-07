@@ -1,22 +1,22 @@
 use blueoath_protocol::{
     ActivityCodeExchangeRequest, ActivityExchangeRewardRequest, ActivityExtractDrawRequest,
     ActivityFormulaRequest, ActivityItemIdRequest, ActivityRewardIndexRequest,
-    ActivitySelectShipRequest, ActivitySelectTeamRequest, BattleAutoMessageRequest,
+    ActivitySelectShipRequest, ActivitySelectTeamRequest, AlchemyRequest, BattleAutoMessageRequest,
     BigActivityRankRequest, BirthdayFeedRequest, BuildShipRequest, BuildShipRewardRequest,
     ChangeNameRequest, ChangeWorldChannelRequest, ChristmasBuyBlindBoxRequest,
     ChristmasBuyItemRequest, CoopChangeChapterRequest, CoopCreateRoomRequest, CoopKickRequest,
     CoopMatchTypeRequest, CoopPasswordRequest, CoopRoomHeroesRequest, CoopRoomIdRequest,
-    CopyAttackRequest, CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
-    DailyCopySelectExRequest, Decode, FashionPurchaseRequest, FriendSearchRequest,
-    FriendTargetRequest, GetBarrageByIdRequest, GuildActivityPresentRequest,
-    GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildCreateRequest, GuildIdRequest,
-    GuildListRequest, GuildModifyRequest, GuildOfferRequest, GuildSearchRequest,
+    CopyAttackRequest, CopyIdRequest, CopyPassRequest, CopyRecordRequest, CopyRewardCountRequest,
+    CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode,
+    FashionPurchaseRequest, FriendSearchRequest, FriendTargetRequest, GetBarrageByIdRequest,
+    GuildActivityPresentRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildCreateRequest,
+    GuildIdRequest, GuildListRequest, GuildModifyRequest, GuildOfferRequest, GuildSearchRequest,
     GuildTaskDonateRequest, GuildTaskIdRequest, GuildTaskMemberRequest, GuildWarBaseRequest,
     GuildWarScoreRequest, HeroAwakenFinishRequest, HeroAwakenRewardRequest, HeroChangeEquipRequest,
     InviteRecordVersionRequest, InviteStateTypeRequest, OutpostBuildingRequest,
     OutpostSetHeroRequest, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
     SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
-    SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest,
+    SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest, SignDayRequest,
     SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
     ValentineRewardRequest,
 };
@@ -412,6 +412,28 @@ fn decodes_typed_activity_requests() {
     assert_eq!(
         ValentineRewardRequest::decode(&[0x08, 2]).unwrap(),
         ValentineRewardRequest { index: 2 }
+    );
+    assert_eq!(
+        CopyRewardCountRequest::decode(&[0x08, 7, 0x10, 3]).unwrap(),
+        CopyRewardCountRequest {
+            chapter_id: 7,
+            reward_time: 3,
+        }
+    );
+    assert_eq!(
+        SignDayRequest::decode(&[0x08, 4]).unwrap(),
+        SignDayRequest { day: 4 }
+    );
+    assert_eq!(
+        AlchemyRequest::decode(&[0x08, 9, 0x10, 1, 0x10, 2]).unwrap(),
+        AlchemyRequest {
+            formula_id: 9,
+            equip_ids: vec![1, 2],
+        }
+    );
+    assert_eq!(
+        CopyIdRequest::decode(&[0x08, 12]).unwrap(),
+        CopyIdRequest { copy_id: 12 }
     );
 }
 

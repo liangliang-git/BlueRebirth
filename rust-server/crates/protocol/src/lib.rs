@@ -2566,6 +2566,63 @@ impl Decode for ValentineRewardRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CopyRewardCountRequest {
+    pub chapter_id: i32,
+    pub reward_time: i32,
+}
+
+impl Decode for CopyRewardCountRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let chapter_id = required_field(&fields, 1, "copy reward is missing chapter id")?;
+        let reward_time = optional_i32(&fields, 2, "copy reward has duplicate time")?;
+        if chapter_id <= 0 || reward_time < 0 {
+            return Err(ProtocolError::Invalid("copy reward request is invalid"));
+        }
+        Ok(Self {
+            chapter_id,
+            reward_time,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SignDayRequest {
+    pub day: i32,
+}
+
+impl Decode for SignDayRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            day: optional_i32(&fields, 1, "sign has duplicate day")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlchemyRequest {
+    pub formula_id: i32,
+    pub equip_ids: Vec<u64>,
+}
+
+impl Decode for AlchemyRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let formula_id = required_field(&fields, 1, "alchemy is missing formula")?;
+        let equip_ids = fields.get(&2).cloned().unwrap_or_default();
+        if formula_id <= 0 || equip_ids.is_empty() || equip_ids.contains(&0) || equip_ids.len() > 99
+        {
+            return Err(ProtocolError::Invalid("alchemy request is invalid"));
+        }
+        Ok(Self {
+            formula_id,
+            equip_ids,
+        })
+    }
+}
+
 impl Decode for GuildTaskDonateRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

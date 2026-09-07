@@ -23,11 +23,11 @@ pub(super) fn handle_typed(
 ) -> HandlerResult {
     match method {
         "copyextra.AddCopyRewardCount" => {
-            let chapter_id = decode_varint_field(request_args, 1);
-            let reward_time = decode_varint_field(request_args, 2).max(1);
-            if chapter_id <= 0 {
-                return invalid("copy reward count target is invalid");
-            }
+            let Ok(request) = CopyRewardCountRequest::decode(request_args) else {
+                return invalid("copy reward request is invalid");
+            };
+            let chapter_id = request.chapter_id;
+            let reward_time = request.reward_time.max(1);
             let key = format!("copyExtraRewardCount:{chapter_id}");
             let total = account.activities.progress.entry(key).or_default();
             *total = total.saturating_add(u64::try_from(reward_time).unwrap_or_default());
@@ -51,33 +51,33 @@ pub(super) fn handle_typed(
             reply(method, output)
         }
         "sign.Sign" => {
-            let day = decode_varint_field(request_args, 1).max(1);
+            let Ok(request) = SignDayRequest::decode(request_args) else {
+                return invalid("sign request is invalid");
+            };
+            let day = request.day.max(1);
             account.activities.progress.insert(format!("sign:{day}"), 1);
             HandlerResult::PushOnly
         }
         "alchemy.StartAlchemy" => {
-            let formula_id = decode_varint_field(request_args, 1);
-            let equip_ids = decode_repeated_varint_field(request_args, 2);
-            if formula_id <= 0
-                || equip_ids.is_empty()
-                || equip_ids.iter().any(|id| {
-                    *id <= 0
-                        || !account
-                            .dock
-                            .equipments
-                            .keys()
-                            .any(|equip_id| equip_id.get() == *id as u64)
-                })
-            {
+            let Ok(request) = AlchemyRequest::decode(request_args) else {
+                return invalid("alchemy request is invalid");
+            };
+            if request.equip_ids.iter().any(|id| {
+                !account
+                    .dock
+                    .equipments
+                    .keys()
+                    .any(|equip_id| equip_id.get() == *id)
+            }) {
                 return invalid("alchemy request is invalid");
             }
             HandlerResult::PushOnly
         }
         "archiveCopy.IsLoad" => {
-            let copy_id = decode_varint_field(request_args, 1);
-            if copy_id <= 0 {
+            let Ok(request) = CopyIdRequest::decode(request_args) else {
                 return invalid("archive copy id is invalid");
-            }
+            };
+            let copy_id = request.copy_id;
             account
                 .activities
                 .progress
