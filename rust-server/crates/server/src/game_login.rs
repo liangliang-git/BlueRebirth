@@ -1,4 +1,6 @@
-use blueoath_domain::{AccountState, ChapterId, CopyId, FleetId};
+use blueoath_domain::AccountState;
+#[cfg(test)]
+use blueoath_domain::{ChapterId, CopyId, FleetId};
 use blueoath_game::BattleService;
 use blueoath_protocol::*;
 use blueoath_transport::NetSocketFrameCodec;
@@ -2300,7 +2302,7 @@ pub(super) fn sync_typed_battle_state(
     );
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn sync_typed_battle_state_with_catalog(
     typed_account: Option<&mut AccountState>,
     legacy_account: Option<&Value>,
