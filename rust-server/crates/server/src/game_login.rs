@@ -1113,10 +1113,6 @@ where
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result
-                } else if typed_account.is_some() {
-                    HandlerResult::Error(GameError::InvalidRequest(
-                        "commerce request is not supported",
-                    ))
                 } else {
                     HandlerResult::Error(GameError::InvalidRequest(
                         "commerce request is not supported",

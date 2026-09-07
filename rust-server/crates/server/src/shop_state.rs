@@ -142,6 +142,7 @@ pub(super) fn append_shop_update_pushes(
     );
 }
 
+#[allow(dead_code)]
 pub(super) fn apply_shop_good(
     account: &mut Value,
     good: &ShopGood,
@@ -206,6 +207,7 @@ pub(super) fn apply_shop_good(
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn deduct_shop_costs(account: &mut Value, costs: &[ShopCost], buy_num: i32) -> bool {
     let buy_num = i64::from(buy_num.max(1));
     let mut totals = std::collections::BTreeMap::<(i32, i32), i64>::new();

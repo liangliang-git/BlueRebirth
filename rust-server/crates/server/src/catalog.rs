@@ -621,7 +621,6 @@ pub(super) struct GameplayCatalog {
 }
 
 pub(super) const MAX_SHOP_BUY_NUM: i32 = 99;
-pub(super) const MAX_SHOP_BATCH_SIZE: usize = 99;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct MailTemplate {

@@ -894,6 +894,7 @@ pub(super) fn hero_remould_state(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub(super) fn fashion_equip_state(
     account: &mut Value,
     catalog: Option<&FashionList>,
