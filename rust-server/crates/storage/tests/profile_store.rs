@@ -410,6 +410,20 @@ fn typed_repository_transaction_commits_domain_mutation() {
     account.sports_meet.points = 20;
     account.sports_meet.free_counts.insert(3001, 2);
     account.sports_meet.received_points.insert(20);
+    account.bathroom.is_all_auto = true;
+    account
+        .bathroom
+        .heroes
+        .push(blueoath_domain::BathroomHeroState {
+            hero_id: 10,
+            position: 2,
+            is_auto: true,
+            start_time: 100,
+            bath_time: 40,
+            buff_id: 7,
+            buff_time: 8,
+            power: 9,
+        });
     account.battle.active = Some(BattleSession {
         chapter_id: ChapterId::new(3).unwrap(),
         copy_id: CopyId::new(300).unwrap(),
@@ -488,6 +502,11 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(loaded.sports_meet.points, 20);
     assert_eq!(loaded.sports_meet.free_counts.get(&3001), Some(&2));
     assert!(loaded.sports_meet.received_points.contains(&20));
+    assert!(loaded.bathroom.is_all_auto);
+    assert_eq!(loaded.bathroom.heroes[0].hero_id, 10);
+    assert_eq!(loaded.bathroom.heroes[0].position, 2);
+    assert!(loaded.bathroom.heroes[0].is_auto);
+    assert_eq!(loaded.bathroom.heroes[0].buff_id, 7);
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())

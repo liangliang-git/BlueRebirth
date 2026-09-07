@@ -3,6 +3,208 @@ use serde_json::Value;
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
+use blueoath_domain::{AccountState, BathroomHeroState};
+
+pub(super) fn handle_bathroom_typed(
+    account: &mut AccountState,
+    method: &str,
+    request_args: &[u8],
+    now: u32,
+    mood_recovery_multiplier: f64,
+    post_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    let requested_hero_id = decode_varint_u64_field(request_args, 1);
+    let before = account
+        .bathroom
+        .heroes
+        .iter()
+        .find(|hero| hero.hero_id == requested_hero_id)
+        .cloned();
+
+    let response = match method {
+        "bathroom.GetBathroomInfo" => bathroom_info_payload_from_typed(account),
+        "bathroom.BathStart" => {
+            let position = decode_varint_u64_field(request_args, 2);
+            if requested_hero_id == 0
+                || !account
+                    .dock
+                    .heroes
+                    .contains_key(&hero_key(requested_hero_id))
+            {
+                return HandlerResult::Error(GameError::InvalidRequest("bathroom hero is invalid"));
+            }
+            start_bathroom_hero(
+                account,
+                requested_hero_id,
+                u32::try_from(position).unwrap_or(u32::MAX),
+                now,
+            );
+            bathroom_info_payload_from_typed(account)
+        }
+        "bathroom.BathEnd" | "bathroom.BathChangeHero" => {
+            account
+                .bathroom
+                .heroes
+                .retain(|hero| hero.hero_id != requested_hero_id);
+            if let Some(before) = before.as_ref() {
+                recover_typed_hero_mood(
+                    account,
+                    before.hero_id,
+                    before
+                        .bath_time
+                        .max(u64::from(now).saturating_sub(before.start_time)),
+                    mood_recovery_multiplier,
+                    now,
+                );
+            }
+            append_method_push(
+                post_pushes,
+                "hero.UpdateHeroBagData",
+                HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+            );
+            bathroom_end_payload(
+                requested_hero_id,
+                before.map(|hero| hero.bath_time).unwrap_or_default() as i64,
+            )
+        }
+        "bathroom.BathService" => {
+            let hero_id = requested_hero_id;
+            let hero = account
+                .bathroom
+                .heroes
+                .iter()
+                .find(|hero| hero.hero_id == hero_id);
+            bathroom_service_payload(
+                hero_id,
+                hero.map(|hero| i64::from(hero.position))
+                    .unwrap_or_default(),
+                hero.map(|hero| hero.bath_time as i64).unwrap_or_default(),
+            )
+        }
+        "bathroom.BathAuto" => {
+            let is_auto = decode_varint_u64_field(request_args, 2) != 0;
+            if let Some(hero) = account
+                .bathroom
+                .heroes
+                .iter_mut()
+                .find(|hero| hero.hero_id == requested_hero_id)
+            {
+                hero.is_auto = is_auto;
+            }
+            Vec::new()
+        }
+        "bathroom.BathAllAuto" => {
+            account.bathroom.is_all_auto = requested_hero_id != 0;
+            Vec::new()
+        }
+        "bathroom.BathStartAll" => {
+            let mut output = Vec::new();
+            for nested in decode_repeated_message_field(request_args, 1) {
+                let hero_id = decode_varint_u64_field(&nested, 1);
+                let position = decode_varint_u64_field(&nested, 2);
+                if hero_id == 0 {
+                    continue;
+                }
+                start_bathroom_hero(
+                    account,
+                    hero_id,
+                    u32::try_from(position).unwrap_or(u32::MAX),
+                    now,
+                );
+                append_message_field(
+                    &mut output,
+                    1,
+                    &bathroom_end_payload(
+                        hero_id,
+                        account
+                            .bathroom
+                            .heroes
+                            .iter()
+                            .find(|hero| hero.hero_id == hero_id)
+                            .map(|hero| hero.bath_time as i64)
+                            .unwrap_or_default(),
+                    ),
+                );
+            }
+            output
+        }
+        _ => return HandlerResult::Empty,
+    };
+
+    append_method_push(
+        post_pushes,
+        "bathroom.BathroomInfo",
+        bathroom_info_payload_from_typed(account),
+    );
+    HandlerResult::Reply(Response::raw(method, response))
+}
+
+fn hero_key(value: u64) -> blueoath_domain::HeroId {
+    blueoath_domain::HeroId::new(value).expect("validated positive hero id")
+}
+
+fn start_bathroom_hero(account: &mut AccountState, hero_id: u64, position: u32, now: u32) {
+    account
+        .bathroom
+        .heroes
+        .retain(|hero| hero.hero_id != hero_id);
+    account.bathroom.heroes.push(BathroomHeroState {
+        hero_id,
+        position,
+        start_time: u64::from(now),
+        ..BathroomHeroState::default()
+    });
+}
+
+fn recover_typed_hero_mood(
+    account: &mut AccountState,
+    hero_id: u64,
+    bath_seconds: u64,
+    multiplier: f64,
+    now: u32,
+) {
+    let Some(hero) = account.dock.heroes.get_mut(&hero_key(hero_id)) else {
+        return;
+    };
+    let intervals = i64::try_from(bath_seconds).unwrap_or(i64::MAX) / MOOD_BATH_INTERVAL_SECONDS;
+    let base = if intervals > 0 {
+        i64::from(MOOD_BATH_INTERVAL_RECOVERY)
+            .saturating_mul(intervals)
+            .min(i64::from(MOOD_BATH_RECOVERY))
+    } else {
+        i64::from(MOOD_BATH_RECOVERY)
+    };
+    let recovery = scale_reward(base, multiplier);
+    hero.mood = hero
+        .mood
+        .saturating_add(u32::try_from(recovery.max(0)).unwrap_or(u32::MAX))
+        .min(MOOD_MAX as u32);
+    let _ = now;
+}
+
+fn bathroom_info_payload_from_typed(account: &AccountState) -> Vec<u8> {
+    let mut output = Vec::new();
+    if account.bathroom.heroes.is_empty() {
+        output.extend_from_slice(&[0x0A, 0x00]);
+    } else {
+        for hero in &account.bathroom.heroes {
+            let mut encoded = Vec::new();
+            append_varint_field(&mut encoded, 1, hero.hero_id);
+            append_varint_field(&mut encoded, 2, u64::from(hero.position));
+            append_varint_field(&mut encoded, 3, u64::from(hero.is_auto));
+            append_varint_field(&mut encoded, 4, hero.start_time);
+            append_varint_field(&mut encoded, 5, hero.bath_time);
+            append_varint_field(&mut encoded, 6, u64::from(hero.buff_id));
+            append_varint_field(&mut encoded, 7, hero.buff_time);
+            append_varint_field(&mut encoded, 8, u64::from(hero.power));
+            append_message_field(&mut output, 1, &encoded);
+        }
+    }
+    if account.bathroom.is_all_auto {
+        append_varint_field(&mut output, 2, 1);
+    }
+    output
+}
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
@@ -564,5 +766,61 @@ fn handle_legacy<'state, 'account, 'scratch>(
             Some(Vec::new())
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod typed_tests {
+    use super::*;
+
+    #[test]
+    fn typed_bathroom_start_and_end_update_domain_state() {
+        let hero_id = blueoath_domain::HeroId::new(9).unwrap();
+        let mut account = AccountState::default();
+        account.dock.heroes.insert(
+            hero_id,
+            blueoath_domain::HeroState {
+                id: hero_id,
+                template_id: blueoath_domain::TemplateId::new(100).unwrap(),
+                name: String::new(),
+                change_name_time: 0,
+                level: 1,
+                exp: 0,
+                mood: 0,
+                affection: 0,
+                hp: 100,
+                locked: false,
+                equip_slots: Vec::new(),
+            },
+        );
+        let mut start = Vec::new();
+        append_varint_field(&mut start, 1, 9);
+        append_varint_field(&mut start, 2, 3);
+        let mut pushes = Vec::new();
+        let result = handle_bathroom_typed(
+            &mut account,
+            "bathroom.BathStart",
+            &start,
+            100,
+            1.0,
+            &mut pushes,
+        );
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert_eq!(account.bathroom.heroes[0].position, 3);
+
+        let mut end = Vec::new();
+        append_varint_field(&mut end, 1, 9);
+        let result = handle_bathroom_typed(
+            &mut account,
+            "bathroom.BathEnd",
+            &end,
+            100,
+            1.0,
+            &mut pushes,
+        );
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert!(account.bathroom.heroes.is_empty());
+        assert_eq!(account.dock.heroes[&hero_id].mood, 300_000);
+        assert_eq!(pushes.len(), 3);
     }
 }

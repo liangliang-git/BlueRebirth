@@ -1300,14 +1300,25 @@ where
             || method.is_family(MethodFamily::Bathroom) =>
         {
             let typed_result = typed_account.as_mut().map(|typed| {
-                task_handler::handle_typed(
-                    typed,
-                    state,
-                    request.method.as_str(),
-                    request_args,
-                    task_catalog,
-                    &mut post_pushes,
-                )
+                if method.is_family(MethodFamily::Bathroom) {
+                    progression_handler::handle_bathroom_typed(
+                        typed,
+                        request.method.as_str(),
+                        request_args,
+                        current_unix_seconds(),
+                        state.mood_recovery_multiplier,
+                        &mut post_pushes,
+                    )
+                } else {
+                    task_handler::handle_typed(
+                        typed,
+                        state,
+                        request.method.as_str(),
+                        request_args,
+                        task_catalog,
+                        &mut post_pushes,
+                    )
+                }
             });
             if let Some(result @ (HandlerResult::Reply(_) | HandlerResult::Error(_))) = typed_result
             {
@@ -2386,7 +2397,6 @@ fn legacy_only_method(method: &str) -> bool {
             | MethodFamily::MatchServer
             | MethodFamily::Room
             | MethodFamily::ShipTask
-            | MethodFamily::Bathroom
             | MethodFamily::Battle
             | MethodFamily::BattlePass
             | MethodFamily::Copy

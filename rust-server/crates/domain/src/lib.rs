@@ -385,6 +385,24 @@ pub struct SportsMeetState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BathroomHeroState {
+    pub hero_id: u64,
+    pub position: u32,
+    pub is_auto: bool,
+    pub start_time: u64,
+    pub bath_time: u64,
+    pub buff_id: u32,
+    pub buff_time: u64,
+    pub power: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BathroomState {
+    pub heroes: Vec<BathroomHeroState>,
+    pub is_all_auto: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TowerRewardState {
     pub reward_type: u32,
     pub config_id: u64,
@@ -489,6 +507,8 @@ pub struct AccountState {
     pub talents: TalentState,
     #[serde(default)]
     pub sports_meet: SportsMeetState,
+    #[serde(default)]
+    pub bathroom: BathroomState,
     #[serde(default)]
     pub tower: TowerState,
     #[serde(default)]

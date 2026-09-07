@@ -1,9 +1,9 @@
 use blueoath_domain::{
-    AccountRepository, AccountState, ActivityTowerState, ChapterId, CharacterState,
-    ChatBarrageState, ChatMessageState, ConstructionJobState, ConstructionProjectState, CopyId,
-    CurrencyKind, EquipId, EquipmentState, FleetId, FleetRecord, HeroId, HeroState,
-    NewAccountFactory, PresetFleetState, ProfileId, ProfileState, RepositoryError, TemplateId,
-    TowerRewardState,
+    AccountRepository, AccountState, ActivityTowerState, BathroomHeroState, ChapterId,
+    CharacterState, ChatBarrageState, ChatMessageState, ConstructionJobState,
+    ConstructionProjectState, CopyId, CurrencyKind, EquipId, EquipmentState, FleetId, FleetRecord,
+    HeroId, HeroState, NewAccountFactory, PresetFleetState, ProfileId, ProfileState,
+    RepositoryError, TemplateId, TowerRewardState,
 };
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -968,6 +968,61 @@ impl ProfileStore {
                     }
                     _ => {}
                 }
+            } else if activity_id == "bathroom" {
+                if progress_kind == "isAllAuto" {
+                    account.bathroom.is_all_auto = value != 0;
+                } else if let Some((hero_id, field)) = progress_kind
+                    .strip_prefix("hero:")
+                    .and_then(|value| value.split_once(':'))
+                    .and_then(|(id, field)| id.parse().ok().map(|id| (id, field)))
+                {
+                    let hero = account
+                        .bathroom
+                        .heroes
+                        .iter_mut()
+                        .find(|hero| hero.hero_id == hero_id);
+                    let hero = if let Some(hero) = hero {
+                        hero
+                    } else {
+                        account.bathroom.heroes.push(BathroomHeroState {
+                            hero_id,
+                            ..BathroomHeroState::default()
+                        });
+                        account
+                            .bathroom
+                            .heroes
+                            .last_mut()
+                            .expect("pushed bathroom hero")
+                    };
+                    match field {
+                        "position" => {
+                            hero.position = u32::try_from(value).map_err(|_| {
+                                StorageError::InvalidTypedAccount(
+                                    "bathroom position is too large".to_owned(),
+                                )
+                            })?
+                        }
+                        "isAuto" => hero.is_auto = value != 0,
+                        "startTime" => hero.start_time = value,
+                        "bathTime" => hero.bath_time = value,
+                        "buffId" => {
+                            hero.buff_id = u32::try_from(value).map_err(|_| {
+                                StorageError::InvalidTypedAccount(
+                                    "bathroom buff id is too large".to_owned(),
+                                )
+                            })?
+                        }
+                        "buffTime" => hero.buff_time = value,
+                        "power" => {
+                            hero.power = u32::try_from(value).map_err(|_| {
+                                StorageError::InvalidTypedAccount(
+                                    "bathroom power is too large".to_owned(),
+                                )
+                            })?
+                        }
+                        _ => {}
+                    }
+                }
             } else {
                 account
                     .activities
@@ -1904,6 +1959,35 @@ impl ProfileStore {
                     profile.id.as_str(),
                     progress_kind,
                     typed_i64(value, "sports meet state")?,
+                    timestamp(),
+                ],
+            )?;
+        }
+        let mut bathroom_progress = vec![(
+            "isAllAuto".to_owned(),
+            u64::from(account.bathroom.is_all_auto),
+        )];
+        for hero in &account.bathroom.heroes {
+            let prefix = format!("hero:{}:", hero.hero_id);
+            bathroom_progress.extend([
+                (format!("{prefix}position"), u64::from(hero.position)),
+                (format!("{prefix}isAuto"), u64::from(hero.is_auto)),
+                (format!("{prefix}startTime"), hero.start_time),
+                (format!("{prefix}bathTime"), hero.bath_time),
+                (format!("{prefix}buffId"), u64::from(hero.buff_id)),
+                (format!("{prefix}buffTime"), hero.buff_time),
+                (format!("{prefix}power"), u64::from(hero.power)),
+            ]);
+        }
+        for (progress_kind, value) in bathroom_progress {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'bathroom', ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    progress_kind,
+                    typed_i64(value, "bathroom state")?,
                     timestamp(),
                 ],
             )?;
