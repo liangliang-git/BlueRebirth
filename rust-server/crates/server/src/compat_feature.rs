@@ -20,8 +20,8 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     request_args: &[u8],
 ) -> HandlerResult {
     let payload = handle_legacy(context, method, request_args);
-    if *context.response_err != 0 {
-        HandlerResult::Error(GameError::Internal(context.response_err_msg.clone()))
+    if let Some(error) = context.handler_error.clone() {
+        HandlerResult::Error(error)
     } else {
         match payload {
             Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
@@ -48,8 +48,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
         ..
     } = context.catalogs;
     let pre_pushes = &mut *context.pre_pushes;
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
+    let handler_error = &mut *context.handler_error;
 
     match method {
         "cachedata.CacheData" => Some(cache_data_payload()),
@@ -64,16 +63,18 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .filter(|(item_id, count)| *item_id > 0 && *count > 0)
                 .collect::<Vec<_>>();
             if items.is_empty() {
-                *response_err = 1;
-                *response_err_msg = "wish cooldown item list is empty".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "wish cooldown item list is empty".to_owned(),
+                ));
                 Some(Vec::new())
             } else if let Some(account) = account.as_deref_mut() {
                 if items
                     .iter()
                     .any(|(item_id, count)| bag_item_count(account, *item_id) < i64::from(*count))
                 {
-                    *response_err = 1;
-                    *response_err_msg = "not enough wish cooldown items".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "not enough wish cooldown items".to_owned(),
+                    ));
                     Some(Vec::new())
                 } else {
                     for (item_id, count) in items {
@@ -90,8 +91,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     Some(ret)
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -99,13 +99,13 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let hero_id = decode_varint_u64_field(request_args, 1);
             let marry_type = decode_varint_field(request_args, 2);
             let Some(account) = account.as_deref_mut() else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 return Some(Vec::new());
             };
             if hero_id == 0 || !(1..=2).contains(&marry_type) {
-                *response_err = 1;
-                *response_err_msg = "marriage request is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "marriage request is invalid".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             let Some(hero) = account
@@ -116,24 +116,20 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .flatten()
                 .find(|hero| json_u64(hero, "heroId") == Some(hero_id))
             else {
-                *response_err = 1;
-                *response_err_msg = "hero was not found".to_owned();
+                *handler_error = Some(GameError::Internal("hero was not found".to_owned()));
                 return Some(Vec::new());
             };
             if json_i64(hero, "marryTime").unwrap_or_default() != 0 {
-                *response_err = 1;
-                *response_err_msg = "hero is already married".to_owned();
+                *handler_error = Some(GameError::Internal("hero is already married".to_owned()));
                 return Some(Vec::new());
             }
             if bag_item_count(account, OATH_RING_TEMPLATE) < 1 {
-                *response_err = 1;
-                *response_err_msg = "oath ring is missing".to_owned();
+                *handler_error = Some(GameError::Internal("oath ring is missing".to_owned()));
                 return Some(Vec::new());
             }
             let now = current_unix_seconds();
             let Some(hero) = find_hero_mut(account, hero_id) else {
-                *response_err = 1;
-                *response_err_msg = "hero was not found".to_owned();
+                *handler_error = Some(GameError::Internal("hero was not found".to_owned()));
                 return Some(Vec::new());
             };
             hero.insert("marryTime".to_owned(), json!(now));
@@ -162,13 +158,13 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .copied()
                 .filter(|exp| *exp > 0)
             else {
-                *response_err = 1;
-                *response_err_msg = "affection item configuration was not found".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "affection item configuration was not found".to_owned(),
+                ));
                 return Some(Vec::new());
             };
             let Some(account) = account.as_deref_mut() else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 return Some(Vec::new());
             };
             let Some(hero) = account
@@ -179,8 +175,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .flatten()
                 .find(|hero| json_u64(hero, "heroId") == Some(hero_id))
             else {
-                *response_err = 1;
-                *response_err_msg = "hero was not found".to_owned();
+                *handler_error = Some(GameError::Internal("hero was not found".to_owned()));
                 return Some(Vec::new());
             };
             let current = json_i64(hero, "affection").unwrap_or_default().max(0);
@@ -194,8 +189,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .min(bag_item_count(account, item_id))
                 .min((room + i64::from(exp_per_item) - 1) / i64::from(exp_per_item));
             if count <= 0 {
-                *response_err = 1;
-                *response_err_msg = "affection gift cannot be used".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "affection gift cannot be used".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             let gained = count.saturating_mul(i64::from(exp_per_item)).min(room);
@@ -222,8 +218,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .map(|id| id as u64)
                 .collect::<std::collections::BTreeSet<_>>();
             let Some(account) = account.as_deref_mut() else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 return Some(Vec::new());
             };
             let total_cost = hero_ids
@@ -257,8 +252,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 })
                 .sum::<i64>();
             if character_i64(account, "gold") < total_cost {
-                *response_err = 1;
-                *response_err_msg = "not enough gold to repair heroes".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "not enough gold to repair heroes".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             adjust_character_i64(account, "gold", -total_cost);
@@ -291,13 +287,11 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .find(|id| *id > 0)
                 .unwrap_or_default();
             let Some(account) = account.as_deref_mut() else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 return Some(Vec::new());
             };
             if ship_info_id == 0 {
-                *response_err = 1;
-                *response_err_msg = "wish hero is invalid".to_owned();
+                *handler_error = Some(GameError::Internal("wish hero is invalid".to_owned()));
                 return Some(Vec::new());
             }
             let template_id = ship_info_id.saturating_mul(10).saturating_add(1);
@@ -320,15 +314,10 @@ fn handle_legacy<'state, 'account, 'scratch>(
             request_args,
             pre_pushes,
             handbook_behaviours,
-            response_err,
-            response_err_msg,
+            handler_error,
         ),
-        "illustrate.IllustrateNew" => {
-            illustrate_new(account, request_args, response_err, response_err_msg)
-        }
-        "illustrate.EquipNew" => {
-            illustrate_equip_new(account, request_args, response_err, response_err_msg)
-        }
+        "illustrate.IllustrateNew" => illustrate_new(account, request_args, handler_error),
+        "illustrate.EquipNew" => illustrate_equip_new(account, request_args, handler_error),
         "illustrate.ModiVowHeroList" => {
             modify_vow_hero_list(account, request_args, pre_pushes, handbook_behaviours)
         }
@@ -337,8 +326,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
             request_args,
             &mut TreasureContext {
                 pre_pushes,
-                response_err,
-                response_err_msg,
+                handler_error,
                 fashion_catalog,
                 equip_catalog,
             },
@@ -348,8 +336,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
             request_args,
             &mut TreasureContext {
                 pre_pushes,
-                response_err,
-                response_err_msg,
+                handler_error,
                 fashion_catalog,
                 equip_catalog,
             },
@@ -363,8 +350,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
             fashion_catalog,
             equip_catalog,
             pre_pushes,
-            response_err,
-            response_err_msg,
+            handler_error,
         ),
         "copy.PassMiniGame" => pass_mini_game(
             fashion_catalog,
@@ -373,8 +359,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
             chapter_catalog,
             context.catalogs.battle,
             pre_pushes,
-            response_err,
-            response_err_msg,
+            handler_error,
         ),
         "copy.FetchRewardBox" => claim_copy_star_reward(
             state,
@@ -385,16 +370,14 @@ fn handle_legacy<'state, 'account, 'scratch>(
             fashion_catalog,
             equip_catalog,
             pre_pushes,
-            response_err,
-            response_err_msg,
+            handler_error,
         ),
         "hero.HeroCombine" => combine_hero_relation(
             account,
             request_args,
             combination_catalog,
             pre_pushes,
-            response_err,
-            response_err_msg,
+            handler_error,
         ),
         "hero.HeroCombineUpLv" => upgrade_combination(
             account,
@@ -402,8 +385,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
             combination_catalog,
             false,
             pre_pushes,
-            response_err,
-            response_err_msg,
+            handler_error,
         ),
         "hero.HeroCombineQuickLevelUp" => upgrade_combination(
             account,
@@ -411,16 +393,14 @@ fn handle_legacy<'state, 'account, 'scratch>(
             combination_catalog,
             true,
             pre_pushes,
-            response_err,
-            response_err_msg,
+            handler_error,
         ),
         "hero.HeroCombineBreak" => break_combination(
             account,
             request_args,
             combination_catalog,
             pre_pushes,
-            response_err,
-            response_err_msg,
+            handler_error,
         ),
         "fashion.fashionReplaceReward" => Some(fashion_replace_reward_payload(
             account.as_deref().unwrap_or(&Value::Null),
@@ -428,8 +408,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
         "copy.DotBase" | "copyinfo.DotBase" => {
             let copy_id = decode_varint_field(request_args, 1);
             if copy_id <= 0 {
-                *response_err = 1;
-                *response_err_msg = "copy id is invalid".to_owned();
+                *handler_error = Some(GameError::Internal("copy id is invalid".to_owned()));
                 return Some(Vec::new());
             }
             if let Some(account) = account.as_deref_mut() {
@@ -447,13 +426,13 @@ fn handle_legacy<'state, 'account, 'scratch>(
         "task.GetPtReward" => {
             let reward_id = decode_varint_field(request_args, 1);
             let Some(account) = account.as_deref_mut() else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 return Some(Vec::new());
             };
             let Some(catalog) = task_catalog else {
-                *response_err = 1;
-                *response_err_msg = "teaching reward catalog is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "teaching reward catalog is unavailable".to_owned(),
+                ));
                 return Some(Vec::new());
             };
             let already_claimed = account
@@ -465,13 +444,15 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         .any(|id| id.as_i64() == Some(i64::from(reward_id)))
                 });
             let Some(configured_reward_id) = catalog.teaching_rewards_by_id.get(&reward_id) else {
-                *response_err = 1;
-                *response_err_msg = "teaching reward does not exist".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "teaching reward does not exist".to_owned(),
+                ));
                 return Some(Vec::new());
             };
             if already_claimed {
-                *response_err = 1;
-                *response_err_msg = "teaching reward was already claimed".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "teaching reward was already claimed".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             let configured = catalog
@@ -488,8 +469,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 })
                 .collect::<Vec<_>>();
             if configured.is_empty() {
-                *response_err = 1;
-                *response_err_msg = "teaching reward is not configured".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "teaching reward is not configured".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             let now = current_unix_seconds();
@@ -502,8 +484,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .and_then(|root| root.get_mut("tasks"))
                 .and_then(Value::as_object_mut);
             let Some(tasks) = tasks else {
-                *response_err = 1;
-                *response_err_msg = "task state is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("task state is unavailable".to_owned()));
                 return Some(Vec::new());
             };
             let ids = tasks
@@ -537,35 +518,34 @@ pub(crate) fn pass_mini_game(
     chapter_catalog: Option<&ChapterCatalog>,
     battle_catalog: Option<&BattleCatalog>,
     pre_pushes: &mut Vec<Vec<u8>>,
-    response_err: &mut i32,
-    response_err_msg: &mut String,
+    handler_error: &mut Option<GameError>,
 ) -> Option<Vec<u8>> {
     // JP MiniGameLimit sends TPASSBASEARG, not the old TTestPassArg range:
     // BaseId=1, IsFinishMission=19, BattleTime=12, BattleType=15.
     let copy_id = decode_varint_field(request_args, 1);
     if copy_id <= 0 {
-        *response_err = 1;
-        *response_err_msg = "mini-game copy id is invalid".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "mini-game copy id is invalid".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let is_finish = decode_varint_field(request_args, 19) != 0;
     if !is_finish {
-        *response_err = 1;
-        *response_err_msg = "mini-game was not finished".to_owned();
+        *handler_error = Some(GameError::Internal("mini-game was not finished".to_owned()));
         return Some(Vec::new());
     }
     if let Some(catalog) = battle_catalog {
         if !catalog.copies.contains_key(&copy_id)
             && !chapter_catalog.is_some_and(|chapters| chapters.mini_game_ids.contains(&copy_id))
         {
-            *response_err = 1;
-            *response_err_msg = "mini-game copy is not configured".to_owned();
+            *handler_error = Some(GameError::Internal(
+                "mini-game copy is not configured".to_owned(),
+            ));
             return Some(Vec::new());
         }
     }
     let Some(account) = account.as_deref_mut() else {
-        *response_err = 1;
-        *response_err_msg = "account is unavailable".to_owned();
+        *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
         return Some(Vec::new());
     };
     let first_pass = !battle_copy_passed(account, copy_id);
@@ -619,19 +599,18 @@ fn combine_hero_relation(
     request_args: &[u8],
     combination_catalog: Option<&CombinationCatalog>,
     pre_pushes: &mut Vec<Vec<u8>>,
-    response_err: &mut i32,
-    response_err_msg: &mut String,
+    handler_error: &mut Option<GameError>,
 ) -> Option<Vec<u8>> {
     let main_id = decode_varint_u64_field(request_args, 1);
     let deputy_id = decode_varint_u64_field(request_args, 2);
     if main_id == 0 || main_id == deputy_id {
-        *response_err = 1;
-        *response_err_msg = "hero combination relation is invalid".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "hero combination relation is invalid".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let Some(account) = account.as_deref_mut() else {
-        *response_err = 1;
-        *response_err_msg = "account is unavailable".to_owned();
+        *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
         return Some(Vec::new());
     };
     let has_hero = |id| {
@@ -646,8 +625,9 @@ fn combine_hero_relation(
             })
     };
     if !has_hero(main_id) || (deputy_id > 0 && !has_hero(deputy_id)) {
-        *response_err = 1;
-        *response_err_msg = "hero combination member was not found".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "hero combination member was not found".to_owned(),
+        ));
         return Some(Vec::new());
     }
     if deputy_id > 0 {
@@ -666,8 +646,9 @@ fn combine_hero_relation(
                 })
         };
         if !open(main_id) || !open(deputy_id) {
-            *response_err = 1;
-            *response_err_msg = "hero combination is not open for this ship".to_owned();
+            *handler_error = Some(GameError::Internal(
+                "hero combination is not open for this ship".to_owned(),
+            ));
             return Some(Vec::new());
         }
     }
@@ -693,8 +674,9 @@ fn combine_hero_relation(
                 .and_then(|info| json_u64(info, "beCombined"))
                 .is_some_and(|id| id > 0 && id != main_id))
     {
-        *response_err = 1;
-        *response_err_msg = "hero is already in another combination".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "hero is already in another combination".to_owned(),
+        ));
         return Some(Vec::new());
     }
     if let Some(old_deputy_id) = current_deputy.filter(|id| *id > 0) {
@@ -771,18 +753,17 @@ fn upgrade_combination(
     combination_catalog: Option<&CombinationCatalog>,
     quick: bool,
     pre_pushes: &mut Vec<Vec<u8>>,
-    response_err: &mut i32,
-    response_err_msg: &mut String,
+    handler_error: &mut Option<GameError>,
 ) -> Option<Vec<u8>> {
     let hero_id = decode_varint_u64_field(request_args, 1);
     let Some(catalog) = combination_catalog else {
-        *response_err = 1;
-        *response_err_msg = "hero combination catalog is unavailable".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "hero combination catalog is unavailable".to_owned(),
+        ));
         return Some(Vec::new());
     };
     let Some(account) = account.as_deref_mut() else {
-        *response_err = 1;
-        *response_err_msg = "account is unavailable".to_owned();
+        *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
         return Some(Vec::new());
     };
     let mut current_level = account
@@ -796,8 +777,9 @@ fn upgrade_combination(
         .and_then(|info| json_i32(info, "comLv").or_else(|| json_i32(info, "ComLv")))
         .unwrap_or_default();
     if hero_id == 0 || current_level >= 100 {
-        *response_err = 1;
-        *response_err_msg = "hero combination level is already maxed".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "hero combination level is already maxed".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let mut changed = 0;
@@ -816,8 +798,9 @@ fn upgrade_combination(
         changed += 1;
     }
     if changed == 0 {
-        *response_err = 1;
-        *response_err_msg = "hero combination level-up cost is insufficient".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "hero combination level-up cost is insufficient".to_owned(),
+        ));
         return Some(Vec::new());
     }
     if let Some(hero) = find_hero_mut(account, hero_id) {
@@ -842,18 +825,17 @@ fn break_combination(
     request_args: &[u8],
     combination_catalog: Option<&CombinationCatalog>,
     pre_pushes: &mut Vec<Vec<u8>>,
-    response_err: &mut i32,
-    response_err_msg: &mut String,
+    handler_error: &mut Option<GameError>,
 ) -> Option<Vec<u8>> {
     let hero_id = decode_varint_u64_field(request_args, 1);
     let Some(catalog) = combination_catalog else {
-        *response_err = 1;
-        *response_err_msg = "hero combination catalog is unavailable".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "hero combination catalog is unavailable".to_owned(),
+        ));
         return Some(Vec::new());
     };
     let Some(account) = account.as_deref_mut() else {
-        *response_err = 1;
-        *response_err_msg = "account is unavailable".to_owned();
+        *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
         return Some(Vec::new());
     };
     let (level, grade) = account
@@ -879,18 +861,21 @@ fn break_combination(
         combination_rule_for(account, hero_id, catalog, level)
             .map(|rule| (rule.break_costs.clone(), rule.level_end, rule.next_id))
     else {
-        *response_err = 1;
-        *response_err_msg = "hero combination break configuration was not found".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "hero combination break configuration was not found".to_owned(),
+        ));
         return Some(Vec::new());
     };
     let Some(next_star) = catalog.rules_by_id.get(&next_id).map(|rule| rule.star) else {
-        *response_err = 1;
-        *response_err_msg = "hero combination is already at final stage".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "hero combination is already at final stage".to_owned(),
+        ));
         return Some(Vec::new());
     };
     if level < level_end || grade >= next_star || !costs_available(account, &break_costs) {
-        *response_err = 1;
-        *response_err_msg = "hero combination break requirement is not met".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "hero combination break requirement is not met".to_owned(),
+        ));
         return Some(Vec::new());
     }
     consume_costs(account, &break_costs);
@@ -943,18 +928,17 @@ fn add_illustrate_behaviour(
     request_args: &[u8],
     pre_pushes: &mut Vec<Vec<u8>>,
     handbook_behaviours: Option<&[i32]>,
-    response_err: &mut i32,
-    response_err_msg: &mut String,
+    handler_error: &mut Option<GameError>,
 ) -> Option<Vec<u8>> {
     let incoming = decode_repeated_message_field(request_args, 1);
     let Some(account) = account.as_deref_mut() else {
-        *response_err = 1;
-        *response_err_msg = "account is unavailable".to_owned();
+        *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
         return Some(Vec::new());
     };
     if incoming.is_empty() {
-        *response_err = 1;
-        *response_err_msg = "illustrate behaviour request is invalid".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "illustrate behaviour request is invalid".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let root = account.as_object_mut().expect("account must be an object");
@@ -996,8 +980,9 @@ fn add_illustrate_behaviour(
         updated.push((illustrate_id, behaviours));
     }
     if updated.is_empty() {
-        *response_err = 1;
-        *response_err_msg = "illustrate behaviour request is invalid".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "illustrate behaviour request is invalid".to_owned(),
+        ));
         return Some(Vec::new());
     }
     append_method_push(
@@ -1055,8 +1040,7 @@ fn claim_copy_star_reward(
     fashion_catalog: Option<&FashionList>,
     equip_catalog: Option<&EquipCatalog>,
     pre_pushes: &mut Vec<Vec<u8>>,
-    response_err: &mut i32,
-    response_err_msg: &mut String,
+    handler_error: &mut Option<GameError>,
 ) -> Option<Vec<u8>> {
     let chapter_id = decode_varint_field(request_args, 1);
     let mut indexes = decode_repeated_varint_field(request_args, 3)
@@ -1072,23 +1056,25 @@ fn claim_copy_star_reward(
     let Some(chapter_rewards) =
         chapter_catalog.and_then(|catalog| catalog.star_rewards_by_chapter.get(&chapter_id))
     else {
-        *response_err = 1;
-        *response_err_msg = "copy star reward chapter was not found".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "copy star reward chapter was not found".to_owned(),
+        ));
         return Some(Vec::new());
     };
     let Some(task_catalog) = task_catalog else {
-        *response_err = 1;
-        *response_err_msg = "copy reward catalog is unavailable".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "copy reward catalog is unavailable".to_owned(),
+        ));
         return Some(Vec::new());
     };
     let Some(account) = account.as_deref_mut() else {
-        *response_err = 1;
-        *response_err_msg = "account is unavailable".to_owned();
+        *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
         return Some(Vec::new());
     };
     if chapter_id <= 0 || indexes.is_empty() {
-        *response_err = 1;
-        *response_err_msg = "copy star reward request is invalid".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "copy star reward request is invalid".to_owned(),
+        ));
         return Some(Vec::new());
     }
 
@@ -1119,23 +1105,27 @@ fn claim_copy_star_reward(
     let mut pending_reward_ids = Vec::new();
     for index in indexes {
         let Some(position) = usize::try_from(index.saturating_sub(1)).ok() else {
-            *response_err = 1;
-            *response_err_msg = "copy star reward index is invalid".to_owned();
+            *handler_error = Some(GameError::Internal(
+                "copy star reward index is invalid".to_owned(),
+            ));
             return Some(Vec::new());
         };
         let Some(required_stars) = chapter_rewards.star_conditions.get(position).copied() else {
-            *response_err = 1;
-            *response_err_msg = "copy star reward index is invalid".to_owned();
+            *handler_error = Some(GameError::Internal(
+                "copy star reward index is invalid".to_owned(),
+            ));
             return Some(Vec::new());
         };
         let Some(reward_id) = chapter_rewards.reward_ids.get(position).copied() else {
-            *response_err = 1;
-            *response_err_msg = "copy star reward is not configured".to_owned();
+            *handler_error = Some(GameError::Internal(
+                "copy star reward is not configured".to_owned(),
+            ));
             return Some(Vec::new());
         };
         if star_num < required_stars {
-            *response_err = 1;
-            *response_err_msg = "copy star requirement is not met".to_owned();
+            *handler_error = Some(GameError::Internal(
+                "copy star requirement is not met".to_owned(),
+            ));
             return Some(Vec::new());
         }
         let already_claimed = claimed.iter().any(|value| {
@@ -1144,8 +1134,9 @@ fn claim_copy_star_reward(
                 || value.as_str() == Some(&format!("{chapter_id}:{index}"))
         });
         if already_claimed || !pending_keys.insert(index) {
-            *response_err = 1;
-            *response_err_msg = "copy star reward was already claimed".to_owned();
+            *handler_error = Some(GameError::Internal(
+                "copy star reward was already claimed".to_owned(),
+            ));
             return Some(Vec::new());
         }
         if task_catalog
@@ -1153,8 +1144,9 @@ fn claim_copy_star_reward(
             .get(&reward_id)
             .is_none_or(Vec::is_empty)
         {
-            *response_err = 1;
-            *response_err_msg = "copy star reward is not configured".to_owned();
+            *handler_error = Some(GameError::Internal(
+                "copy star reward is not configured".to_owned(),
+            ));
             return Some(Vec::new());
         }
         pending_reward_ids.push((index, reward_id));
@@ -1218,8 +1210,9 @@ fn open_normal_treasure(
     let open_num = decode_varint_field(request_args, 2);
     let catalog = BUILD_SHIP_CATALOG.get_or_init(BuildShipCatalog::default);
     let Some(drop_id) = catalog.treasure_drop_by_item.get(&treasure_id).copied() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "treasure configuration was not found".to_owned();
+        *context.handler_error = Some(GameError::Internal(
+            "treasure configuration was not found".to_owned(),
+        ));
         return Some(Vec::new());
     };
     open_treasure(
@@ -1243,8 +1236,9 @@ fn open_select_treasure(
     let open_num = decode_varint_field(request_args, 3).max(1);
     let catalog = BUILD_SHIP_CATALOG.get_or_init(BuildShipCatalog::default);
     let Some(selected) = catalog.selected_treasure_by_item.get(&treasure_id) else {
-        *context.response_err = 1;
-        *context.response_err_msg = "select treasure configuration was not found".to_owned();
+        *context.handler_error = Some(GameError::Internal(
+            "select treasure configuration was not found".to_owned(),
+        ));
         return Some(Vec::new());
     };
     let selected_option = if selected.options.is_empty() {
@@ -1254,8 +1248,9 @@ fn open_select_treasure(
             .ok()
             .is_none_or(|p| p > selected.options.len())
     {
-        *context.response_err = 1;
-        *context.response_err_msg = "select treasure position is out of range".to_owned();
+        *context.handler_error = Some(GameError::Internal(
+            "select treasure position is out of range".to_owned(),
+        ));
         return Some(Vec::new());
     } else {
         Some(selected.options[usize::try_from(position - 1).unwrap_or_default()])
@@ -1273,8 +1268,7 @@ fn open_select_treasure(
 
 struct TreasureContext<'a> {
     pre_pushes: &'a mut Vec<Vec<u8>>,
-    response_err: &'a mut i32,
-    response_err_msg: &'a mut String,
+    handler_error: &'a mut Option<GameError>,
     fashion_catalog: Option<&'a FashionList>,
     equip_catalog: Option<&'a EquipCatalog>,
 }
@@ -1289,18 +1283,19 @@ fn open_treasure(
     context: &mut TreasureContext<'_>,
 ) -> Option<Vec<u8>> {
     if treasure_id <= 0 || !(1..=99).contains(&open_num) {
-        *context.response_err = 1;
-        *context.response_err_msg = "treasure id or count is invalid".to_owned();
+        *context.handler_error = Some(GameError::Internal(
+            "treasure id or count is invalid".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let Some(account) = account.as_deref_mut() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "account is unavailable".to_owned();
+        *context.handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
         return Some(Vec::new());
     };
     if bag_item_count(account, treasure_id) < i64::from(open_num) {
-        *context.response_err = 1;
-        *context.response_err_msg = "treasure count is insufficient".to_owned();
+        *context.handler_error = Some(GameError::Internal(
+            "treasure count is insufficient".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let mut pending = Vec::new();
@@ -1318,8 +1313,9 @@ fn open_treasure(
             )
         });
         let Some((goods_type, item_id, num)) = reward else {
-            *context.response_err = 1;
-            *context.response_err_msg = "treasure drop pool is invalid".to_owned();
+            *context.handler_error = Some(GameError::Internal(
+                "treasure drop pool is invalid".to_owned(),
+            ));
             return Some(Vec::new());
         };
         pending.push(ShopReward {
@@ -1376,21 +1372,20 @@ fn encode_treasure_response(rewards: &[ShopReward], treasure_id: i32) -> Vec<u8>
 fn illustrate_new(
     account: &mut Option<&mut Value>,
     request_args: &[u8],
-    response_err: &mut i32,
-    response_err_msg: &mut String,
+    handler_error: &mut Option<GameError>,
 ) -> Option<Vec<u8>> {
     let ids = decode_repeated_varint_field(request_args, 1)
         .into_iter()
         .filter(|id| *id > 0)
         .collect::<Vec<_>>();
     let Some(account) = account.as_deref_mut() else {
-        *response_err = 1;
-        *response_err_msg = "account is unavailable".to_owned();
+        *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
         return Some(Vec::new());
     };
     if ids.is_empty() {
-        *response_err = 1;
-        *response_err_msg = "illustrate id list is empty".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "illustrate id list is empty".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let now = current_unix_seconds();
@@ -1432,21 +1427,20 @@ fn illustrate_new(
 fn illustrate_equip_new(
     account: &mut Option<&mut Value>,
     request_args: &[u8],
-    response_err: &mut i32,
-    response_err_msg: &mut String,
+    handler_error: &mut Option<GameError>,
 ) -> Option<Vec<u8>> {
     let ids = decode_repeated_varint_field(request_args, 1)
         .into_iter()
         .filter(|id| *id > 0)
         .collect::<Vec<_>>();
     let Some(account) = account.as_deref_mut() else {
-        *response_err = 1;
-        *response_err_msg = "account is unavailable".to_owned();
+        *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
         return Some(Vec::new());
     };
     if ids.is_empty() {
-        *response_err = 1;
-        *response_err_msg = "illustrate equipment id list is empty".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "illustrate equipment id list is empty".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let now = current_unix_seconds();

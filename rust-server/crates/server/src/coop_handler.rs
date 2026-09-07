@@ -16,8 +16,8 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     request_args: &[u8],
 ) -> HandlerResult {
     let payload = handle_legacy(context, method, request_args);
-    if *context.response_err != 0 {
-        HandlerResult::Error(GameError::Internal(context.response_err_msg.clone()))
+    if let Some(error) = context.handler_error.clone() {
+        HandlerResult::Error(error)
     } else {
         match payload {
             Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
@@ -78,8 +78,8 @@ fn handle_legacy<'state, 'account, 'scratch>(
         "matchsvr.CreateRoom" => {
             let copy_id = decode_varint_field(request_args, COPY_ID_FIELD);
             if copy_id <= 0 {
-                *context.response_err = 1;
-                *context.response_err_msg = "co-op copy is invalid".to_owned();
+                *context.handler_error =
+                    Some(GameError::Internal("co-op copy is invalid".to_owned()));
                 return Some(Vec::new());
             }
             let hero_ids = decode_pve_hero_ids(request_args);
@@ -108,8 +108,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
         }
         "matchsvr.EnterRoom" => {
             let Some(mut room) = shared_room(context.state, room_id) else {
-                *context.response_err = 1;
-                *context.response_err_msg = "room is not found".to_owned();
+                *context.handler_error = Some(GameError::Internal("room is not found".to_owned()));
                 return Some(Vec::new());
             };
             let capacity = room
@@ -126,8 +125,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .all(|user| user.get("uid").and_then(Value::as_u64) != Some(uid))
             {
                 if users.len() >= capacity {
-                    *context.response_err = 1;
-                    *context.response_err_msg = "room is full".to_owned();
+                    *context.handler_error = Some(GameError::Internal("room is full".to_owned()));
                     return Some(Vec::new());
                 }
                 users.push(room_user_from_account(account, uid, request_args, now));
@@ -148,8 +146,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
         }
         "matchsvr.DismissRoom" => {
             if !room_matches(account, room_id) {
-                *context.response_err = 1;
-                *context.response_err_msg = "room is not found".to_owned();
+                *context.handler_error = Some(GameError::Internal("room is not found".to_owned()));
                 return Some(Vec::new());
             }
             let owner_id = account
@@ -158,8 +155,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .and_then(Value::as_u64)
                 .unwrap_or_default();
             if owner_id != uid {
-                *context.response_err = 1;
-                *context.response_err_msg = "only room owner can dismiss".to_owned();
+                *context.handler_error = Some(GameError::Internal(
+                    "only room owner can dismiss".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             leave_shared_room(context.state, account, room_id, uid);
@@ -167,8 +165,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
         }
         "matchsvr.Ready" | "matchsvr.Cancel" => {
             if !room_matches(account, room_id) {
-                *context.response_err = 1;
-                *context.response_err_msg = "room is not found".to_owned();
+                *context.handler_error = Some(GameError::Internal("room is not found".to_owned()));
                 return Some(Vec::new());
             }
             let ready = method == "matchsvr.Ready";
@@ -186,8 +183,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .and_then(Value::as_u64)
                 .unwrap_or_default();
             if owner_id != uid || kicked_uid == 0 || kicked_uid == uid {
-                *context.response_err = 1;
-                *context.response_err_msg = "only room owner can kick another user".to_owned();
+                *context.handler_error = Some(GameError::Internal(
+                    "only room owner can kick another user".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             if let Some(users) = account
@@ -205,8 +203,8 @@ fn handle_legacy<'state, 'account, 'scratch>(
             if account.get("pveRoom").and_then(Value::as_object).is_none()
                 || !valid_pve_hero_ids(account, &hero_ids)
             {
-                *context.response_err = 1;
-                *context.response_err_msg = "co-op fleet is invalid".to_owned();
+                *context.handler_error =
+                    Some(GameError::Internal("co-op fleet is invalid".to_owned()));
                 return Some(Vec::new());
             }
             if let Some(user) = room_user_mut(account, uid) {
@@ -244,8 +242,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .and_then(Value::as_u64)
                 .unwrap_or_default();
             if owner_id != uid {
-                *context.response_err = 1;
-                *context.response_err_msg = "only room owner can change visibility".to_owned();
+                *context.handler_error = Some(GameError::Internal(
+                    "only room owner can change visibility".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             if let Some(room) = account.get_mut("pveRoom").and_then(Value::as_object_mut) {
@@ -260,8 +259,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
         }
         "matchsvr.Start" => {
             if !room_matches(account, room_id) {
-                *context.response_err = 1;
-                *context.response_err_msg = "room is not found".to_owned();
+                *context.handler_error = Some(GameError::Internal("room is not found".to_owned()));
                 return Some(Vec::new());
             }
             let owner_id = account
@@ -270,8 +268,8 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .and_then(Value::as_u64)
                 .unwrap_or_default();
             if owner_id != uid {
-                *context.response_err = 1;
-                *context.response_err_msg = "only room owner can start".to_owned();
+                *context.handler_error =
+                    Some(GameError::Internal("only room owner can start".to_owned()));
                 return Some(Vec::new());
             }
             if let Some(room) = account.get_mut("pveRoom").and_then(Value::as_object_mut) {
@@ -296,13 +294,13 @@ fn handle_legacy<'state, 'account, 'scratch>(
         "battle.JoinRoom" => {
             let requested_room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
             if requested_room_id == 0 {
-                *context.response_err = 1;
-                *context.response_err_msg = "battle room is invalid".to_owned();
+                *context.handler_error =
+                    Some(GameError::Internal("battle room is invalid".to_owned()));
                 return Some(Vec::new());
             }
             let Some(mut battle_room) = shared_battle(context.state, requested_room_id) else {
-                *context.response_err = 1;
-                *context.response_err_msg = "battle room is not found".to_owned();
+                *context.handler_error =
+                    Some(GameError::Internal("battle room is not found".to_owned()));
                 return Some(Vec::new());
             };
             let users = battle_room
@@ -311,8 +309,8 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .expect("battle room users must be an array");
             if !users.iter().any(|value| value.as_u64() == Some(uid)) {
                 if users.len() >= 2 {
-                    *context.response_err = 1;
-                    *context.response_err_msg = "battle room is full".to_owned();
+                    *context.handler_error =
+                        Some(GameError::Internal("battle room is full".to_owned()));
                     return Some(Vec::new());
                 }
                 users.push(json!(uid));

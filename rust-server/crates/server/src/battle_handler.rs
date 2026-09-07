@@ -10,8 +10,8 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     request_args: &[u8],
 ) -> HandlerResult {
     let payload = handle_legacy(context, method, request_args);
-    if *context.response_err != 0 {
-        HandlerResult::Error(GameError::Internal(context.response_err_msg.clone()))
+    if let Some(error) = context.handler_error.clone() {
+        HandlerResult::Error(error)
     } else {
         match payload {
             Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
@@ -39,8 +39,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
     } = catalogs;
     let pre_pushes = &mut *context.pre_pushes;
     let post_pushes = &mut *context.post_pushes;
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
+    let handler_error = &mut *context.handler_error;
     let pass_details = &mut *context.pass_details;
     let pass_rewards = &mut *context.pass_rewards;
     let pass_hero_ids = &mut *context.pass_hero_ids;
@@ -52,15 +51,15 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let request = match CopyRecordRequest::decode(request_args) {
                 Ok(request) => request,
                 Err(_) => {
-                    *response_err = 1;
-                    *response_err_msg = "copy record request is invalid".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "copy record request is invalid".to_owned(),
+                    ));
                     return Some(Vec::new());
                 }
             };
             let copy_id = request.copy_id;
             if copy_id <= 0 {
-                *response_err = 1;
-                *response_err_msg = "copy id is invalid".to_owned();
+                *handler_error = Some(GameError::Internal("copy id is invalid".to_owned()));
                 Some(Vec::new())
             } else {
                 Some(CopyRecordListCodec::encode(&copy_record_list_from_account(
@@ -73,21 +72,21 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let request = match CopyRecordRequest::decode(request_args) {
                 Ok(request) => request,
                 Err(_) => {
-                    *response_err = 1;
-                    *response_err_msg = "copy record request is invalid".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "copy record request is invalid".to_owned(),
+                    ));
                     return Some(Vec::new());
                 }
             };
             let copy_id = request.copy_id;
             let index = request.index;
             if copy_id <= 0 || index < 0 {
-                *response_err = 1;
-                *response_err_msg = "copy record is invalid".to_owned();
+                *handler_error = Some(GameError::Internal("copy record is invalid".to_owned()));
                 Some(Vec::new())
             } else if let Some(account) = account.as_deref_mut() {
                 if !delete_copy_record(account, copy_id, index) {
-                    *response_err = 1;
-                    *response_err_msg = "copy record is not found".to_owned();
+                    *handler_error =
+                        Some(GameError::Internal("copy record is not found".to_owned()));
                     Some(Vec::new())
                 } else {
                     Some(CopyRecordListCodec::encode(&copy_record_list_from_account(
@@ -95,8 +94,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     )))
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -104,28 +102,27 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let request = match CopyRecordRequest::decode(request_args) {
                 Ok(request) => request,
                 Err(_) => {
-                    *response_err = 1;
-                    *response_err_msg = "copy record request is invalid".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "copy record request is invalid".to_owned(),
+                    ));
                     return Some(Vec::new());
                 }
             };
             let copy_id = request.copy_id;
             let index = request.index;
             if copy_id <= 0 || index < 0 {
-                *response_err = 1;
-                *response_err_msg = "copy record is invalid".to_owned();
+                *handler_error = Some(GameError::Internal("copy record is invalid".to_owned()));
                 Some(Vec::new())
             } else if let Some(account) = account.as_deref_mut() {
                 if let Some(fleet) = apply_copy_record_to_fleet(account, copy_id, index) {
                     Some(FleetInfoCodec::encode(&fleet))
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "copy record is not found".to_owned();
+                    *handler_error =
+                        Some(GameError::Internal("copy record is not found".to_owned()));
                     Some(Vec::new())
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -142,8 +139,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let request = match DailyCopyEnterRequest::decode(request_args) {
                 Ok(request) => request,
                 Err(_) => {
-                    *response_err = 1;
-                    *response_err_msg = "daily copy enter request is invalid".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "daily copy enter request is invalid".to_owned(),
+                    ));
                     return Some(Vec::new());
                 }
             };
@@ -171,8 +169,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 (None, _) => chapter_catalog.is_none() && chapter_id == 1,
             };
             if chapter_id <= 0 || copy_id <= 0 || tactic_id <= 0 || !known_copy {
-                *response_err = 1;
-                *response_err_msg = "daily copy enter request is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "daily copy enter request is invalid".to_owned(),
+                ));
                 Some(Vec::new())
             } else if let Some(account) = account.as_deref_mut() {
                 let tactic_hero_ids = fleet_hero_ids(account, tactic_id as u64)
@@ -203,8 +202,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         1,
                     )
                 {
-                    *response_err = 1;
-                    *response_err_msg = "insufficient supply or missing daily tactic".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "insufficient supply or missing daily tactic".to_owned(),
+                    ));
                     return Some(Vec::new());
                 }
                 normalize_daily_copy_state(account, chapter_catalog, current_unix_seconds());
@@ -277,8 +277,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 );
                 Some(daily_copy_enter_payload(&start_payload))
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -404,8 +403,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let start_request = match CopyStartRequest::decode(request_args) {
                 Ok(request) => request,
                 Err(_) => {
-                    *response_err = 1;
-                    *response_err_msg = "copy start request is invalid".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "copy start request is invalid".to_owned(),
+                    ));
                     return Some(Vec::new());
                 }
             };
@@ -468,8 +468,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 match_type: start_request.match_type,
             };
             if !known_copy || hero_ids.is_empty() {
-                *response_err = 1;
-                *response_err_msg = "battle copy or fleet is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "battle copy or fleet is invalid".to_owned(),
+                ));
                 Some(Vec::new())
             } else if !account.as_deref_mut().is_some_and(|account| {
                 consume_battle_supply(
@@ -480,9 +481,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     1,
                 )
             }) {
-                *response_err = 1;
-                *response_err_msg =
-                    "insufficient supply or missing supply configuration".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "insufficient supply or missing supply configuration".to_owned(),
+                ));
                 Some(Vec::new())
             } else {
                 if let Some(account) = account.as_deref_mut() {
@@ -539,13 +540,13 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     let _ = enemy_id;
                     Some(battle_attack_payload_with_damage(request_args, 0))
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "battle session is not active".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "battle session is not active".to_owned(),
+                    ));
                     Some(Vec::new())
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -587,8 +588,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     })
             });
             if !known_copy || !valid_session {
-                *response_err = 1;
-                *response_err_msg = "battle session is invalid or not won".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "battle session is invalid or not won".to_owned(),
+                ));
                 Some(Vec::new())
             } else if let Some(account) = account.as_deref_mut() {
                 let server_battle_time = now.saturating_sub(
@@ -638,8 +640,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         request_args,
                     )
                 {
-                    *response_err = 1;
-                    *response_err_msg = "battle fleet result is invalid".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "battle fleet result is invalid".to_owned(),
+                    ));
                     return Some(Vec::new());
                 }
                 let final_fleet = if has_fleet_result {
@@ -764,8 +767,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     Some(payload)
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -800,8 +802,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         })
                         && account_has_fleet(account, fleet_id));
                 if !valid_start {
-                    *response_err = 1;
-                    *response_err_msg = "sweep fleet or copy is not available".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "sweep fleet or copy is not available".to_owned(),
+                    ));
                 } else if method == "mopUp.StartSweep"
                     && !consume_battle_supply(
                         account,
@@ -811,9 +814,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         sweep_count as i32,
                     )
                 {
-                    *response_err = 1;
-                    *response_err_msg =
-                        "insufficient supply or missing supply configuration".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "insufficient supply or missing supply configuration".to_owned(),
+                    ));
                 } else {
                     update_mop_up_state(account, method, request_args, now);
                     // Local server sweeps resolve immediately. Keep helper's delayed mode for

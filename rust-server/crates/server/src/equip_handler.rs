@@ -10,8 +10,8 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     request_args: &[u8],
 ) -> HandlerResult {
     let payload = handle_legacy(context, method, request_args);
-    if *context.response_err != 0 {
-        HandlerResult::Error(GameError::Internal(context.response_err_msg.clone()))
+    if let Some(error) = context.handler_error.clone() {
+        HandlerResult::Error(error)
     } else {
         match payload {
             Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
@@ -37,8 +37,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
     } = catalogs;
     let account_view = account.as_deref();
     let pre_pushes = &mut *context.pre_pushes;
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
+    let handler_error = &mut *context.handler_error;
 
     match method {
         "equip.UpdateEquipBagData" => Some(EquipListCodec::encode(&equip_list_from_account(
@@ -51,8 +50,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
         "equiptestcopy.ReceiveRewards" => {
             let reward_id = decode_varint_field(request_args, 1);
             if reward_id <= 0 {
-                *response_err = 1;
-                *response_err_msg = "equipment test reward id is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "equipment test reward id is invalid".to_owned(),
+                ));
                 Some(Vec::new())
             } else if let Some(account) = account.as_deref_mut() {
                 let received = account
@@ -83,8 +83,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         })
                         .collect::<Vec<_>>();
                     if rewards.is_empty() && task_catalog.is_some() {
-                        *response_err = 1;
-                        *response_err_msg = "equipment test reward is not configured".to_owned();
+                        *handler_error = Some(GameError::Internal(
+                            "equipment test reward is not configured".to_owned(),
+                        ));
                         return Some(Vec::new());
                     }
                     account
@@ -122,8 +123,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     Some(encode_retire_hero_response(&rewards))
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -134,13 +134,15 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let copy_index = decode_varint_field(request_args, 1);
             let damage_index = decode_varint_field(request_args, 2);
             if copy_index <= 0 || damage_index <= 0 {
-                *response_err = 1;
-                *response_err_msg = "equipment new test reward index is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "equipment new test reward index is invalid".to_owned(),
+                ));
                 Some(Vec::new())
             } else if let Some(account) = account.as_deref_mut() {
                 let Some(equip_new_test_catalog) = equip_new_test_catalog else {
-                    *response_err = 1;
-                    *response_err_msg = "equipment new test reward is not configured".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "equipment new test reward is not configured".to_owned(),
+                    ));
                     return Some(Vec::new());
                 };
                 let reward_id = match resolve_new_test_reward(
@@ -151,8 +153,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 ) {
                     Ok(reward_id) => reward_id,
                     Err(message) => {
-                        *response_err = 1;
-                        *response_err_msg = format!("equipment new test reward {message}");
+                        *handler_error = Some(GameError::Internal(format!(
+                            "equipment new test reward {message}"
+                        )));
                         return Some(Vec::new());
                     }
                 };
@@ -160,8 +163,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     .and_then(|catalog| catalog.rewards_by_id.get(&reward_id))
                     .filter(|rewards| !rewards.is_empty())
                 else {
-                    *response_err = 1;
-                    *response_err_msg = "equipment new test reward is not configured".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "equipment new test reward is not configured".to_owned(),
+                    ));
                     return Some(Vec::new());
                 };
                 let _rewards = reward_defs
@@ -177,8 +181,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     })
                     .collect::<Vec<_>>();
                 if !mark_new_test_reward(account, copy_index, damage_index) {
-                    *response_err = 1;
-                    *response_err_msg = "equipment new test reward already claimed".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "equipment new test reward already claimed".to_owned(),
+                    ));
                     return Some(Vec::new());
                 }
                 append_method_push(
@@ -203,8 +208,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 );
                 Some(Vec::new())
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -213,16 +217,16 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 ensure_equip_activity_state(account, equip_catalog);
                 Some(equip_activity_payload(account))
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
         "equipactivity.GetReward" => {
             let equip_id = decode_varint_u64_field(request_args, 1);
             if equip_id == 0 {
-                *response_err = 1;
-                *response_err_msg = "equipment activity id is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "equipment activity id is invalid".to_owned(),
+                ));
                 Some(Vec::new())
             } else if let Some(account) = account.as_deref_mut() {
                 ensure_equip_activity_state(account, equip_catalog);
@@ -250,10 +254,10 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 });
                 if let Some(reward_defs) = reward_defs.filter(|rewards| !rewards.is_empty()) {
                     if !mark_equip_activity_reward(account, equip_id) {
-                        *response_err = 1;
-                        *response_err_msg =
+                        *handler_error = Some(GameError::Internal(
                             "equipment activity reward is already claimed or unavailable"
-                                .to_owned();
+                                .to_owned(),
+                        ));
                         return Some(Vec::new());
                     }
                     let _rewards = reward_defs
@@ -285,13 +289,13 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     );
                     Some(Vec::new())
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "equipment activity reward is not configured".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "equipment activity reward is not configured".to_owned(),
+                    ));
                     Some(Vec::new())
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -304,8 +308,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 let (rewards, removed_ids) =
                     dismantle_equip_state(account, equip_catalog, &equip_ids);
                 if removed_ids.is_empty() {
-                    *response_err = 1;
-                    *response_err_msg = "no dismantlable equipment was selected".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "no dismantlable equipment was selected".to_owned(),
+                    ));
                     Some(Vec::new())
                 } else {
                     let mut equip_push = equip_list_from_account(account, equip_catalog);
@@ -334,8 +339,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     Some(encode_retire_hero_response(&rewards))
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -380,13 +384,13 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     if std::env::var_os("BLUEOATH_TRACE_METHODS").is_some() {
                         eprintln!("equip.Enhance rejected equip={}", equip_id);
                     }
-                    *response_err = 1;
-                    *response_err_msg = "equipment enhancement requirements are not met".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "equipment enhancement requirements are not met".to_owned(),
+                    ));
                     Some(Vec::new())
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -419,14 +423,13 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     );
                     Some(encode_equip_enhance_response(equip_id, level, exp))
                 } else {
-                    *response_err = 1;
-                    *response_err_msg =
-                        "bound equipment enhancement requirements are not met".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "bound equipment enhancement requirements are not met".to_owned(),
+                    ));
                     Some(Vec::new())
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -463,13 +466,13 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     );
                     Some(response)
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "equipment renovation requirements are not met".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "equipment renovation requirements are not met".to_owned(),
+                    ));
                     Some(Vec::new())
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }

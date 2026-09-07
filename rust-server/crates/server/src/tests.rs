@@ -1,3 +1,4 @@
+use super::common::error::GameError;
 use super::game_login::pass_mini_game;
 use super::{
     add_bag_item, add_building_state, adjust_character_i64, advance_task_event,
@@ -4730,8 +4731,7 @@ async fn copy_star_reward_claims_configured_reward_once() {
 #[test]
 fn pass_mini_game_uses_tpassbase_and_records_single_copy() {
     let mut account = default_account_snapshot("mini-game", "Captain", 123);
-    let mut response_err = 0;
-    let mut response_err_msg = String::new();
+    let mut handler_error = None;
     let mut args = Vec::new();
     append_varint_field(&mut args, 1, 1001);
     append_varint_field(&mut args, 12, 42);
@@ -4745,12 +4745,11 @@ fn pass_mini_game_uses_tpassbase_and_records_single_copy() {
             None,
             None,
             &mut Vec::new(),
-            &mut response_err,
-            &mut response_err_msg,
+            &mut handler_error,
         )
         .unwrap()
     };
-    assert_eq!(response_err, 0);
+    assert!(handler_error.is_none());
     assert_eq!(decode_varint_field(&response, 12), 1001);
     assert_eq!(decode_varint_field(&response, 4), 3);
     assert_eq!(decode_varint_field(&response, 8), 60);
@@ -4770,14 +4769,15 @@ fn pass_mini_game_uses_tpassbase_and_records_single_copy() {
             None,
             None,
             &mut Vec::new(),
-            &mut response_err,
-            &mut response_err_msg,
+            &mut handler_error,
         )
         .unwrap()
     };
     assert!(invalid.is_empty());
-    assert_eq!(response_err, 1);
-    assert_eq!(response_err_msg, "mini-game was not finished");
+    assert_eq!(
+        handler_error,
+        Some(GameError::Internal("mini-game was not finished".to_owned()))
+    );
 }
 
 #[test]

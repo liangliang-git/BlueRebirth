@@ -10,8 +10,8 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     request_args: &[u8],
 ) -> HandlerResult {
     let payload = handle_legacy(context, method, request_args);
-    if *context.response_err != 0 {
-        HandlerResult::Error(GameError::Internal(context.response_err_msg.clone()))
+    if let Some(error) = context.handler_error.clone() {
+        HandlerResult::Error(error)
     } else {
         match payload {
             Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
@@ -38,8 +38,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
     let account_view = account.as_deref();
     let pre_pushes = &mut *context.pre_pushes;
     let post_pushes = &mut *context.post_pushes;
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
+    let handler_error = &mut *context.handler_error;
 
     match method {
         "hero.GetHeroInfo" | "hero.GetHeroInfoByHeroIdArray" => Some(HeroBagCodec::encode(
@@ -54,8 +53,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .collect::<Vec<_>>();
             let is_dis_equip = decode_varint_u64_field(request_args, 2) != 0;
             if invalid_id {
-                *response_err = 1;
-                *response_err_msg = "hero id is invalid".to_owned();
+                *handler_error = Some(GameError::Internal("hero id is invalid".to_owned()));
                 Some(Vec::new())
             } else if let Some(account) = account.as_deref_mut() {
                 let requested_set = hero_ids
@@ -170,8 +168,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let (hero_id, items) = decode_hero_add_exp_request(request_args);
             const MAX_EXP_ITEMS: usize = 99;
             if hero_id == 0 || items.is_empty() || items.len() > MAX_EXP_ITEMS {
-                *response_err = 1;
-                *response_err_msg = "hero experience request is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "hero experience request is invalid".to_owned(),
+                ));
                 Some(Vec::new())
             } else if let Some(account) = account.as_deref_mut() {
                 let hero_exists = account
@@ -184,8 +183,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                             .any(|hero| json_u64(hero, "heroId") == Some(hero_id))
                     });
                 if !hero_exists {
-                    *response_err = 1;
-                    *response_err_msg = "hero was not found".to_owned();
+                    *handler_error = Some(GameError::Internal("hero was not found".to_owned()));
                     Some(Vec::new())
                 } else {
                     let mut total_exp = 0i64;
@@ -208,8 +206,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         );
                     }
                     if total_exp <= 0 {
-                        *response_err = 1;
-                        *response_err_msg = "experience items were not found".to_owned();
+                        *handler_error = Some(GameError::Internal(
+                            "experience items were not found".to_owned(),
+                        ));
                         Some(Vec::new())
                     } else {
                         if let Some(hero) = find_hero_mut(account, hero_id) {
@@ -265,8 +264,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     }
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -305,14 +303,12 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         Some(Vec::new())
                     }
                     Err(error) => {
-                        *response_err = 1;
-                        *response_err_msg = error.to_owned();
+                        *handler_error = Some(GameError::Internal(error.to_owned()));
                         Some(Vec::new())
                     }
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -360,14 +356,12 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         Some(Vec::new())
                     }
                     Err(error) => {
-                        *response_err = 1;
-                        *response_err_msg = error.to_owned();
+                        *handler_error = Some(GameError::Internal(error.to_owned()));
                         Some(Vec::new())
                     }
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -395,14 +389,12 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         Some(Vec::new())
                     }
                     Err(error) => {
-                        *response_err = 1;
-                        *response_err_msg = error.to_owned();
+                        *handler_error = Some(GameError::Internal(error.to_owned()));
                         Some(Vec::new())
                     }
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -420,14 +412,12 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         Some(Vec::new())
                     }
                     Err(error) => {
-                        *response_err = 1;
-                        *response_err_msg = error.to_owned();
+                        *handler_error = Some(GameError::Internal(error.to_owned()));
                         Some(Vec::new())
                     }
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -456,14 +446,12 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         Some(Vec::new())
                     }
                     Err(error) => {
-                        *response_err = 1;
-                        *response_err_msg = error.to_owned();
+                        *handler_error = Some(GameError::Internal(error.to_owned()));
                         Some(Vec::new())
                     }
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -563,17 +551,15 @@ fn handle_legacy<'state, 'account, 'scratch>(
                             hero_id, skill_id
                         );
                     }
-                    *response_err = 1;
-                    *response_err_msg = if materials_ok {
+                    *handler_error = Some(GameError::Internal(if materials_ok {
                         "hero or skill was invalid".to_owned()
                     } else {
                         "not enough skill upgrade materials".to_owned()
-                    };
+                    }));
                     Some(Vec::new())
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -594,8 +580,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         );
                     }
                     Err(error) => {
-                        *response_err = 1;
-                        *response_err_msg = error.to_owned();
+                        *handler_error = Some(GameError::Internal(error.to_owned()));
                     }
                 }
             }
@@ -621,8 +606,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         );
                     }
                     Err(error) => {
-                        *response_err = 1;
-                        *response_err_msg = error.to_owned();
+                        *handler_error = Some(GameError::Internal(error.to_owned()));
                     }
                 }
             }
@@ -632,8 +616,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let (hero_id, effects) = decode_equip_effect_request(request_args);
             if let Some(account) = account.as_deref_mut() {
                 if let Err(error) = hero_equip_effect_state(account, hero_id, &effects) {
-                    *response_err = 1;
-                    *response_err_msg = error.to_owned();
+                    *handler_error = Some(GameError::Internal(error.to_owned()));
                 } else {
                     pre_pushes.push(encode_hero_bag_push(account));
                 }
@@ -645,8 +628,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
             if let Some(account) = account.as_deref_mut() {
                 if let Err(error) = hero_equip_binding_state(account, hero_id, equip_id, equip_type)
                 {
-                    *response_err = 1;
-                    *response_err_msg = error.to_owned();
+                    *handler_error = Some(GameError::Internal(error.to_owned()));
                 } else {
                     pre_pushes.push(encode_hero_bag_push(account));
                 }
@@ -662,14 +644,12 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         Some(encode_retire_hero_response(&rewards))
                     }
                     Err(error) => {
-                        *response_err = 1;
-                        *response_err_msg = error.to_owned();
+                        *handler_error = Some(GameError::Internal(error.to_owned()));
                         Some(Vec::new())
                     }
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -682,8 +662,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
             if let Some(account) = account.as_deref_mut() {
                 if let Err(error) = hero_equip_lock_transplant_state(account, &hero_ids, equip_type)
                 {
-                    *response_err = 1;
-                    *response_err_msg = error.to_owned();
+                    *handler_error = Some(GameError::Internal(error.to_owned()));
                 } else {
                     pre_pushes.push(encode_hero_bag_push(account));
                     append_method_push(
@@ -719,13 +698,11 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         );
                     }
                     Err(error) => {
-                        *response_err = 1;
-                        *response_err_msg = error.to_owned();
+                        *handler_error = Some(GameError::Internal(error.to_owned()));
                     }
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
             }
             Some(Vec::new())
         }

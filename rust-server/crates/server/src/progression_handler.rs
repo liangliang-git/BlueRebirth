@@ -10,8 +10,8 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     request_args: &[u8],
 ) -> HandlerResult {
     let payload = handle_legacy(context, method, request_args);
-    if *context.response_err != 0 {
-        HandlerResult::Error(GameError::Internal(context.response_err_msg.clone()))
+    if let Some(error) = context.handler_error.clone() {
+        HandlerResult::Error(error)
     } else {
         match payload {
             Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
@@ -38,8 +38,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
     let account_view = account.as_deref();
     let pre_pushes = &mut *context.pre_pushes;
     let post_pushes = &mut *context.post_pushes;
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
+    let handler_error = &mut *context.handler_error;
 
     match method {
         "study.GetStudyInfo" => Some(study_info_payload(
@@ -69,13 +68,13 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     );
                     Some(Vec::new())
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "study slot or hero is invalid".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "study slot or hero is invalid".to_owned(),
+                    ));
                     Some(Vec::new())
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -107,13 +106,12 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     );
                     Some(Vec::new())
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "study progress is missing".to_owned();
+                    *handler_error =
+                        Some(GameError::Internal("study progress is missing".to_owned()));
                     Some(Vec::new())
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -136,13 +134,11 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     );
                     Some(ret)
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "study is not finished".to_owned();
+                    *handler_error = Some(GameError::Internal("study is not finished".to_owned()));
                     Some(Vec::new())
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -160,20 +156,24 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         })
                     });
                 if !has_progress || items.is_empty() {
-                    *response_err = 1;
-                    *response_err_msg = "study progress or speedup items are missing".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "study progress or speedup items are missing".to_owned(),
+                    ));
                 }
                 for (item_id, count) in &items {
-                    if *response_err == 0 && bag_item_count(account, *item_id) < i64::from(*count) {
-                        *response_err = 1;
+                    if handler_error.is_none()
+                        && bag_item_count(account, *item_id) < i64::from(*count)
+                    {
+                        *handler_error =
+                            Some(GameError::Internal("not enough study textbooks".to_owned()));
                     }
                 }
-                if *response_err == 0 {
+                if handler_error.is_none() {
                     for (item_id, count) in items {
                         consume_bag_item(account, item_id, count);
                     }
                 }
-                if *response_err == 0 {
+                if handler_error.is_none() {
                     if let Some(ret) =
                         finish_study_state_force(account, hero_id, skill_id, current_unix_seconds())
                     {
@@ -190,17 +190,17 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         );
                         Some(ret)
                     } else {
-                        *response_err = 1;
-                        *response_err_msg = "study progress is missing".to_owned();
+                        *handler_error =
+                            Some(GameError::Internal("study progress is missing".to_owned()));
                         Some(Vec::new())
                     }
                 } else {
-                    *response_err_msg = "not enough study textbooks".to_owned();
+                    *handler_error =
+                        Some(GameError::Internal("not enough study textbooks".to_owned()));
                     Some(Vec::new())
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -351,12 +351,12 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     task_type
                 };
                 if task_claimed(account, task_type, task_id) {
-                    *response_err = 1;
-                    *response_err_msg = "task reward was already claimed".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "task reward was already claimed".to_owned(),
+                    ));
                     Some(Vec::new())
                 } else if !task_completed(account, task_type, task_id, goal) {
-                    *response_err = 1;
-                    *response_err_msg = "task is not complete".to_owned();
+                    *handler_error = Some(GameError::Internal("task is not complete".to_owned()));
                     Some(Vec::new())
                 } else {
                     let definition = task_catalog.and_then(|catalog| {
@@ -373,8 +373,8 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         _ => false,
                     };
                     if !available {
-                        *response_err = 1;
-                        *response_err_msg = "task is not available".to_owned();
+                        *handler_error =
+                            Some(GameError::Internal("task is not available".to_owned()));
                         Some(Vec::new())
                     } else {
                         let mut configured = task_rewards(task_catalog, task_type, task_id);
@@ -389,8 +389,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                             }
                         }
                         if configured.is_empty() {
-                            *response_err = 1;
-                            *response_err_msg = "task reward is not configured".to_owned();
+                            *handler_error = Some(GameError::Internal(
+                                "task reward is not configured".to_owned(),
+                            ));
                             Some(Vec::new())
                         } else {
                             let rewards = configured

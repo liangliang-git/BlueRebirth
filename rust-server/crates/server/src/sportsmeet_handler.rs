@@ -304,8 +304,7 @@ mod tests {
         let state = ServerState::new("sports", "Captain", "1.4.0");
         let mut pre = Vec::new();
         let mut post = Vec::new();
-        let mut err = 0;
-        let mut msg = String::new();
+        let mut handler_error = None;
         let mut details = None;
         let mut rewards = Vec::new();
         let mut hero_ids = Vec::new();
@@ -318,8 +317,7 @@ mod tests {
             catalogs: GameLoginCatalogs::empty(),
             pre_pushes: &mut pre,
             post_pushes: &mut post,
-            response_err: &mut err,
-            response_err_msg: &mut msg,
+            handler_error: &mut handler_error,
             pass_details: &mut details,
             pass_rewards: &mut rewards,
             pass_hero_ids: &mut hero_ids,

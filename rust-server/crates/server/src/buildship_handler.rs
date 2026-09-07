@@ -36,8 +36,8 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     request_args: &[u8],
 ) -> HandlerResult {
     let payload = handle_legacy(context, method, request_args);
-    if *context.response_err != 0 {
-        HandlerResult::Error(GameError::Internal(context.response_err_msg.clone()))
+    if let Some(error) = context.handler_error.clone() {
+        HandlerResult::Error(error)
     } else {
         match payload {
             Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
@@ -62,8 +62,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
     } = catalogs;
     let account_view = account.as_deref();
     let pre_pushes = &mut *context.pre_pushes;
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
+    let handler_error = &mut *context.handler_error;
 
     match method {
         "buildship.BuildShipInfo" => {
@@ -82,8 +81,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 }
             };
             if !pool_known {
-                *response_err = 1;
-                *response_err_msg = "build pool is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("build pool is unavailable".to_owned()));
                 Some(Vec::new())
             } else if let Some(account) = account.as_deref_mut() {
                 let capacity = account
@@ -97,16 +95,16 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     .and_then(Value::as_array)
                     .map_or(0, Vec::len) as i64;
                 if current + i64::from(pulls) > capacity {
-                    *response_err = 1;
-                    *response_err_msg = "hero dock is full".to_owned();
+                    *handler_error = Some(GameError::Internal("hero dock is full".to_owned()));
                     Some(Vec::new())
                 } else if !build_drop_exists(build_catalog, pool_id) {
-                    *response_err = 1;
-                    *response_err_msg = "build pool has no drop entries".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "build pool has no drop entries".to_owned(),
+                    ));
                     Some(Vec::new())
                 } else if !consume_buildship_cost(account, build_catalog, pool_id, pulls) {
-                    *response_err = 1;
-                    *response_err_msg = "not enough build resources".to_owned();
+                    *handler_error =
+                        Some(GameError::Internal("not enough build resources".to_owned()));
                     Some(Vec::new())
                 } else {
                     // Draw and grant as one transaction. If a malformed nested pool fails
@@ -117,8 +115,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     for _ in 0..pulls {
                         let Some((goods_type, item_id, num)) = draw_build_ship_reward(pool_id)
                         else {
-                            *response_err = 1;
-                            *response_err_msg = "build pool has no drop entries".to_owned();
+                            *handler_error = Some(GameError::Internal(
+                                "build pool has no drop entries".to_owned(),
+                            ));
                             break;
                         };
                         let reward = ShopReward {
@@ -138,7 +137,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         }
                         rewards.push(reward);
                     }
-                    if *response_err == 0
+                    if handler_error.is_none()
                         && pulls == 10
                         && build_catalog
                             .extract_type_by_pool
@@ -195,14 +194,15 @@ fn handle_legacy<'state, 'account, 'scratch>(
                             }
                         }
                     }
-                    if *response_err != 0 {
+                    if handler_error.is_some() {
                         *account = account_before_draw;
                         Some(Vec::new())
                     } else {
                         let Some(state) = ensure_build_state(account) else {
                             *account = account_before_draw;
-                            *response_err = 1;
-                            *response_err_msg = "account snapshot is invalid".to_owned();
+                            *handler_error = Some(GameError::Internal(
+                                "account snapshot is invalid".to_owned(),
+                            ));
                             return Some(Vec::new());
                         };
                         let counts = state
@@ -210,8 +210,8 @@ fn handle_legacy<'state, 'account, 'scratch>(
                             .or_insert_with(|| json!({}));
                         let Some(counts) = counts.as_object_mut() else {
                             *account = account_before_draw;
-                            *response_err = 1;
-                            *response_err_msg = "build state is invalid".to_owned();
+                            *handler_error =
+                                Some(GameError::Internal("build state is invalid".to_owned()));
                             return Some(Vec::new());
                         };
                         let old = counts
@@ -262,19 +262,18 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let pool_id = decode_varint_field(request_args, 1);
             let milestone = decode_varint_field(request_args, 2);
             if account.is_none() {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             } else {
                 let Some(account) = account.as_deref_mut() else {
-                    *response_err = 1;
-                    *response_err_msg = "account is unavailable".to_owned();
+                    *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                     return Some(Vec::new());
                 };
                 let catalog = BUILD_SHIP_CATALOG.get_or_init(BuildShipCatalog::default);
                 let Some(state) = ensure_build_state(account) else {
-                    *response_err = 1;
-                    *response_err_msg = "account snapshot is invalid".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "account snapshot is invalid".to_owned(),
+                    ));
                     return Some(Vec::new());
                 };
                 // Migrate legacy snapshots that stored UsedRewardInfo as a bare array.
@@ -300,8 +299,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     .and_then(Value::as_array)
                     .is_some_and(|xs| xs.iter().any(|x| json_i64_any(x) == i64::from(milestone)));
                 if milestone <= 0 || draw_count < i64::from(milestone) || already {
-                    *response_err = 1;
-                    *response_err_msg = "build reward is unavailable".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "build reward is unavailable".to_owned(),
+                    ));
                     Some(Vec::new())
                 } else {
                     let mut rewards = Vec::new();
@@ -363,13 +363,14 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         rewards.push(reward);
                     }
                     if rewards.is_empty() {
-                        *response_err = 1;
-                        *response_err_msg = "build reward is not configured".to_owned();
+                        *handler_error = Some(GameError::Internal(
+                            "build reward is not configured".to_owned(),
+                        ));
                         Some(Vec::new())
                     } else {
                         if !record_build_claim(account, used_key, pool_id, milestone) {
-                            *response_err = 1;
-                            *response_err_msg = "build state is invalid".to_owned();
+                            *handler_error =
+                                Some(GameError::Internal("build state is invalid".to_owned()));
                             return Some(Vec::new());
                         }
                         let now = current_unix_seconds();

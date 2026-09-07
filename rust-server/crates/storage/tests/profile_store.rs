@@ -196,6 +196,15 @@ fn typed_repository_transaction_commits_domain_mutation() {
             .get(),
         25
     );
+    let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
+    let legacy_rows: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM accounts WHERE id = 'typed'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(legacy_rows, 0);
     let _ = std::fs::remove_dir_all(root);
 }
 

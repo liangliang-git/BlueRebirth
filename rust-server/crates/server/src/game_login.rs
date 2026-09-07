@@ -82,8 +82,7 @@ struct GameLoginRequestContext<'state, 'account, 'scratch> {
     catalogs: GameLoginCatalogs<'state>,
     pre_pushes: &'scratch mut Vec<Vec<u8>>,
     post_pushes: &'scratch mut Vec<Vec<u8>>,
-    response_err: &'scratch mut i32,
-    response_err_msg: &'scratch mut String,
+    handler_error: &'scratch mut Option<GameError>,
     pass_details: &'scratch mut Option<BattlePassDetails>,
     pass_rewards: &'scratch mut Vec<ShopReward>,
     pass_hero_ids: &'scratch mut Vec<u64>,
@@ -161,8 +160,7 @@ where
     let mut pass_hero_ids = Vec::<u64>::new();
     let mut pass_mvp_hero_id = None;
     let mut pass_shipwrecked_ids = std::collections::HashSet::new();
-    let mut response_err = 0;
-    let mut response_err_msg = String::new();
+    let mut handler_error: Option<GameError> = None;
     let mut ret = match request.method.as_str() {
         "player.Login" => Some(GameLoginCodec::encode_response(&TRetLogin {
             ret: "ok".to_owned(),
@@ -214,8 +212,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -225,8 +222,7 @@ where
             let result =
                 compat_feature::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -237,8 +233,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -247,8 +242,7 @@ where
             };
             let result = hero_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -282,8 +276,9 @@ where
                 }
             }
             _ => {
-                response_err = 1;
-                response_err_msg = "preset fleet request is invalid".to_owned();
+                handler_error = Some(GameError::Internal(
+                    "preset fleet request is invalid".to_owned(),
+                ));
                 Some(Vec::new())
             }
         },
@@ -313,8 +308,9 @@ where
                     }
                 }
                 Err(_) => {
-                    response_err = 1;
-                    response_err_msg = "secretary request is invalid".to_owned();
+                    handler_error = Some(GameError::Internal(
+                        "secretary request is invalid".to_owned(),
+                    ));
                 }
             }
             Some(Vec::new())
@@ -327,8 +323,7 @@ where
                     }
                 }
                 Err(_) => {
-                    response_err = 1;
-                    response_err_msg = "name request is invalid".to_owned();
+                    handler_error = Some(GameError::Internal("name request is invalid".to_owned()));
                 }
             }
             Some(Vec::new())
@@ -341,8 +336,8 @@ where
                     }
                 }
                 Err(_) => {
-                    response_err = 1;
-                    response_err_msg = "message request is invalid".to_owned();
+                    handler_error =
+                        Some(GameError::Internal("message request is invalid".to_owned()));
                 }
             }
             Some(Vec::new())
@@ -355,8 +350,9 @@ where
                     }
                 }
                 Err(_) => {
-                    response_err = 1;
-                    response_err_msg = "head frame request is invalid".to_owned();
+                    handler_error = Some(GameError::Internal(
+                        "head frame request is invalid".to_owned(),
+                    ));
                 }
             }
             Some(Vec::new())
@@ -369,8 +365,7 @@ where
                     }
                 }
                 Err(_) => {
-                    response_err = 1;
-                    response_err_msg = "head request is invalid".to_owned();
+                    handler_error = Some(GameError::Internal("head request is invalid".to_owned()));
                 }
             }
             Some(Vec::new())
@@ -391,8 +386,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -401,8 +395,7 @@ where
             };
             let result = base_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -413,8 +406,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -423,8 +415,7 @@ where
             };
             let result = guild_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -435,8 +426,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -446,8 +436,7 @@ where
             let result =
                 friend_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -458,8 +447,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -468,8 +456,7 @@ where
             };
             let result = chat_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -480,8 +467,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -491,8 +477,7 @@ where
             let result =
                 adventure_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -503,8 +488,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -513,8 +497,7 @@ where
             };
             let result = boss_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -525,8 +508,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -536,8 +518,7 @@ where
             let result =
                 guildbox_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -548,8 +529,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -559,8 +539,7 @@ where
             let result =
                 invitescore_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -571,8 +550,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -582,8 +560,7 @@ where
             let result =
                 activity_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -594,8 +571,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -605,8 +581,7 @@ where
             let result =
                 activity_extra_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -625,8 +600,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -635,8 +609,7 @@ where
             };
             let result = misc_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -655,8 +628,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -665,8 +637,7 @@ where
             };
             let result = misc_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -677,8 +648,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -688,8 +658,7 @@ where
             let result =
                 teaching_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -700,8 +669,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -711,8 +679,7 @@ where
             let result =
                 outpost_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -723,8 +690,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -734,8 +700,7 @@ where
             let result =
                 shiptask_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -748,8 +713,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -759,8 +723,7 @@ where
             let result =
                 sportsmeet_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -771,8 +734,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -782,8 +744,7 @@ where
             let result =
                 extended_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -794,8 +755,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -805,8 +765,7 @@ where
             let result =
                 misc_extended_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -817,8 +776,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -828,8 +786,7 @@ where
             let result =
                 guildtask_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -840,8 +797,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -854,8 +810,7 @@ where
                 request_args,
             );
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -866,8 +821,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -876,8 +830,7 @@ where
             };
             let result = misc_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -921,12 +874,11 @@ where
                 }
             }
             if rewards.is_empty() {
-                response_err = 1;
-                response_err_msg = if fetch_one {
+                handler_error = Some(GameError::Internal(if fetch_one {
                     "mail was not found".to_owned()
                 } else {
                     "mail list is empty".to_owned()
-                };
+                }));
             }
             Some(encode_mail_list_response(
                 mail_catalog.unwrap_or_default(),
@@ -948,8 +900,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -959,8 +910,7 @@ where
             let result =
                 commerce_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -975,8 +925,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -985,8 +934,7 @@ where
             };
             let result = equip_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -1001,8 +949,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -1012,8 +959,7 @@ where
             let result =
                 building_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -1024,8 +970,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -1035,8 +980,7 @@ where
             let result =
                 buildship_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -1050,8 +994,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -1061,8 +1004,7 @@ where
             let result =
                 progression_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -1088,8 +1030,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -1098,8 +1039,7 @@ where
             };
             let result = coop_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -1118,8 +1058,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -1129,8 +1068,7 @@ where
             let result =
                 battle_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -1141,8 +1079,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -1152,8 +1089,7 @@ where
             let result =
                 talent_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -1164,8 +1100,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -1174,8 +1109,7 @@ where
             };
             let result = tower_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -1186,8 +1120,7 @@ where
                 catalogs: *catalogs,
                 pre_pushes: &mut pre_pushes,
                 post_pushes: &mut post_pushes,
-                response_err: &mut response_err,
-                response_err_msg: &mut response_err_msg,
+                handler_error: &mut handler_error,
                 pass_details: &mut pass_details,
                 pass_rewards: &mut pass_rewards,
                 pass_hero_ids: &mut pass_hero_ids,
@@ -1197,8 +1130,7 @@ where
             let result =
                 tower_handler::handle_activity(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
-                response_err = error.client_code();
-                response_err_msg = error.to_string();
+                handler_error = Some(error.clone());
             }
             result.into_payload()
         }
@@ -1206,8 +1138,9 @@ where
             let (copy_id, requested) = match SeaDifficultyRequest::decode(request_args) {
                 Ok(request) => (request.copy_id, request.difficulty),
                 Err(_) => {
-                    response_err = 1;
-                    response_err_msg = "sea difficulty request is invalid".to_owned();
+                    handler_error = Some(GameError::Internal(
+                        "sea difficulty request is invalid".to_owned(),
+                    ));
                     (-1, 0)
                 }
             };
@@ -1217,18 +1150,17 @@ where
             if copy_id < 0 {
                 Some(Vec::new())
             } else if !known_copy {
-                response_err = 1;
-                response_err_msg = "sea copy is invalid".to_owned();
+                handler_error = Some(GameError::Internal("sea copy is invalid".to_owned()));
                 Some(Vec::new())
             } else if !(1..=7).contains(&requested) {
-                response_err = 1;
-                response_err_msg = "sea difficulty is invalid".to_owned();
+                handler_error = Some(GameError::Internal("sea difficulty is invalid".to_owned()));
                 Some(Vec::new())
             } else if let Some(account) = account.as_deref_mut() {
                 let level = commander_level(account);
                 if level < SEA_DIFFICULTY_UNLOCK_LEVEL && requested > 1 {
-                    response_err = 1;
-                    response_err_msg = "sea difficulty unlocks at commander level 60".to_owned();
+                    handler_error = Some(GameError::Internal(
+                        "sea difficulty unlocks at commander level 60".to_owned(),
+                    ));
                     Some(Vec::new())
                 } else {
                     set_sea_difficulty(account, requested);
@@ -1260,8 +1192,7 @@ where
                     Some(Vec::new())
                 }
             } else {
-                response_err = 1;
-                response_err_msg = "account is unavailable".to_owned();
+                handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
@@ -1368,8 +1299,8 @@ where
             ret = Some(Vec::new());
         } else {
             let error = GameError::UnknownMethod(request.method.clone());
-            response_err = error.client_code();
-            response_err_msg = error.to_string();
+            handler_error = Some(error.clone());
+
             ret = Some(Vec::new());
         }
     }
@@ -1494,7 +1425,11 @@ where
     }
     let trace_ret_len = ret.as_ref().map(Vec::len).unwrap_or_default();
     let trace_method = request.method.clone();
-    let trace_err_msg = response_err_msg.clone();
+    let (client_error_code, client_error_message) = handler_error
+        .as_ref()
+        .map(|error| (error.client_code(), error.to_string()))
+        .unwrap_or((0, String::new()));
+    let trace_err_msg = client_error_message.clone();
     let trace_ret_hex = if trace_method == "copy.StartBase" {
         ret.as_deref()
             .unwrap_or_default()
@@ -1505,8 +1440,8 @@ where
         String::new()
     };
     let response = TMessageCodec::encode_response(&TResponse {
-        err: response_err,
-        err_msg: response_err_msg,
+        err: client_error_code,
+        err_msg: client_error_message,
         method: request.method,
         ret,
         callback_handler: request.callback_handler,
@@ -1519,7 +1454,7 @@ where
         eprintln!(
             "game-login result method={} err={} msg={} ret={} pre_pushes={} post_pushes={}",
             trace_method,
-            response_err,
+            client_error_code,
             trace_err_msg,
             trace_ret_len,
             pre_pushes.len(),

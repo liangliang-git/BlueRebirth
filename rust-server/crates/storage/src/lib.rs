@@ -1,6 +1,7 @@
 use blueoath_domain::{
-    AccountRepository, AccountState, CharacterState, EquipId, EquipmentState, FleetId, FleetRecord,
-    HeroId, HeroState, NewAccountFactory, ProfileId, ProfileState, RepositoryError, TemplateId,
+    AccountRepository, AccountState, CharacterState, CurrencyKind, EquipId, EquipmentState,
+    FleetId, FleetRecord, HeroId, HeroState, NewAccountFactory, ProfileId, ProfileState,
+    RepositoryError, TemplateId,
 };
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -411,6 +412,234 @@ impl ProfileStore {
         Ok(next_revision)
     }
 
+    fn save_typed_account_with_revision(
+        &self,
+        account: &AccountState,
+        expected_revision: Option<u64>,
+    ) -> Result<u64, StorageError> {
+        let profile = account.profile.as_ref().ok_or_else(|| {
+            StorageError::InvalidTypedAccount("account profile is required".to_owned())
+        })?;
+        if !is_valid_profile_id(profile.id.as_str()) {
+            return Err(StorageError::InvalidProfileId);
+        }
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let actual = transaction
+            .query_row(
+                "SELECT revision FROM account_revisions WHERE profile_id = ?1",
+                params![profile.id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .unwrap_or_default();
+        let actual = u64::try_from(actual)
+            .map_err(|_| StorageError::InvalidTypedAccount("negative revision".to_owned()))?;
+        if expected_revision != Some(actual) && expected_revision.is_some() {
+            return Err(StorageError::RevisionConflict {
+                expected: expected_revision.unwrap_or_default(),
+                actual,
+            });
+        }
+        let next_revision = actual.checked_add(1).ok_or_else(|| {
+            StorageError::InvalidTypedAccount("account revision overflow".to_owned())
+        })?;
+        let sql_revision = i64::try_from(next_revision).map_err(|_| {
+            StorageError::InvalidTypedAccount("account revision exceeds SQLite range".to_owned())
+        })?;
+
+        transaction.execute(
+            "INSERT INTO profiles(id, name, state_json, updated_utc)
+             VALUES (?1, ?2, '{}', ?3)
+             ON CONFLICT(id) DO UPDATE SET
+               name = excluded.name,
+               updated_utc = excluded.updated_utc",
+            params![profile.id.as_str(), profile.name, timestamp()],
+        )?;
+        clear_normalized_account(&transaction, profile.id.as_str())?;
+
+        let character = &account.character;
+        transaction.execute(
+            "INSERT INTO characters(
+                profile_id, uid, name, level, exp, secretary_id, gold, diamond,
+                supply, pve_pt, head, head_frame
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                profile.id.as_str(),
+                typed_i64(character.uid, "character uid")?,
+                character.name,
+                typed_i64(character.level, "character level")?,
+                typed_i64(character.exp, "character exp")?,
+                character
+                    .secretary_id
+                    .map(|id| typed_i64(id.get(), "secretary id"))
+                    .transpose()?
+                    .unwrap_or_default(),
+                typed_i64(account.resources.amount(CurrencyKind::Gold).get(), "gold")?,
+                typed_i64(
+                    account.resources.amount(CurrencyKind::Diamond).get(),
+                    "diamond"
+                )?,
+                typed_i64(
+                    account.resources.amount(CurrencyKind::Supply).get(),
+                    "supply"
+                )?,
+                typed_i64(
+                    account.resources.amount(CurrencyKind::PvePoint).get(),
+                    "pve point"
+                )?,
+                typed_i64(character.head, "character head")?,
+                typed_i64(character.head_frame, "character head frame")?,
+            ],
+        )?;
+
+        for hero in account.dock.heroes.values() {
+            transaction.execute(
+                "INSERT INTO heroes(
+                    profile_id, hero_id, template_id, level, exp, mood,
+                    affection, hp, lock_state, created_utc
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(hero.id.get(), "hero id")?,
+                    typed_i64(hero.template_id.get(), "hero template id")?,
+                    typed_i64(hero.level, "hero level")?,
+                    typed_i64(hero.exp, "hero exp")?,
+                    typed_i64(hero.mood, "hero mood")?,
+                    typed_i64(hero.affection, "hero affection")?,
+                    typed_i64(hero.hp, "hero hp")?,
+                    i64::from(hero.locked),
+                    timestamp(),
+                ],
+            )?;
+        }
+        for equipment in account.dock.equipments.values() {
+            transaction.execute(
+                "INSERT INTO equipments(
+                    profile_id, equip_id, template_id, enhance_level, star,
+                    enhance_exp, hero_id
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(equipment.id.get(), "equipment id")?,
+                    typed_i64(equipment.template_id.get(), "equipment template id")?,
+                    typed_i64(equipment.enhance_level, "equipment enhance level")?,
+                    typed_i64(equipment.star, "equipment star")?,
+                    typed_i64(equipment.enhance_exp, "equipment enhance exp")?,
+                    equipment
+                        .hero_id
+                        .map(|id| typed_i64(id.get(), "equipment hero id"))
+                        .transpose()?,
+                ],
+            )?;
+        }
+        for hero in account.dock.heroes.values() {
+            for (slot_index, equip_id) in hero.equip_slots.iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO hero_equip_slots(
+                        profile_id, hero_id, slot_index, equip_id
+                     ) VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        profile.id.as_str(),
+                        typed_i64(hero.id.get(), "hero id")?,
+                        typed_i64(slot_index, "equipment slot")?,
+                        equip_id
+                            .map(|id| typed_i64(id.get(), "slot equipment id"))
+                            .transpose()?,
+                    ],
+                )?;
+            }
+        }
+        for (fleet_id, fleet) in &account.fleet.fleets {
+            transaction.execute(
+                "INSERT INTO fleets(profile_id, fleet_id, formation_id, tactic_id)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(fleet_id.get(), "fleet id")?,
+                    typed_i64(fleet.formation_id, "formation id")?,
+                    typed_i64(fleet.tactic_id, "tactic id")?,
+                ],
+            )?;
+            for (position, hero_id) in fleet.members.iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO fleet_members(profile_id, fleet_id, position, hero_id)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        profile.id.as_str(),
+                        typed_i64(fleet_id.get(), "fleet id")?,
+                        typed_i64(position, "fleet member position")?,
+                        typed_i64(hero_id.get(), "fleet member hero id")?,
+                    ],
+                )?;
+            }
+        }
+        for (task_id, progress) in &account.tasks.progress {
+            transaction.execute(
+                "INSERT INTO tasks(profile_id, task_id, task_type, progress, completed, reset_day)
+                 VALUES (?1, ?2, 0, ?3, ?4, 0)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(*task_id, "task id")?,
+                    typed_i64(*progress, "task progress")?,
+                    i64::from(account.tasks.completed.contains(task_id)),
+                ],
+            )?;
+        }
+        for (chapter_id, challenge_times) in &account.daily_copy.challenge_times {
+            transaction.execute(
+                "INSERT INTO daily_copy_progress(
+                    profile_id, reset_day, chapter_id, group_id, challenge_times,
+                    success_times, select_ex, extra_group
+                 ) VALUES (?1, ?2, ?3, 0, ?4, 0, 0, 0)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(account.daily_copy.reset_day, "daily reset day")?,
+                    typed_i64(chapter_id.get(), "daily chapter id")?,
+                    typed_i64(*challenge_times, "daily challenge times")?,
+                ],
+            )?;
+        }
+        for (building_id, level) in &account.buildings.levels {
+            transaction.execute(
+                "INSERT INTO buildings(profile_id, building_id, level, land_index)
+                 VALUES (?1, ?2, ?3, 0)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(*building_id, "building id")?,
+                    typed_i64(*level, "building level")?,
+                ],
+            )?;
+        }
+        if let Some(session) = &account.battle.active {
+            transaction.execute(
+                "INSERT INTO battle_sessions(
+                    profile_id, chapter_id, copy_id, current_fleet, state,
+                    started_at, expires_at, revision
+                 ) VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?6, ?7)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(session.chapter_id.get(), "battle chapter id")?,
+                    typed_i64(session.copy_id.get(), "battle copy id")?,
+                    typed_i64(session.current_fleet, "battle current fleet")?,
+                    typed_i64(session.started_at, "battle start")?,
+                    typed_i64(session.expires_at, "battle expiry")?,
+                    typed_i64(session.revision, "battle revision")?,
+                ],
+            )?;
+        }
+        transaction.execute(
+            "INSERT INTO account_revisions(profile_id, revision, updated_utc)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(profile_id) DO UPDATE SET
+               revision = excluded.revision,
+               updated_utc = excluded.updated_utc",
+            params![profile.id.as_str(), sql_revision, timestamp()],
+        )?;
+        transaction.commit()?;
+        Ok(next_revision)
+    }
+
     pub fn list(&self) -> Result<Vec<String>, StorageError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare("SELECT id FROM profiles ORDER BY id")?;
@@ -465,6 +694,48 @@ fn positive_u64(value: i64, field: &str) -> Result<u64, StorageError> {
         .ok()
         .filter(|value| *value > 0)
         .ok_or_else(|| StorageError::InvalidTypedAccount(format!("{field} must be positive")))
+}
+
+fn typed_i64<T>(value: T, field: &str) -> Result<i64, StorageError>
+where
+    T: TryInto<i64>,
+{
+    value
+        .try_into()
+        .map_err(|_| StorageError::InvalidTypedAccount(format!("{field} exceeds SQLite range")))
+}
+
+fn clear_normalized_account(
+    transaction: &Transaction<'_>,
+    profile_id: &str,
+) -> Result<(), StorageError> {
+    for table in [
+        "task_claims",
+        "construction_jobs",
+        "buildings",
+        "daily_copy_progress",
+        "copy_progress",
+        "sea_progress",
+        "tower_progress",
+        "activity_progress",
+        "tasks",
+        "battle_sessions",
+        "fleet_members",
+        "fleets",
+        "hero_equip_slots",
+        "equipments",
+        "heroes",
+        "inventory",
+        "characters",
+        "friend_relations",
+        "chat_messages",
+    ] {
+        transaction.execute(
+            &format!("DELETE FROM {table} WHERE profile_id = ?1"),
+            params![profile_id],
+        )?;
+    }
+    Ok(())
 }
 
 fn non_negative_u64(value: i64, field: &str) -> Result<u64, StorageError> {
@@ -987,26 +1258,19 @@ fn bool_field(object: &serde_json::Map<String, Value>, key: &str) -> i64 {
 
 impl AccountRepository for ProfileStore {
     fn load(&self, profile_id: &ProfileId) -> Result<Option<AccountState>, RepositoryError> {
-        if let Some(value) = self
-            .load_account(profile_id.as_str())
-            .map_err(|error| RepositoryError::Storage(error.to_string()))?
-        {
-            return serde_json::from_value(value)
-                .map(Some)
-                .map_err(|error| RepositoryError::Storage(error.to_string()));
-        }
         self.load_typed_account(profile_id)
             .map_err(|error| RepositoryError::Storage(error.to_string()))
     }
 
     fn create(&self, account: &AccountState) -> Result<(), RepositoryError> {
-        let profile = account.profile.as_ref().ok_or_else(|| {
-            RepositoryError::Storage("account profile is required for creation".to_owned())
-        })?;
+        if account.profile.is_none() {
+            return Err(RepositoryError::Storage(
+                "account profile is required for creation".to_owned(),
+            ));
+        }
         account.validate()?;
-        let value = serde_json::to_value(account)
-            .map_err(|error| RepositoryError::Storage(error.to_string()))?;
-        self.save_account(profile.id.as_str(), &value)
+        self.save_typed_account_with_revision(account, None)
+            .map(|_| ())
             .map_err(|error| RepositoryError::Storage(error.to_string()))
     }
 
@@ -1014,24 +1278,23 @@ impl AccountRepository for ProfileStore {
     where
         F: FnOnce(&mut AccountState) -> Result<T, blueoath_domain::DomainError>,
     {
-        let mut account = self
-            .load_account(profile_id.as_str())
+        let existing = self
+            .load_typed_account(profile_id)
             .map_err(|error| RepositoryError::Storage(error.to_string()))?
-            .map(|value| {
-                serde_json::from_value(value)
-                    .map_err(|error| RepositoryError::Storage(error.to_string()))
-            })
-            .transpose()?
             .unwrap_or_else(|| {
                 let profile = profile_id.clone();
                 NewAccountFactory::create(profile, profile_id.as_str())
             });
+        let expected_revision = existing.profile.as_ref().map(|profile| profile.revision);
+        let mut account = existing;
         let result = operation(&mut account)?;
         account.validate()?;
-        let value = serde_json::to_value(&account)
+        let next_revision = self
+            .save_typed_account_with_revision(&account, expected_revision)
             .map_err(|error| RepositoryError::Storage(error.to_string()))?;
-        self.save_account(profile_id.as_str(), &value)
-            .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+        if let Some(profile) = account.profile.as_mut() {
+            profile.revision = next_revision;
+        }
         Ok(result)
     }
 }

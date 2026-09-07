@@ -10,8 +10,8 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     request_args: &[u8],
 ) -> HandlerResult {
     let payload = handle_legacy(context, method, request_args);
-    if *context.response_err != 0 {
-        HandlerResult::Error(GameError::Internal(context.response_err_msg.clone()))
+    if let Some(error) = context.handler_error.clone() {
+        HandlerResult::Error(error)
     } else {
         match payload {
             Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
@@ -29,8 +29,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
     let account = &mut *context.account;
     let hero_level_catalog = context.catalogs.hero_level;
     let pre_pushes = &mut *context.pre_pushes;
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
+    let handler_error = &mut *context.handler_error;
 
     match method {
         "jopen.GetJopen" => Some(jopen_payload(account.as_deref().unwrap_or(&Value::Null))),
@@ -75,8 +74,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         UserInfoCodec::encode(&user_info_from_account(state, Some(account))),
                     );
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "strategy request is invalid".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "strategy request is invalid".to_owned(),
+                    ));
                 }
             }
             Some(Vec::new())
@@ -108,8 +108,8 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         support_info_payload(account),
                     );
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "support request is invalid".to_owned();
+                    *handler_error =
+                        Some(GameError::Internal("support request is invalid".to_owned()));
                 }
             }
             Some(Vec::new())
@@ -169,8 +169,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     }
                     return Some(encode_support_settlement(&settlement));
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "support entry is not ready or invalid".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "support entry is not ready or invalid".to_owned(),
+                    ));
                 }
             }
             Some(Vec::new())
@@ -182,8 +183,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let activity_id = decode_varint_field(request_args, 1);
             let index = decode_varint_field(request_args, 2);
             if activity_id <= 0 || index <= 0 {
-                *response_err = 1;
-                *response_err_msg = "milestone request is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "milestone request is invalid".to_owned(),
+                ));
             } else if let Some(account) = account.as_deref_mut() {
                 let claimed = account
                     .as_object_mut()
@@ -253,8 +255,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let chapter_id = decode_varint_field(request_args, 1);
             let score_entries = decode_repeated_message_field(request_args, 3);
             if chapter_id <= 0 || score_entries.is_empty() {
-                *response_err = 1;
-                *response_err_msg = "mini-game score request is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "mini-game score request is invalid".to_owned(),
+                ));
                 Some(Vec::new())
             } else if let Some(account) = account.as_deref_mut() {
                 let now = current_unix_seconds().min(i32::MAX as u32) as i32;
@@ -269,16 +272,16 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 let total = mini_game_chapter_score(account, chapter_id);
                 Some(mini_game_score_response(total, now))
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 Some(Vec::new())
             }
         }
         "user.GetMiniGameScore" => {
             let chapter_id = decode_varint_field(request_args, 1);
             if chapter_id <= 0 {
-                *response_err = 1;
-                *response_err_msg = "mini-game chapter is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "mini-game chapter is invalid".to_owned(),
+                ));
                 Some(Vec::new())
             } else {
                 Some(mini_game_score_response(
@@ -293,8 +296,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
         "user.GetMiniGameScoreRank" => {
             let chapter_id = decode_varint_field(request_args, 1);
             if chapter_id <= 0 {
-                *response_err = 1;
-                *response_err_msg = "mini-game chapter is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "mini-game chapter is invalid".to_owned(),
+                ));
                 Some(Vec::new())
             } else {
                 let account_value = account.as_deref().unwrap_or(&Value::Null);
@@ -319,12 +323,12 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         UserInfoCodec::encode(&user_info_from_account(state, Some(account))),
                     );
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "resource purchase is unavailable".to_owned();
+                    *handler_error = Some(GameError::Internal(
+                        "resource purchase is unavailable".to_owned(),
+                    ));
                 }
             } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
             }
             Some(Vec::new())
         }

@@ -14,8 +14,8 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     request_args: &[u8],
 ) -> HandlerResult {
     let payload = handle_legacy(context, method, request_args);
-    if *context.response_err != 0 {
-        HandlerResult::Error(GameError::Internal(context.response_err_msg.clone()))
+    if let Some(error) = context.handler_error.clone() {
+        HandlerResult::Error(error)
     } else {
         match payload {
             Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
@@ -30,8 +30,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
     request_args: &[u8],
 ) -> Option<Vec<u8>> {
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
+    let handler_error = &mut *context.handler_error;
     let account = context.account.as_deref_mut()?;
     ensure_activity_fashion_state(catalog, account);
     match method {
@@ -50,8 +49,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 context.state,
                 context.pre_pushes,
                 context.catalogs.fashion,
-                response_err,
-                response_err_msg,
+                handler_error,
             )
         }
         "activityextract.SwitchDraw" => {
@@ -77,8 +75,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 context.state,
                 context.pre_pushes,
                 context.catalogs.fashion,
-                response_err,
-                response_err_msg,
+                handler_error,
             )
         }
         "activityextractur.SwitchDraw" => {
@@ -99,8 +96,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
             context.pre_pushes,
             context.catalogs.fashion,
             request_args,
-            response_err,
-            response_err_msg,
+            handler_error,
         ),
         "activityfashion.Reward" => handle_activity_fashion_reward(
             catalog,
@@ -109,8 +105,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
             context.pre_pushes,
             context.catalogs.fashion,
             request_args,
-            response_err,
-            response_err_msg,
+            handler_error,
         ),
         "activitySSR.GetActivitySSRInfo" => {
             Some(ssr_info_payload(activity_state_mut(account, "activitySSR")))
@@ -163,8 +158,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
         "activitybirthday.MakeBirthdayCake" => {
             let formula = decode_varint_field(request_args, 1).max(0);
             let Some(reward) = birthday_formula_reward(catalog, formula) else {
-                *response_err = 1;
-                *response_err_msg = "birthday cake formula is not configured".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "birthday cake formula is not configured".to_owned(),
+                ));
                 return Some(Vec::new());
             };
             {
@@ -200,8 +196,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let cake = decode_varint_field(request_args, 2).max(0);
             let state = activity_state_mut(account, "activityBirthday");
             if team_id <= 0 || cake <= 0 {
-                *response_err = 1;
-                *response_err_msg = "birthday feed request is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "birthday feed request is invalid".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             state["lastFeedTeamId"] = json!(team_id);
@@ -223,8 +220,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
         "activitybirthday.GetCakeAffairReward" => {
             let level = decode_varint_field(request_args, 1).max(0);
             let Some(reward_id) = birthday_affair_reward_id(catalog, level) else {
-                *response_err = 1;
-                *response_err_msg = "birthday affair reward is not configured".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "birthday affair reward is not configured".to_owned(),
+                ));
                 return Some(Vec::new());
             };
             let already_claimed = account
@@ -248,8 +246,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .cloned()
                 .unwrap_or_default();
             if reward_defs.is_empty() {
-                *response_err = 1;
-                *response_err_msg = "birthday affair reward is missing".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "birthday affair reward is missing".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             for reward in reward_defs {
@@ -287,8 +286,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let code = decode_varint_field(request_args, 1);
             let number = decode_varint_field(request_args, 3).clamp(1, 99);
             if code <= 0 {
-                *response_err = 1;
-                *response_err_msg = "activity exchange code is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "activity exchange code is invalid".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             let state = activity_state_mut(account, "activityCodeExchange");
@@ -299,8 +299,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let reward_index = decode_varint_field(request_args, 1).max(0);
             let number = decode_varint_field(request_args, 2).clamp(1, 99);
             let Some(activity) = code_exchange_activity(catalog) else {
-                *response_err = 1;
-                *response_err_msg = "activity exchange config is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "activity exchange config is unavailable".to_owned(),
+                ));
                 return Some(Vec::new());
             };
             let reward_id = activity
@@ -318,8 +319,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .cloned()
                 .unwrap_or_default();
             if reward_index <= 0 || reward_id <= 0 || reward_defs.is_empty() {
-                *response_err = 1;
-                *response_err_msg = "activity exchange reward is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "activity exchange reward is invalid".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             let state = activity_state_mut(account, "activityCodeExchange");
@@ -332,8 +334,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .and_then(|receipt| json_i64(receipt, "count"))
                 .unwrap_or_default();
             if available < i64::from(number) {
-                *response_err = 1;
-                *response_err_msg = "activity exchange reward count is insufficient".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "activity exchange reward count is insufficient".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             if let Some(receipt) = state
@@ -374,8 +377,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
         "activitypapercut.MakePaperCut" => {
             let materials = decode_repeated_varint_field(request_args, 1);
             if materials.is_empty() {
-                *response_err = 1;
-                *response_err_msg = "paper cut materials are empty".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "paper cut materials are empty".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             let formula_config = catalog.paper_cut_formulas.values().find(|config| {
@@ -401,8 +405,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                     })
             });
             let Some(formula_config) = formula_config else {
-                *response_err = 1;
-                *response_err_msg = "paper cut formula is not configured".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "paper cut formula is not configured".to_owned(),
+                ));
                 return Some(Vec::new());
             };
             let formula = json_i32(formula_config, "id").unwrap_or_default();
@@ -415,8 +420,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .and_then(|values| values.first())
                 .and_then(Value::as_array);
             let Some(drop) = drop else {
-                *response_err = 1;
-                *response_err_msg = "paper cut reward is not configured".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "paper cut reward is not configured".to_owned(),
+                ));
                 return Some(Vec::new());
             };
             let goods_type =
@@ -427,16 +433,16 @@ fn handle_legacy<'state, 'account, 'scratch>(
             let amount = i32::try_from(drop.get(2).and_then(Value::as_i64).unwrap_or_default())
                 .unwrap_or_default();
             let Some(account) = context.account.as_deref_mut() else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
+                *handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
                 return Some(Vec::new());
             };
             if materials
                 .iter()
                 .any(|item_id| !extract_can_consume(account, 1, *item_id, 1))
             {
-                *response_err = 1;
-                *response_err_msg = "paper cut materials are insufficient".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "paper cut materials are insufficient".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             for item_id in materials {
@@ -467,8 +473,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
         "activitysecretcopy.GetReward" => {
             let rate_index = decode_varint_field(request_args, 1);
             if rate_index <= 0 {
-                *response_err = 1;
-                *response_err_msg = "secret copy reward index is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "secret copy reward index is invalid".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             let state = activity_state_mut(account, "activitySecretCopy");
@@ -479,8 +486,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                 .flatten()
                 .any(|item| json_i64(item, "rateIndex") == Some(i64::from(rate_index)));
             if already_claimed {
-                *response_err = 1;
-                *response_err_msg = "secret copy reward was already claimed".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "secret copy reward was already claimed".to_owned(),
+                ));
             } else {
                 state["rewards"]
                     .as_array_mut()
@@ -496,8 +504,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
         | "activityvalentineloveletter.GetRewardBySecretary" => {
             let index = decode_varint_field(request_args, 1).max(0);
             if method.ends_with("GetReward") && index <= 0 {
-                *response_err = 1;
-                *response_err_msg = "valentine reward index is invalid".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "valentine reward index is invalid".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             let key = if method.ends_with("BySecretary") {
@@ -519,8 +528,9 @@ fn handle_legacy<'state, 'account, 'scratch>(
                         .any(|value| value.as_i64() == Some(i64::from(index)))
                 });
             if !already_claimed && reward_id.is_none() {
-                *response_err = 1;
-                *response_err_msg = "valentine reward is not configured".to_owned();
+                *handler_error = Some(GameError::Internal(
+                    "valentine reward is not configured".to_owned(),
+                ));
                 return Some(Vec::new());
             }
             let rewards = if !already_claimed {
@@ -626,8 +636,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
             context.state,
             context.pre_pushes,
             request_args,
-            response_err,
-            response_err_msg,
+            handler_error,
         ),
         "activitychristmasshop.OpenSpecialBlindBox" => {
             let item_id = decode_varint_field(request_args, 1).max(0);
@@ -643,8 +652,7 @@ fn handle_legacy<'state, 'account, 'scratch>(
             context.state,
             context.pre_pushes,
             request_args,
-            response_err,
-            response_err_msg,
+            handler_error,
         ),
         "activitychristmasshop.SetToy" => {
             let toy_id = decode_varint_field(request_args, 1).max(0);
@@ -836,12 +844,12 @@ fn handle_activity_fashion_buy(
     pre_pushes: &mut Vec<Vec<u8>>,
     fashion_catalog: Option<&blueoath_protocol::FashionList>,
     request_args: &[u8],
-    response_err: &mut i32,
-    response_err_msg: &mut String,
+    handler_error: &mut Option<GameError>,
 ) -> Option<Vec<u8>> {
     let Some(config) = activity_fashion_config(catalog, account) else {
-        *response_err = 1;
-        *response_err_msg = "activity fashion configuration is unavailable".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity fashion configuration is unavailable".to_owned(),
+        ));
         return Some(Vec::new());
     };
     let current = account
@@ -858,8 +866,9 @@ fn handle_activity_fashion_buy(
         .unwrap_or_default();
     let requested = decode_varint_field(request_args, 1).clamp(1, 99);
     if max_count <= current || i64::from(requested) > max_count - current {
-        *response_err = 1;
-        *response_err_msg = "activity fashion purchase limit reached".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity fashion purchase limit reached".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let gid = decode_varint_field(request_args, 2).max(0);
@@ -872,13 +881,15 @@ fn handle_activity_fashion_buy(
         .filter_map(|value| i32::try_from(value).ok())
         .collect::<Vec<_>>();
     if pools.len() < 3 {
-        *response_err = 1;
-        *response_err_msg = "activity fashion reward pools are incomplete".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity fashion reward pools are incomplete".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let Some((goods_type, item_id, unit_cost)) = activity_fashion_cost(&config) else {
-        *response_err = 1;
-        *response_err_msg = "activity fashion purchase cost is invalid".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity fashion purchase cost is invalid".to_owned(),
+        ));
         return Some(Vec::new());
     };
     let unowned_fashion = config
@@ -894,8 +905,9 @@ fn handle_activity_fashion_buy(
     let mut target_unowned = unowned_fashion.is_some();
     let requested_pool = pools.iter().position(|pool| *pool == gid);
     if gid > 0 && requested_pool.is_none() && gid != item_id {
-        *response_err = 1;
-        *response_err_msg = "activity fashion reward pool is invalid".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity fashion reward pool is invalid".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let mut reward_specs = Vec::new();
@@ -911,8 +923,9 @@ fn handle_activity_fashion_buy(
             pools[1]
         };
         let Some(reward) = activity_fashion_drop_reward(catalog, drop_id, draw_index) else {
-            *response_err = 1;
-            *response_err_msg = "activity fashion reward configuration is invalid".to_owned();
+            *handler_error = Some(GameError::Internal(
+                "activity fashion reward configuration is invalid".to_owned(),
+            ));
             return Some(Vec::new());
         };
         if unowned_fashion == Some(reward.item_id) && reward.goods_type == 18 {
@@ -922,8 +935,9 @@ fn handle_activity_fashion_buy(
     }
     let total_cost = unit_cost.saturating_mul(requested);
     if !resource_available(account, goods_type, item_id, total_cost) {
-        *response_err = 1;
-        *response_err_msg = "activity fashion purchase cost is insufficient".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity fashion purchase cost is insufficient".to_owned(),
+        ));
         return Some(Vec::new());
     }
     consume_resource(account, goods_type, item_id, total_cost);
@@ -948,13 +962,13 @@ fn handle_activity_fashion_reward(
     pre_pushes: &mut Vec<Vec<u8>>,
     fashion_catalog: Option<&blueoath_protocol::FashionList>,
     request_args: &[u8],
-    response_err: &mut i32,
-    response_err_msg: &mut String,
+    handler_error: &mut Option<GameError>,
 ) -> Option<Vec<u8>> {
     let index = decode_varint_field(request_args, 1);
     let Some(config) = activity_fashion_config(catalog, account) else {
-        *response_err = 1;
-        *response_err_msg = "activity fashion configuration is unavailable".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity fashion configuration is unavailable".to_owned(),
+        ));
         return Some(Vec::new());
     };
     let (threshold, drop_id) = match index {
@@ -964,8 +978,9 @@ fn handle_activity_fashion_reward(
     }
     .unwrap_or_default();
     if threshold <= 0 || drop_id <= 0 {
-        *response_err = 1;
-        *response_err_msg = "activity fashion reward index is invalid".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity fashion reward index is invalid".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let already_claimed = account
@@ -986,13 +1001,15 @@ fn handle_activity_fashion_reward(
         .and_then(Value::as_i64)
         .unwrap_or_default();
     if buy_count < i64::from(threshold) {
-        *response_err = 1;
-        *response_err_msg = "activity fashion milestone is not reached".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity fashion milestone is not reached".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let Some(reward) = activity_fashion_drop_reward(catalog, drop_id, i64::from(index)) else {
-        *response_err = 1;
-        *response_err_msg = "activity fashion milestone reward is invalid".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity fashion milestone reward is invalid".to_owned(),
+        ));
         return Some(Vec::new());
     };
     let reward = grant_reward(account, reward, current_unix_seconds(), fashion_catalog);
@@ -1067,12 +1084,12 @@ fn handle_extract_draw(
     server_state: &ServerState,
     pre_pushes: &mut Vec<Vec<u8>>,
     fashion_catalog: Option<&blueoath_protocol::FashionList>,
-    response_err: &mut i32,
-    response_err_msg: &mut String,
+    handler_error: &mut Option<GameError>,
 ) -> Option<Vec<u8>> {
     if draw_id <= 0 {
-        *response_err = 1;
-        *response_err_msg = "activity extract draw id is invalid".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity extract draw id is invalid".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let configs = if ur {
@@ -1081,13 +1098,15 @@ fn handle_extract_draw(
         &catalog.activity_extract
     };
     let Some(config) = configs.get(&draw_id) else {
-        *response_err = 1;
-        *response_err_msg = "activity extract pool is not configured".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity extract pool is not configured".to_owned(),
+        ));
         return Some(Vec::new());
     };
     let Some(cost) = extract_cost(config) else {
-        *response_err = 1;
-        *response_err_msg = "activity extract cost is not configured".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity extract cost is not configured".to_owned(),
+        ));
         return Some(Vec::new());
     };
     let entries = config
@@ -1105,14 +1124,16 @@ fn handle_extract_draw(
         .filter(|(reward_id, amount)| *reward_id > 0 && *amount > 0)
         .collect::<Vec<_>>();
     if entries.is_empty() {
-        *response_err = 1;
-        *response_err_msg = "activity extract reward pool is empty".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity extract reward pool is empty".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let total_cost = cost.2.saturating_mul(num);
     if !extract_can_consume(account, cost.0, cost.1, total_cost) {
-        *response_err = 1;
-        *response_err_msg = "activity extract cost is insufficient".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "activity extract cost is insufficient".to_owned(),
+        ));
         return Some(Vec::new());
     }
     extract_consume(account, cost.0, cost.1, total_cost);
@@ -1703,8 +1724,7 @@ fn handle_christmas_buy_box(
     server_state: &ServerState,
     pre_pushes: &mut Vec<Vec<u8>>,
     request_args: &[u8],
-    response_err: &mut i32,
-    response_err_msg: &mut String,
+    handler_error: &mut Option<GameError>,
 ) -> Option<Vec<u8>> {
     const BLIND_BOX_COIN: i32 = 17_007;
     const BLIND_BOX_REPEAT_TOY: i32 = 17_008;
@@ -1713,8 +1733,9 @@ fn handle_christmas_buy_box(
     let limit = parameter_value(catalog, 314).unwrap_or(8).max(1);
     let eligible = christmas_eligible_figures(catalog, account);
     if eligible.is_empty() {
-        *response_err = 1;
-        *response_err_msg = "christmas blind box has no eligible figure".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "christmas blind box has no eligible figure".to_owned(),
+        ));
         return Some(Vec::new());
     }
     let current_count = account
@@ -1727,13 +1748,15 @@ fn handle_christmas_buy_box(
         .and_then(|entry| json_i64(entry, "buyCount"))
         .unwrap_or_default();
     if current_count >= i64::from(limit) {
-        *response_err = 1;
-        *response_err_msg = "christmas blind box daily limit reached".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "christmas blind box daily limit reached".to_owned(),
+        ));
         return Some(Vec::new());
     }
     if !resource_available(account, 1, BLIND_BOX_COIN, cost) {
-        *response_err = 1;
-        *response_err_msg = "christmas blind box coin is insufficient".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "christmas blind box coin is insufficient".to_owned(),
+        ));
         return Some(Vec::new());
     }
     consume_resource(account, 1, BLIND_BOX_COIN, cost);
@@ -1843,8 +1866,7 @@ fn handle_christmas_buy_item(
     server_state: &ServerState,
     pre_pushes: &mut Vec<Vec<u8>>,
     request_args: &[u8],
-    response_err: &mut i32,
-    response_err_msg: &mut String,
+    handler_error: &mut Option<GameError>,
 ) -> Option<Vec<u8>> {
     const BUY_CUR: i32 = 1;
     const BUY_TOY: i32 = 2;
@@ -1860,15 +1882,17 @@ fn handle_christmas_buy_item(
             parameter_value(catalog, 312).unwrap_or(10).max(1),
         ),
         _ => {
-            *response_err = 1;
-            *response_err_msg = "christmas buy way is invalid".to_owned();
+            *handler_error = Some(GameError::Internal(
+                "christmas buy way is invalid".to_owned(),
+            ));
             return Some(Vec::new());
         }
     };
     let total_cost = unit_cost.saturating_mul(buy_times);
     if !resource_available(account, goods_type, item_id, total_cost) {
-        *response_err = 1;
-        *response_err_msg = "christmas blind box exchange cost is insufficient".to_owned();
+        *handler_error = Some(GameError::Internal(
+            "christmas blind box exchange cost is insufficient".to_owned(),
+        ));
         return Some(Vec::new());
     }
     consume_resource(account, goods_type, item_id, total_cost);
