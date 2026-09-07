@@ -211,6 +211,19 @@ where
             }
             result.into_payload()
         }
+        _ if typed_account.is_some() && compat_feature::handles_typed(request.method.as_str()) => {
+            let result = compat_feature::handle_typed(
+                state,
+                typed_account.as_mut().expect("typed compat account"),
+                request.method.as_str(),
+                request_args,
+                &mut pre_pushes,
+            );
+            if let HandlerResult::Error(error) = &result {
+                handler_error = Some(error.clone());
+            }
+            result.into_payload()
+        }
         _ if typed_account.is_some() && legacy_only_method(request.method.as_str()) => {
             handler_error = Some(GameError::InvalidRequest(
                 "request family has no typed handler",

@@ -14,6 +14,100 @@ use super::*;
 const HP_COEFFICIENT: i64 = 10_000_000_000;
 const OATH_RING_TEMPLATE: i32 = 10_180;
 
+pub(super) fn handles_typed(method: &str) -> bool {
+    method == "repair.RepairHero"
+}
+
+pub(super) fn handle_typed(
+    state: &ServerState,
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    pre_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    if method != "repair.RepairHero" {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "compat feature method is unsupported",
+        ));
+    }
+    let hero_ids = decode_repeated_varint_field(request_args, 1)
+        .into_iter()
+        .filter(|id| *id > 0)
+        .map(|id| id as u64)
+        .collect::<std::collections::BTreeSet<_>>();
+    if hero_ids.is_empty() {
+        return HandlerResult::Error(GameError::InvalidRequest("repair hero list is empty"));
+    }
+    let mut total_cost = 0_u64;
+    for hero_id in &hero_ids {
+        let Some(hero) = account
+            .dock
+            .heroes
+            .values()
+            .find(|hero| hero.id.get() == *hero_id)
+        else {
+            return HandlerResult::Error(GameError::NotFound("hero"));
+        };
+        if hero.hp >= HP_COEFFICIENT as u64 {
+            continue;
+        }
+        let template_id = i32::try_from(hero.template_id.get()).unwrap_or_default();
+        let fixed_money = SHIP_STAT_CATALOG
+            .get()
+            .and_then(|catalog| catalog.by_template.get(&template_id))
+            .map(|stats| stats.fixed_money.max(0) as u64)
+            .unwrap_or_default();
+        let missing = (HP_COEFFICIENT as u64).saturating_sub(hero.hp);
+        let cost = fixed_money
+            .checked_mul(missing)
+            .and_then(|value| value.checked_add(HP_COEFFICIENT as u64 - 1))
+            .map(|value| value / HP_COEFFICIENT as u64)
+            .ok_or(GameError::InvalidState("repair cost overflow"));
+        let Ok(cost) = cost else {
+            return HandlerResult::Error(GameError::InvalidState("repair cost overflow"));
+        };
+        total_cost = total_cost.saturating_add(cost);
+    }
+    if account
+        .resources
+        .amount(blueoath_domain::CurrencyKind::Gold)
+        .get()
+        < total_cost
+    {
+        return HandlerResult::Error(GameError::InsufficientResource(
+            blueoath_domain::CurrencyKind::Gold,
+        ));
+    }
+    if total_cost > 0 {
+        if account
+            .resources
+            .debit(blueoath_domain::CurrencyKind::Gold, total_cost)
+            .is_err()
+        {
+            return HandlerResult::Error(GameError::InsufficientResource(
+                blueoath_domain::CurrencyKind::Gold,
+            ));
+        }
+        for hero_id in hero_ids {
+            if let Some(hero) = account
+                .dock
+                .heroes
+                .values_mut()
+                .find(|hero| hero.id.get() == hero_id)
+            {
+                hero.hp = HP_COEFFICIENT as u64;
+            }
+        }
+        pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
+        append_method_push(
+            pre_pushes,
+            "user.UpdateUserInfo",
+            UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+        );
+    }
+    HandlerResult::PushOnly
+}
+
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
