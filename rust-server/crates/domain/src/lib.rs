@@ -664,6 +664,8 @@ pub struct AccountState {
     #[serde(default)]
     pub ship_task: ShipTaskState,
     #[serde(default)]
+    pub exchange_times: BTreeMap<u64, u32>,
+    #[serde(default)]
     pub invite_score: InviteScoreState,
     #[serde(default)]
     pub talents: TalentState,

@@ -1185,6 +1185,17 @@ impl ProfileStore {
                     }
                     _ => {}
                 }
+            } else if activity_id == "exchange" {
+                if let Ok(id) = progress_kind.parse::<u64>() {
+                    account.exchange_times.insert(
+                        id,
+                        u32::try_from(value).map_err(|_| {
+                            StorageError::InvalidTypedAccount(
+                                "exchange count is too large".to_owned(),
+                            )
+                        })?,
+                    );
+                }
             } else if activity_id == "buildShip" {
                 let mut parts = progress_kind.split(':');
                 match parts.next() {
@@ -2571,6 +2582,19 @@ impl ProfileStore {
                     profile.id.as_str(),
                     progress_kind,
                     typed_i64(value, "ship task state")?,
+                    timestamp(),
+                ],
+            )?;
+        }
+        for (id, count) in &account.exchange_times {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'exchange', ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    id.to_string(),
+                    typed_i64(u64::from(*count), "exchange count")?,
                     timestamp(),
                 ],
             )?;

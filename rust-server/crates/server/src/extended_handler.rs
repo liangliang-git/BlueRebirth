@@ -15,6 +15,162 @@ pub(super) fn handles(method: &str) -> bool {
     )
 }
 
+pub(super) fn handle_typed_exchange(
+    state: &ServerState,
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    pre_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    let catalog = gameplay_catalog();
+    match method {
+        "exchange.GetExchangeInfo" | "exchange.GetExchange" => {
+            reply(method, typed_exchange_info_payload(account, catalog))
+        }
+        "exchange.Exchange" => {
+            let id = decode_varint_field(request_args, 1);
+            let Some(config) = catalog.exchanges.get(&id) else {
+                return invalid("exchange item was not found");
+            };
+            let max_count = json_i32(config, "change_count").unwrap_or_default();
+            let consume = reward_triplets(config, "item_consume");
+            let rewards = reward_triplets(config, "item_reward");
+            let current_count = account
+                .exchange_times
+                .get(&(id.max(0) as u64))
+                .copied()
+                .unwrap_or_default();
+            if max_count > 0 && current_count >= max_count as u32 {
+                return invalid("exchange limit reached");
+            }
+            if consume.is_empty() || rewards.is_empty() {
+                return invalid("exchange reward is not configured");
+            }
+            if consume
+                .iter()
+                .any(|(kind, item, amount)| !can_consume_typed(account, *kind, *item, *amount))
+            {
+                return invalid("exchange cost is insufficient");
+            }
+            let typed_rewards = rewards
+                .iter()
+                .map(|(kind, item, amount)| ShopReward {
+                    goods_type: *kind,
+                    item_id: *item,
+                    num: *amount,
+                    instance_id: 0,
+                })
+                .collect::<Vec<_>>();
+            if !can_grant_typed_task_rewards(account, &typed_rewards) {
+                return invalid("exchange reward is unsupported");
+            }
+            for (kind, item, amount) in consume {
+                consume_typed(account, kind, item, amount);
+            }
+            for reward in &typed_rewards {
+                let _ = grant_typed_task_reward(account, reward);
+            }
+            account
+                .exchange_times
+                .entry(id.max(0) as u64)
+                .and_modify(|count| *count = count.saturating_add(1))
+                .or_insert(1);
+            append_method_push(
+                pre_pushes,
+                "user.UpdateUserInfo",
+                UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            reply("exchange.Exchange", encode_rewards_list(&typed_rewards))
+        }
+        _ => HandlerResult::Empty,
+    }
+}
+
+fn typed_exchange_info_payload(
+    account: &blueoath_domain::AccountState,
+    catalog: &GameplayCatalog,
+) -> Vec<u8> {
+    let mut output = Vec::new();
+    for id in catalog.exchanges.keys().copied() {
+        let mut item = Vec::new();
+        append_varint_field(&mut item, 1, id.max(0) as u64);
+        append_varint_field(
+            &mut item,
+            2,
+            account
+                .exchange_times
+                .get(&(id.max(0) as u64))
+                .copied()
+                .unwrap_or_default() as u64,
+        );
+        append_message_field(&mut output, 1, &item);
+    }
+    output
+}
+
+fn can_consume_typed(
+    account: &blueoath_domain::AccountState,
+    kind: i32,
+    item: i32,
+    amount: i32,
+) -> bool {
+    let Ok(amount) = u64::try_from(amount) else {
+        return false;
+    };
+    if amount == 0 {
+        return false;
+    }
+    if kind == 5 {
+        return typed_currency(item)
+            .is_some_and(|currency| account.resources.amount(currency).get() >= amount);
+    }
+    let Ok(template_id) = blueoath_domain::TemplateId::new(item.max(0) as u64) else {
+        return false;
+    };
+    account
+        .inventory
+        .items
+        .get(&template_id)
+        .copied()
+        .unwrap_or_default()
+        >= amount
+}
+
+fn consume_typed(account: &mut blueoath_domain::AccountState, kind: i32, item: i32, amount: i32) {
+    let amount = u64::try_from(amount).unwrap_or_default();
+    if kind == 5 {
+        if let Some(currency) = typed_currency(item) {
+            let _ = account.resources.debit(currency, amount);
+        }
+    } else if let Ok(template_id) = blueoath_domain::TemplateId::new(item.max(0) as u64) {
+        let current = account
+            .inventory
+            .items
+            .get(&template_id)
+            .copied()
+            .unwrap_or_default();
+        account
+            .inventory
+            .items
+            .insert(template_id, current.saturating_sub(amount));
+    }
+}
+
+fn typed_currency(item: i32) -> Option<blueoath_domain::CurrencyKind> {
+    Some(match item {
+        1 => blueoath_domain::CurrencyKind::Gold,
+        2 => blueoath_domain::CurrencyKind::Diamond,
+        5 => blueoath_domain::CurrencyKind::Supply,
+        30 => blueoath_domain::CurrencyKind::PvePoint,
+        _ => return None,
+    })
+}
+
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,

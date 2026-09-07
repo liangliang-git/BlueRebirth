@@ -494,6 +494,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
     account.adventure.enemy_index = 1;
     account.ship_task.current_ship_tid = 12;
     account.ship_task.current_hero_template_id = 1200;
+    account.exchange_times.insert(7001, 3);
     account
         .ship_task
         .tasks
@@ -624,6 +625,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(loaded.ship_task.current_ship_tid, 12);
     assert_eq!(loaded.ship_task.tasks[0].count, 2);
     assert!(loaded.ship_task.achievements[0].claimed);
+    assert_eq!(loaded.exchange_times.get(&7001), Some(&3));
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())
