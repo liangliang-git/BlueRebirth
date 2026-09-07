@@ -2744,6 +2744,42 @@ impl Decode for ActivityItemIdRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MagazineItemRequest {
+    pub item_id: i32,
+}
+
+impl Decode for MagazineItemRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let item_id = required_field(&fields, 1, "magazine is missing item id")?;
+        if item_id <= 0 {
+            return Err(ProtocolError::Invalid("magazine item id is invalid"));
+        }
+        Ok(Self { item_id })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InteractionItemStateRequest {
+    pub item_id: i32,
+    pub value: i32,
+}
+
+impl Decode for InteractionItemStateRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let item_id = required_field(&fields, 1, "interaction item is missing item id")?;
+        let value = optional_i32(&fields, 2, "interaction item has duplicate state value")?;
+        if item_id <= 0 || value < 0 {
+            return Err(ProtocolError::Invalid(
+                "interaction item state request is invalid",
+            ));
+        }
+        Ok(Self { item_id, value })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActivityCodeExchangeRequest {
     pub code: i32,
     pub number: i32,

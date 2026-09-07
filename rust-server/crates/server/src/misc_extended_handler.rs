@@ -27,7 +27,12 @@ fn handle_typed_magazine(
     pre_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
     if method == "magazine.FetchMagazineReward" {
-        let reward_key = decode_varint_field(args, 1).max(0) as u64;
+        let Ok(request) = MagazineItemRequest::decode(args) else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "magazine item request is invalid",
+            ));
+        };
+        let reward_key = request.item_id as u64;
         let already_claimed = account.magazine.claimed_rewards.contains(&reward_key);
         let reward_id = magazine_reward_id(catalog, reward_key as i32);
         let rewards = if !already_claimed && reward_id > 0 {
@@ -67,21 +72,36 @@ fn handle_typed_magazine(
         }
         "magazine.UpdateMagazineInfo" => reply(method, typed_magazine_update_payload(account)),
         "magazine.AddHero" => {
-            let hero_id = decode_varint_field(args, 1).max(0) as u64;
+            let Ok(request) = MagazineItemRequest::decode(args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "magazine item request is invalid",
+                ));
+            };
+            let hero_id = request.item_id as u64;
             if hero_id > 0 && !account.magazine.heroes.contains(&hero_id) {
                 account.magazine.heroes.push(hero_id);
             }
             reply(method, typed_magazine_payload(account))
         }
         "magazine.Vote" => {
-            let page_id = decode_varint_field(args, 1).max(0) as u64;
+            let Ok(request) = MagazineItemRequest::decode(args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "magazine item request is invalid",
+                ));
+            };
+            let page_id = request.item_id as u64;
             if page_id > 0 {
                 account.magazine.votes.insert(page_id);
             }
             reply(method, typed_magazine_payload(account))
         }
         "magazine.UnLock" => {
-            let page_id = decode_varint_field(args, 1).max(0) as u64;
+            let Ok(request) = MagazineItemRequest::decode(args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "magazine item request is invalid",
+                ));
+            };
+            let page_id = request.item_id as u64;
             if page_id > 0 {
                 account.magazine.unlocked.insert(page_id);
             }
@@ -97,7 +117,18 @@ fn handle_typed_interaction(
     method: &str,
     args: &[u8],
 ) -> HandlerResult {
-    let item_id = decode_varint_field(args, 1).max(0) as u64;
+    if method == "interactionitem.RefreshInteractionItems" {
+        return reply(method, typed_interaction_payload(account));
+    }
+    let item_request = match InteractionItemStateRequest::decode(args) {
+        Ok(request) => request,
+        Err(_) => {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "interaction item request is invalid",
+            ));
+        }
+    };
+    let item_id = item_request.item_id as u64;
     if matches!(
         method,
         "interactionitem.GetItemReward"
@@ -122,32 +153,27 @@ fn handle_typed_interaction(
         return reply(method, typed_interaction_payload(account));
     }
     match method {
-        "interactionitem.RefreshInteractionItems" => {
-            reply(method, typed_interaction_payload(account))
-        }
         "interactionitem.SetCrystalBallToy" => {
             account.interaction_items.crystal_ball_toy = item_id;
             reply(method, typed_interaction_payload(account))
         }
         "interactionitem.SetBagItemVisible" => {
-            let visible = decode_varint_field(args, 2) != 0;
-            if item_id > 0 {
-                account.interaction_items.visible.insert(item_id, visible);
-            }
+            let visible = item_request.value != 0;
+            account.interaction_items.visible.insert(item_id, visible);
             reply(method, typed_interaction_payload(account))
         }
         "interactionitem.SetMutexBagGroupState" => {
-            let value = decode_varint_field(args, 2).max(0) as u64;
-            if item_id > 0 {
-                account.interaction_items.groups.insert(item_id, value);
-            }
+            account
+                .interaction_items
+                .groups
+                .insert(item_id, item_request.value as u64);
             reply(method, typed_interaction_payload(account))
         }
         "interactionitem.SetPosterState" => {
-            let value = decode_varint_field(args, 2).max(0) as u64;
-            if item_id > 0 {
-                account.interaction_items.posters.insert(item_id, value);
-            }
+            account
+                .interaction_items
+                .posters
+                .insert(item_id, item_request.value as u64);
             reply(method, typed_interaction_payload(account))
         }
         _ => HandlerResult::Empty,
