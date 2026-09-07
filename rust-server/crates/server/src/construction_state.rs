@@ -1,9 +1,11 @@
 #![allow(dead_code)]
 
+#[cfg(test)]
 use serde_json::{json, Value};
 
 use super::*;
 
+#[cfg(test)]
 pub(super) fn decode_construction_projects(payload: &[u8]) -> Vec<Value> {
     let mut projects = Vec::new();
     let mut index = 0;
@@ -72,6 +74,7 @@ pub(super) fn decode_construction_projects(payload: &[u8]) -> Vec<Value> {
     projects
 }
 
+#[cfg(test)]
 pub(super) fn start_construction(
     account: &mut Value,
     projects: &[Value],
@@ -280,6 +283,7 @@ pub(super) fn encode_discuss_empty() -> Vec<u8> {
     out
 }
 
+#[cfg(test)]
 pub(super) fn finish_construction(account: &mut Value, indexes: &[i32], now: u32) -> bool {
     if indexes.is_empty() {
         return false;
@@ -331,6 +335,7 @@ pub(super) fn finish_construction(account: &mut Value, indexes: &[i32], now: u32
     true
 }
 
+#[cfg(test)]
 pub(super) fn receive_construction(
     account: &mut Value,
     indexes: &[i32],
