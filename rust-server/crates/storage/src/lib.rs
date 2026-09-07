@@ -987,13 +987,16 @@ fn bool_field(object: &serde_json::Map<String, Value>, key: &str) -> i64 {
 
 impl AccountRepository for ProfileStore {
     fn load(&self, profile_id: &ProfileId) -> Result<Option<AccountState>, RepositoryError> {
-        self.load_account(profile_id.as_str())
+        if let Some(value) = self
+            .load_account(profile_id.as_str())
             .map_err(|error| RepositoryError::Storage(error.to_string()))?
-            .map(|value| {
-                serde_json::from_value(value)
-                    .map_err(|error| RepositoryError::Storage(error.to_string()))
-            })
-            .transpose()
+        {
+            return serde_json::from_value(value)
+                .map(Some)
+                .map_err(|error| RepositoryError::Storage(error.to_string()));
+        }
+        self.load_typed_account(profile_id)
+            .map_err(|error| RepositoryError::Storage(error.to_string()))
     }
 
     fn create(&self, account: &AccountState) -> Result<(), RepositoryError> {

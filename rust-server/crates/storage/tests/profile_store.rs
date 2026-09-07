@@ -284,5 +284,12 @@ fn account_snapshot_write_projects_core_rows_into_normalized_tables() {
             .unwrap();
         assert_eq!(count, expected, "table {table}");
     }
+    connection
+        .execute("DELETE FROM accounts WHERE id = 'normalized'", [])
+        .unwrap();
+    let repository_loaded = AccountRepository::load(&store, &ProfileId::new("normalized").unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(repository_loaded.character.uid, 7);
     let _ = std::fs::remove_dir_all(root);
 }
