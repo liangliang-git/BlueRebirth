@@ -12,6 +12,76 @@ pub(super) fn handle_typed(
     pre_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
     match method {
+        "strategy.GetStrategy" => {
+            HandlerResult::Reply(Response::raw(method, typed_strategy_info_payload(account)))
+        }
+        "strategy.Learn" | "strategy.Upgrade" => {
+            let strategy_id = decode_varint_field(request_args, 1);
+            if strategy_id <= 0 {
+                return HandlerResult::Error(GameError::InvalidRequest("strategy id is invalid"));
+            }
+            let level = decode_varint_field(request_args, 2).max(1) as u64;
+            account
+                .activities
+                .progress
+                .insert(format!("compat:strategy:{strategy_id}:level"), level);
+            append_method_push(
+                pre_pushes,
+                "strategy.GetStrategy",
+                typed_strategy_info_payload(account),
+            );
+            HandlerResult::PushOnly
+        }
+        "strategy.Reset" => {
+            account.activities.progress.retain(|key, _| {
+                !key.starts_with("compat:strategy:") || key == "compat:strategy:resetNum"
+            });
+            let reset_num = account
+                .activities
+                .progress
+                .get("compat:strategy:resetNum")
+                .copied()
+                .unwrap_or_default()
+                .saturating_add(1);
+            account
+                .activities
+                .progress
+                .insert("compat:strategy:resetNum".to_owned(), reset_num);
+            append_method_push(
+                pre_pushes,
+                "strategy.GetStrategy",
+                typed_strategy_info_payload(account),
+            );
+            HandlerResult::PushOnly
+        }
+        "strategy.Apply" => {
+            let strategy_id = decode_varint_field(request_args, 1);
+            let fleet_id = decode_varint_field(request_args, 3);
+            let tactic_type = decode_varint_field(request_args, 4);
+            if strategy_id <= 0 || fleet_id <= 0 || tactic_type <= 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "strategy apply request is invalid",
+                ));
+            }
+            let Ok(fleet_id) = blueoath_domain::FleetId::new(fleet_id as u64) else {
+                return HandlerResult::Error(GameError::InvalidRequest("fleet id is invalid"));
+            };
+            let Some(fleet) = account.fleet.fleets.get_mut(&fleet_id) else {
+                return HandlerResult::Error(GameError::NotFound("fleet"));
+            };
+            fleet.tactic_id = strategy_id as u32;
+            append_method_push(
+                pre_pushes,
+                "tactic.GetHerosTactic",
+                FleetInfoCodec::encode(&fleet_info_from_typed_account(account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "strategy.GetStrategy",
+                typed_strategy_info_payload(account),
+            );
+            HandlerResult::PushOnly
+        }
         "jopen.GetJopen" => {
             HandlerResult::Reply(Response::raw(method, typed_jopen_payload(account)))
         }
@@ -980,6 +1050,52 @@ fn typed_jopen_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
     output
 }
 
+fn typed_strategy_info_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let mut entries = account
+        .activities
+        .progress
+        .iter()
+        .filter_map(|(key, level)| {
+            let rest = key.strip_prefix("compat:strategy:")?;
+            let mut parts = rest.split(':');
+            let id = parts.next()?.parse::<u64>().ok()?;
+            if parts.next() != Some("level") || id == 0 {
+                return None;
+            }
+            Some((id, *level))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_unstable_by_key(|(id, _)| *id);
+    let mut output = Vec::new();
+    for (id, level) in entries {
+        let mut item = Vec::new();
+        append_varint_field(&mut item, 1, id);
+        append_varint_field(&mut item, 2, level);
+        append_message_field(&mut output, 1, &item);
+    }
+    append_varint_field(
+        &mut output,
+        2,
+        account
+            .activities
+            .progress
+            .get("compat:strategy:curCost")
+            .copied()
+            .unwrap_or_default(),
+    );
+    append_varint_field(
+        &mut output,
+        3,
+        account
+            .activities
+            .progress
+            .get("compat:strategy:resetNum")
+            .copied()
+            .unwrap_or_default(),
+    );
+    output
+}
+
 fn typed_milestone_info_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
     let mut grouped = std::collections::BTreeMap::<u64, Vec<u64>>::new();
     for key in account.activities.progress.keys() {
@@ -1271,6 +1387,41 @@ mod tests {
         );
         let state = ServerState::new("typed-base-state", "Captain", "1.0.0");
         let mut pushes = Vec::new();
+
+        account.fleet.fleets.insert(
+            blueoath_domain::FleetId::new(1).unwrap(),
+            blueoath_domain::FleetRecord {
+                formation_id: 1,
+                tactic_id: 1,
+                members: Vec::new(),
+            },
+        );
+        let mut strategy = Vec::new();
+        append_varint_field(&mut strategy, 1, 7);
+        append_varint_field(&mut strategy, 2, 3);
+        assert!(matches!(
+            handle_typed(
+                &mut account,
+                &state,
+                "strategy.Learn",
+                &strategy,
+                &mut pushes,
+            ),
+            HandlerResult::PushOnly
+        ));
+        assert_eq!(
+            account.activities.progress.get("compat:strategy:7:level"),
+            Some(&3)
+        );
+        let mut apply = Vec::new();
+        append_varint_field(&mut apply, 1, 7);
+        append_varint_field(&mut apply, 3, 1);
+        append_varint_field(&mut apply, 4, 1);
+        assert!(matches!(
+            handle_typed(&mut account, &state, "strategy.Apply", &apply, &mut pushes,),
+            HandlerResult::PushOnly
+        ));
+        assert_eq!(account.fleet.fleets.values().next().unwrap().tactic_id, 7);
 
         assert!(matches!(
             handle_typed(&mut account, &state, "jopen.FetchHero", &[], &mut pushes,),
