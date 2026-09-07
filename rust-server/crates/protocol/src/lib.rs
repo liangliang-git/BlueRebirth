@@ -2349,6 +2349,33 @@ impl Decode for GuildModifyRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeroChangeEquipRequest {
+    pub hero_id: u64,
+    pub slot: u64,
+    pub equip_id: u64,
+    pub equip_type: u64,
+}
+
+impl Decode for HeroChangeEquipRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let hero_id = required_u64(&fields, 1, "hero equip is missing hero id")?;
+        let slot = required_u64(&fields, 2, "hero equip is missing slot")?;
+        let equip_id = optional_u64(&fields, 3, "hero equip has duplicate equipment id")?;
+        let equip_type = optional_u64(&fields, 4, "hero equip has duplicate equipment type")?;
+        if hero_id == 0 || !(1..=6).contains(&slot) {
+            return Err(ProtocolError::Invalid("hero equip request is invalid"));
+        }
+        Ok(Self {
+            hero_id,
+            slot,
+            equip_id,
+            equip_type: equip_type.max(1),
+        })
+    }
+}
+
 impl Decode for GuildTaskDonateRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

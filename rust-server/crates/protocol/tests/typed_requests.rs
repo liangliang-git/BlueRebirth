@@ -9,11 +9,12 @@ use blueoath_protocol::{
     GuildBoxIdRequest, GuildCreateRequest, GuildIdRequest, GuildListRequest, GuildModifyRequest,
     GuildOfferRequest, GuildSearchRequest, GuildTaskDonateRequest, GuildTaskIdRequest,
     GuildTaskMemberRequest, GuildWarBaseRequest, GuildWarScoreRequest, HeroAwakenFinishRequest,
-    HeroAwakenRewardRequest, InviteRecordVersionRequest, InviteStateTypeRequest,
-    OutpostBuildingRequest, OutpostSetHeroRequest, ProtocolError, SeaDifficultyRequest,
-    SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
-    SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest,
-    SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
+    HeroAwakenRewardRequest, HeroChangeEquipRequest, InviteRecordVersionRequest,
+    InviteStateTypeRequest, OutpostBuildingRequest, OutpostSetHeroRequest, ProtocolError,
+    SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest,
+    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, ShipTaskCurrentShipRequest,
+    ShipTaskRewardRequest, SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest,
+    TeachingUserRequest,
 };
 
 #[test]
@@ -461,6 +462,15 @@ fn decodes_typed_coop_requests() {
             notice: None,
             frame: 3,
             chat_room: Some("c".to_owned()),
+        }
+    );
+    assert_eq!(
+        HeroChangeEquipRequest::decode(&[0x08, 1, 0x10, 2, 0x18, 3, 0x20, 1]).unwrap(),
+        HeroChangeEquipRequest {
+            hero_id: 1,
+            slot: 2,
+            equip_id: 3,
+            equip_type: 1,
         }
     );
 }

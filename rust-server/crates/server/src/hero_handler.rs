@@ -250,13 +250,17 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, encode_retire_hero_response(&rewards)))
         }
         "hero.ChangeEquip" => {
-            let hero_id = decode_varint_u64_field(request_args, 1);
-            let slot = decode_varint_u64_field(request_args, 2);
-            let equip_id = decode_varint_u64_field(request_args, 3);
-            let equip_type = decode_varint_u64_field(request_args, 4).max(1);
-            if equip_type != 1 || !(1..=6).contains(&slot) {
+            let Ok(request) = HeroChangeEquipRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "hero equip request is invalid",
+                ));
+            };
+            if request.equip_type != 1 {
                 return HandlerResult::Empty;
             }
+            let hero_id = request.hero_id;
+            let slot = request.slot;
+            let equip_id = request.equip_id;
             let Some(hero_id) = blueoath_domain::HeroId::new(hero_id).ok() else {
                 return HandlerResult::Error(GameError::InvalidRequest("hero id is invalid"));
             };
