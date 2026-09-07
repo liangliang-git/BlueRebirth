@@ -237,8 +237,9 @@ impl Decode for CopyPassRequest {
             match field {
                 11 => {
                     let value = optional_u64(&nested, 2, "copy pass has duplicate damage")?;
-                    damage = i32::try_from(value)
+                    let value = i32::try_from(value)
                         .map_err(|_| ProtocolError::Invalid("copy pass damage is out of range"))?;
+                    damage = damage.max(value);
                 }
                 18 => {
                     let hero_id = optional_u64(&nested, 1, "copy pass hero is missing id")?;

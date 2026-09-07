@@ -1,3 +1,5 @@
+use blueoath_protocol::Decode;
+
 use super::*;
 
 pub(super) fn decode_hero_exp_item(payload: &[u8]) -> Option<(i32, i32)> {
@@ -219,28 +221,24 @@ pub(super) struct BattlePassResult {
 }
 
 pub(super) fn decode_battle_pass_result(payload: &[u8]) -> BattlePassResult {
-    let mvp = decode_varint_u64_field(payload, 9);
+    let Ok(request) = blueoath_protocol::CopyPassRequest::decode(payload) else {
+        return BattlePassResult::default();
+    };
     let mut result = BattlePassResult {
-        grade: i32::try_from(decode_varint_u64_field(payload, 8)).unwrap_or(i32::MAX),
-        battle_time: i32::try_from(decode_varint_u64_field(payload, 12)).unwrap_or(i32::MAX),
-        mvp_hero_id: (mvp > 0).then_some(mvp),
+        grade: request.grade,
+        battle_time: request.battle_time,
+        mvp_hero_id: request.mvp_hero_id,
+        damage: request.damage,
         ..BattlePassResult::default()
     };
-    result.damage = decode_repeated_message_field(payload, 11)
-        .into_iter()
-        .map(|entry| decode_varint_u64_field(&entry, 2))
-        .filter_map(|value| i32::try_from(value).ok())
-        .max()
-        .unwrap_or_default()
-        .max(0);
-    for hero in decode_repeated_message_field(payload, 18) {
-        let hero_id = decode_varint_u64_field(&hero, 1);
-        if hero_id > 0 {
-            let hp = i64::try_from(decode_varint_u64_field(&hero, 2)).unwrap_or(i64::MAX);
-            result.heroes.push(BattleHeroResult { hero_id, hp });
-            if hp == 0 {
-                result.shipwrecked_ids.insert(hero_id);
-            }
+    for hero in request.heroes {
+        let hp = i64::try_from(hero.hp).unwrap_or(i64::MAX);
+        result.heroes.push(BattleHeroResult {
+            hero_id: hero.hero_id,
+            hp,
+        });
+        if hp == 0 {
+            result.shipwrecked_ids.insert(hero.hero_id);
         }
     }
     result
