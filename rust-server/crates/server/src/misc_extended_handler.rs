@@ -11,6 +11,211 @@ pub(super) fn handles(method: &str) -> bool {
     )
 }
 
+pub(super) fn handle_typed(
+    state: &ServerState,
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    pre_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
+    if GameMethod::parse(method).is_family(MethodFamily::Magazine) {
+        return handle_typed_magazine(state, account, catalog, method, request_args, pre_pushes);
+    }
+    handle_typed_interaction(account, catalog, method, request_args)
+}
+
+fn handle_typed_magazine(
+    state: &ServerState,
+    account: &mut blueoath_domain::AccountState,
+    catalog: &GameplayCatalog,
+    method: &str,
+    args: &[u8],
+    pre_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    if method == "magazine.FetchMagazineReward" {
+        let reward_key = decode_varint_field(args, 1).max(0) as u64;
+        let already_claimed = account.magazine.claimed_rewards.contains(&reward_key);
+        let reward_id = magazine_reward_id(catalog, reward_key as i32);
+        let rewards = if !already_claimed && reward_id > 0 {
+            catalog
+                .rewards_by_id
+                .get(&reward_id)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        if !rewards.is_empty() && !can_grant_typed_task_rewards(account, &rewards) {
+            return HandlerResult::Error(GameError::InvalidState("magazine reward is unsupported"));
+        }
+        for reward in &rewards {
+            let _ = grant_typed_task_reward(account, reward);
+        }
+        account.magazine.claimed_rewards.insert(reward_key);
+        if !rewards.is_empty() {
+            append_method_push(
+                pre_pushes,
+                "user.UpdateUserInfo",
+                UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            return reply(method, encode_rewards_list(&rewards));
+        }
+        return reply(method, typed_magazine_payload(account));
+    }
+    match method {
+        "magazine.GetMagazine" | "magazine.Magazine" => {
+            reply(method, typed_magazine_payload(account))
+        }
+        "magazine.UpdateMagazineInfo" => reply(method, typed_magazine_update_payload(account)),
+        "magazine.AddHero" => {
+            let hero_id = decode_varint_field(args, 1).max(0) as u64;
+            if hero_id > 0 && !account.magazine.heroes.contains(&hero_id) {
+                account.magazine.heroes.push(hero_id);
+            }
+            reply(method, typed_magazine_payload(account))
+        }
+        "magazine.Vote" => {
+            let page_id = decode_varint_field(args, 1).max(0) as u64;
+            if page_id > 0 {
+                account.magazine.votes.insert(page_id);
+            }
+            reply(method, typed_magazine_payload(account))
+        }
+        "magazine.UnLock" => {
+            let page_id = decode_varint_field(args, 1).max(0) as u64;
+            if page_id > 0 {
+                account.magazine.unlocked.insert(page_id);
+            }
+            reply(method, typed_magazine_payload(account))
+        }
+        _ => HandlerResult::Empty,
+    }
+}
+
+fn handle_typed_interaction(
+    account: &mut blueoath_domain::AccountState,
+    catalog: &GameplayCatalog,
+    method: &str,
+    args: &[u8],
+) -> HandlerResult {
+    let item_id = decode_varint_field(args, 1).max(0) as u64;
+    if matches!(
+        method,
+        "interactionitem.GetItemReward"
+            | "interactionitem.BuyChristmasFurniture"
+            | "interactionitem.GetSpringPaperFlowerReward"
+    ) {
+        let rewards = interaction_reward_defs(catalog, item_id as i32);
+        if !account.interaction_items.rewards.contains(&item_id) {
+            if !rewards.is_empty() && !can_grant_typed_task_rewards(account, &rewards) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "interaction item reward is unsupported",
+                ));
+            }
+            for reward in &rewards {
+                let _ = grant_typed_task_reward(account, reward);
+            }
+        }
+        account.interaction_items.rewards.insert(item_id);
+        if method == "interactionitem.GetItemReward" {
+            return reply(method, encode_rewards_list(&rewards));
+        }
+        return reply(method, typed_interaction_payload(account));
+    }
+    match method {
+        "interactionitem.RefreshInteractionItems" => {
+            reply(method, typed_interaction_payload(account))
+        }
+        "interactionitem.SetCrystalBallToy" => {
+            account.interaction_items.crystal_ball_toy = item_id;
+            reply(method, typed_interaction_payload(account))
+        }
+        "interactionitem.SetBagItemVisible" => {
+            let visible = decode_varint_field(args, 2) != 0;
+            if item_id > 0 {
+                account.interaction_items.visible.insert(item_id, visible);
+            }
+            reply(method, typed_interaction_payload(account))
+        }
+        "interactionitem.SetMutexBagGroupState" => {
+            let value = decode_varint_field(args, 2).max(0) as u64;
+            if item_id > 0 {
+                account.interaction_items.groups.insert(item_id, value);
+            }
+            reply(method, typed_interaction_payload(account))
+        }
+        "interactionitem.SetPosterState" => {
+            let value = decode_varint_field(args, 2).max(0) as u64;
+            if item_id > 0 {
+                account.interaction_items.posters.insert(item_id, value);
+            }
+            reply(method, typed_interaction_payload(account))
+        }
+        _ => HandlerResult::Empty,
+    }
+}
+
+fn typed_magazine_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let mut output = Vec::new();
+    for id in &account.magazine.unlocked {
+        let mut magazine = Vec::new();
+        append_varint_field(&mut magazine, 1, *id);
+        for reward in &account.magazine.claimed_rewards {
+            let mut item = Vec::new();
+            append_varint_field(&mut item, 1, *reward);
+            append_varint_field(&mut item, 2, u64::from(current_unix_seconds()));
+            append_message_field(&mut magazine, 2, &item);
+        }
+        append_message_field(&mut output, 1, &magazine);
+    }
+    for (index, hero_id) in account.magazine.heroes.iter().enumerate() {
+        let mut hero = Vec::new();
+        append_varint_field(&mut hero, 1, (index as u64).saturating_add(1));
+        append_varint_field(&mut hero, 2, *hero_id);
+        append_varint_field(&mut hero, 3, 0);
+        append_message_field(&mut output, 2, &hero);
+    }
+    for id in &account.magazine.unlocked {
+        let mut unlock = Vec::new();
+        append_varint_field(&mut unlock, 1, *id);
+        append_varint_field(&mut unlock, 2, u64::from(current_unix_seconds()));
+        append_message_field(&mut output, 3, &unlock);
+    }
+    output
+}
+
+fn typed_magazine_update_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let mut output = Vec::new();
+    for id in &account.magazine.unlocked {
+        append_varint_field(&mut output, 1, *id);
+    }
+    append_varint_field(&mut output, 2, u64::from(current_unix_seconds()));
+    append_varint_field(&mut output, 3, 1);
+    output
+}
+
+fn typed_interaction_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let state = &account.interaction_items;
+    let mut output = Vec::new();
+    append_varint_field(&mut output, 1, state.crystal_ball_toy);
+    for reward in &state.rewards {
+        append_varint_field(&mut output, 2, *reward);
+    }
+    for (id, visible) in &state.visible {
+        let mut item = Vec::new();
+        append_varint_field(&mut item, 1, *id);
+        append_varint_field(&mut item, 2, u64::from(*visible));
+        append_message_field(&mut output, 3, &item);
+    }
+    output
+}
+
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
@@ -354,6 +559,7 @@ fn push_unique_i32(target: &mut Value, value: i32) {
 #[cfg(test)]
 mod tests {
     use crate::common::response::HandlerResult;
+    use blueoath_domain::AccountState;
 
     use super::*;
 
@@ -364,5 +570,30 @@ mod tests {
             &str,
             &[u8],
         ) -> HandlerResult = handle;
+    }
+
+    #[test]
+    fn typed_magazine_and_interaction_state_update_without_json() {
+        let state = ServerState::new("misc", "Captain", "test");
+        let mut account = AccountState::default();
+        let mut pushes = Vec::new();
+        let result = handle_typed(
+            &state,
+            &mut account,
+            "magazine.AddHero",
+            &[0x08, 10],
+            &mut pushes,
+        );
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert_eq!(account.magazine.heroes, vec![10]);
+        let result = handle_typed(
+            &state,
+            &mut account,
+            "interactionitem.SetBagItemVisible",
+            &[0x08, 11, 0x10, 1],
+            &mut pushes,
+        );
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert_eq!(account.interaction_items.visible.get(&11), Some(&true));
     }
 }

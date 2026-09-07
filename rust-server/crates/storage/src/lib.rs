@@ -1302,6 +1302,60 @@ impl ProfileStore {
                     }
                     _ => {}
                 }
+            } else if activity_id == "magazine" {
+                let mut parts = progress_kind.split(':');
+                match parts.next() {
+                    Some("hero") => {
+                        if let Ok(position) = parts.next().unwrap_or_default().parse::<usize>() {
+                            if account.magazine.heroes.len() <= position {
+                                account.magazine.heroes.resize(position + 1, 0);
+                            }
+                            account.magazine.heroes[position] = value;
+                        }
+                    }
+                    Some("vote") => {
+                        if let Some(id) = parts.next().and_then(|value| value.parse::<u64>().ok()) {
+                            account.magazine.votes.insert(id);
+                        }
+                    }
+                    Some("unlock") => {
+                        if let Some(id) = parts.next().and_then(|value| value.parse::<u64>().ok()) {
+                            account.magazine.unlocked.insert(id);
+                        }
+                    }
+                    Some("claim") => {
+                        if let Some(id) = parts.next().and_then(|value| value.parse::<u64>().ok()) {
+                            account.magazine.claimed_rewards.insert(id);
+                        }
+                    }
+                    _ => {}
+                }
+            } else if activity_id == "interactionItem" {
+                let mut parts = progress_kind.split(':');
+                match parts.next() {
+                    Some("crystalBallToy") => account.interaction_items.crystal_ball_toy = value,
+                    Some("reward") => {
+                        if let Some(id) = parts.next().and_then(|value| value.parse::<u64>().ok()) {
+                            account.interaction_items.rewards.insert(id);
+                        }
+                    }
+                    Some("visible") => {
+                        if let Some(id) = parts.next().and_then(|value| value.parse::<u64>().ok()) {
+                            account.interaction_items.visible.insert(id, value != 0);
+                        }
+                    }
+                    Some("group") => {
+                        if let Some(id) = parts.next().and_then(|value| value.parse::<u64>().ok()) {
+                            account.interaction_items.groups.insert(id, value);
+                        }
+                    }
+                    Some("poster") => {
+                        if let Some(id) = parts.next().and_then(|value| value.parse::<u64>().ok()) {
+                            account.interaction_items.posters.insert(id, value);
+                        }
+                    }
+                    _ => {}
+                }
             } else if activity_id == "buildShip" {
                 let mut parts = progress_kind.split(':');
                 match parts.next() {
@@ -2802,6 +2856,92 @@ impl ProfileStore {
                     ],
                 )?;
             }
+        }
+        let mut magazine_progress = account
+            .magazine
+            .heroes
+            .iter()
+            .enumerate()
+            .map(|(position, hero_id)| (format!("hero:{position}"), *hero_id))
+            .collect::<Vec<_>>();
+        magazine_progress.extend(
+            account
+                .magazine
+                .votes
+                .iter()
+                .map(|id| (format!("vote:{id}"), 1)),
+        );
+        magazine_progress.extend(
+            account
+                .magazine
+                .unlocked
+                .iter()
+                .map(|id| (format!("unlock:{id}"), 1)),
+        );
+        magazine_progress.extend(
+            account
+                .magazine
+                .claimed_rewards
+                .iter()
+                .map(|id| (format!("claim:{id}"), 1)),
+        );
+        for (progress_kind, value) in magazine_progress {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'magazine', ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    progress_kind,
+                    typed_i64(value, "magazine state")?,
+                    timestamp(),
+                ],
+            )?;
+        }
+        let mut interaction_progress = vec![(
+            "crystalBallToy".to_owned(),
+            account.interaction_items.crystal_ball_toy,
+        )];
+        interaction_progress.extend(
+            account
+                .interaction_items
+                .rewards
+                .iter()
+                .map(|id| (format!("reward:{id}"), 1)),
+        );
+        interaction_progress.extend(
+            account
+                .interaction_items
+                .visible
+                .iter()
+                .map(|(id, visible)| (format!("visible:{id}"), u64::from(*visible))),
+        );
+        interaction_progress.extend(
+            account
+                .interaction_items
+                .groups
+                .iter()
+                .map(|(id, value)| (format!("group:{id}"), *value)),
+        );
+        interaction_progress.extend(
+            account
+                .interaction_items
+                .posters
+                .iter()
+                .map(|(id, value)| (format!("poster:{id}"), *value)),
+        );
+        for (progress_kind, value) in interaction_progress {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'interactionItem', ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    progress_kind,
+                    typed_i64(value, "interaction item state")?,
+                    timestamp(),
+                ],
+            )?;
         }
         for (pool_id, count) in &account.build_ship.draw_counts {
             transaction.execute(

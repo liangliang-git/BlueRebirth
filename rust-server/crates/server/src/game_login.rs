@@ -837,9 +837,7 @@ where
         _ if (method.is_family(MethodFamily::Exchange)
             || method.is_family(MethodFamily::FoodCompose)
             || method.is_family(MethodFamily::BattlePass)
-            || method.is_family(MethodFamily::ActivityBattlePass)
-            || method.is_family(MethodFamily::Magazine)
-            || method.is_family(MethodFamily::InteractionItem))
+            || method.is_family(MethodFamily::ActivityBattlePass))
             && !extended_handler::handles(request.method.as_str())
             && !misc_extended_handler::handles(request.method.as_str()) =>
         {
@@ -988,6 +986,22 @@ where
             let result = extended_handler::handle_typed_battlepass(
                 state,
                 typed_account.as_mut().expect("typed battle pass account"),
+                request.method.as_str(),
+                request_args,
+                &mut pre_pushes,
+            );
+            if let HandlerResult::Error(error) = &result {
+                handler_error = Some(error.clone());
+            }
+            result.into_payload()
+        }
+        _ if (method.is_family(MethodFamily::Magazine)
+            || method.is_family(MethodFamily::InteractionItem))
+            && typed_account.is_some() =>
+        {
+            let result = misc_extended_handler::handle_typed(
+                state,
+                typed_account.as_mut().expect("typed misc account"),
                 request.method.as_str(),
                 request_args,
                 &mut pre_pushes,
@@ -2500,8 +2514,6 @@ fn legacy_only_method(method: &str) -> bool {
             | MethodFamily::Battle
             | MethodFamily::Copy
             | MethodFamily::DailyCopy
-            | MethodFamily::Magazine
-            | MethodFamily::InteractionItem
             | MethodFamily::MopUp
     )
 }

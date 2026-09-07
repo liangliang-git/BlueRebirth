@@ -542,6 +542,23 @@ impl Default for BattlePassState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MagazineState {
+    pub heroes: Vec<u64>,
+    pub votes: BTreeSet<u64>,
+    pub unlocked: BTreeSet<u64>,
+    pub claimed_rewards: BTreeSet<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InteractionItemState {
+    pub crystal_ball_toy: u64,
+    pub rewards: BTreeSet<u64>,
+    pub visible: BTreeMap<u64, bool>,
+    pub groups: BTreeMap<u64, u64>,
+    pub posters: BTreeMap<u64, u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InviteScoreState {
     pub have_got_ssr: u64,
     pub have_got_fashion: u64,
@@ -716,6 +733,10 @@ pub struct AccountState {
     pub battle_pass: BattlePassState,
     #[serde(default)]
     pub activity_battle_pass: BattlePassState,
+    #[serde(default)]
+    pub magazine: MagazineState,
+    #[serde(default)]
+    pub interaction_items: InteractionItemState,
     #[serde(default)]
     pub exchange_times: BTreeMap<u64, u32>,
     #[serde(default)]

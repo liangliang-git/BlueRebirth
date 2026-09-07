@@ -513,6 +513,15 @@ fn typed_repository_transaction_commits_domain_mutation() {
     account.battle_pass.claimed_tasks.insert(101);
     account.battle_pass.tasks.insert(101, 4);
     account.activity_battle_pass.pass_level = 5;
+    account.magazine.heroes.push(10);
+    account.magazine.votes.insert(2);
+    account.magazine.unlocked.insert(3);
+    account.magazine.claimed_rewards.insert(4);
+    account.interaction_items.crystal_ball_toy = 8;
+    account.interaction_items.rewards.insert(9);
+    account.interaction_items.visible.insert(10, true);
+    account.interaction_items.groups.insert(11, 2);
+    account.interaction_items.posters.insert(12, 3);
     account
         .ship_task
         .tasks
@@ -661,6 +670,15 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert!(loaded.battle_pass.claimed_tasks.contains(&101));
     assert_eq!(loaded.battle_pass.tasks.get(&101), Some(&4));
     assert_eq!(loaded.activity_battle_pass.pass_level, 5);
+    assert_eq!(loaded.magazine.heroes, vec![10]);
+    assert!(loaded.magazine.votes.contains(&2));
+    assert!(loaded.magazine.unlocked.contains(&3));
+    assert!(loaded.magazine.claimed_rewards.contains(&4));
+    assert_eq!(loaded.interaction_items.crystal_ball_toy, 8);
+    assert!(loaded.interaction_items.rewards.contains(&9));
+    assert_eq!(loaded.interaction_items.visible.get(&10), Some(&true));
+    assert_eq!(loaded.interaction_items.groups.get(&11), Some(&2));
+    assert_eq!(loaded.interaction_items.posters.get(&12), Some(&3));
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())
