@@ -759,6 +759,39 @@ impl ProfileStore {
             .last()
             .map(|job| job.project.clone());
 
+        let mut statement = connection.prepare(
+            "SELECT friend_profile_id, relation
+             FROM friend_relations WHERE profile_id = ?1 ORDER BY friend_profile_id",
+        )?;
+        let relations = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (friend_profile_id, relation) in relations {
+            let Ok(uid) = friend_profile_id.parse::<u64>() else {
+                continue;
+            };
+            if uid == 0 {
+                continue;
+            }
+            match relation.as_str() {
+                "friend" => {
+                    account.social.friends.insert(uid);
+                }
+                "pending" => {
+                    account.social.pending.insert(uid);
+                }
+                "blacklist" => {
+                    account.social.blacklist.insert(uid);
+                }
+                "applied" => {
+                    account.social.applied.insert(uid);
+                }
+                _ => {}
+            }
+        }
+
         if let Some((chapter_value, copy_value, current_fleet, started_at, expires_at, revision)) =
             connection
                 .query_row(
@@ -1361,6 +1394,26 @@ impl ProfileStore {
                     i64::from(job.completed),
                 ],
             )?;
+        }
+        for (relation, ids) in [
+            ("friend", &account.social.friends),
+            ("pending", &account.social.pending),
+            ("blacklist", &account.social.blacklist),
+            ("applied", &account.social.applied),
+        ] {
+            for friend_profile_id in ids {
+                transaction.execute(
+                    "INSERT INTO friend_relations(
+                        profile_id, friend_profile_id, relation, created_at
+                     ) VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        profile.id.as_str(),
+                        friend_profile_id.to_string(),
+                        relation,
+                        timestamp(),
+                    ],
+                )?;
+            }
         }
         if let Some(session) = &account.battle.active {
             transaction.execute(

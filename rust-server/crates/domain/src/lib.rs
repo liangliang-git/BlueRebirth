@@ -312,7 +312,14 @@ pub struct ConstructionJobState {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SocialState {
-    pub friends: BTreeSet<ProfileId>,
+    #[serde(default)]
+    pub friends: BTreeSet<u64>,
+    #[serde(default)]
+    pub pending: BTreeSet<u64>,
+    #[serde(default)]
+    pub blacklist: BTreeSet<u64>,
+    #[serde(default)]
+    pub applied: BTreeSet<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,7 +1,7 @@
 use blueoath_domain::{
     AccountRepository, AccountState, BattleSession, ChapterId, ChatBarrageState, ChatMessageState,
-    CopyId, EquipId, EquipmentState, FleetId, FleetRecord, HeroId, HeroState, PresetFleetState,
-    ProfileId, ProfileState, TemplateId,
+    CopyId, EquipId, EquipmentState, FleetId, FleetRecord, HeroId, HeroState, NewAccountFactory,
+    PresetFleetState, ProfileId, ProfileState, TemplateId,
 };
 use blueoath_storage::{ProfileStore, StorageError, StoredProfileState, StoredShip};
 use serde_json::json;
@@ -131,6 +131,32 @@ fn normalized_profile_runtime_round_trips_without_json_state_column() {
         )
         .unwrap();
     assert_eq!(legacy_columns, 0);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn typed_social_relations_round_trip_through_normalized_storage() {
+    let (store, root) = store();
+    let profile_id = ProfileId::new("typed-social").unwrap();
+    let mut account = NewAccountFactory::create(profile_id.clone(), "Captain");
+    account.social.friends.insert(42);
+    account.social.pending.insert(43);
+    account.social.blacklist.insert(44);
+    account.social.applied.insert(45);
+
+    store.create(&account).unwrap();
+    let loaded = store.load_typed_account(&profile_id).unwrap().unwrap();
+    assert_eq!(loaded.social, account.social);
+
+    let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
+    let relation_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM friend_relations WHERE profile_id = 'typed-social'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(relation_count, 4);
     let _ = std::fs::remove_dir_all(root);
 }
 

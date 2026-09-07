@@ -577,6 +577,62 @@ impl Decode for UserSupplyRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FriendTargetRequest {
+    pub uid: u64,
+}
+
+impl Decode for FriendTargetRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let uid = optional_u64(&fields, 1, "friend request has duplicate target")?;
+        if uid == 0 {
+            return Err(ProtocolError::Invalid("friend request is missing target"));
+        }
+        Ok(Self { uid })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FriendSearchRequest {
+    pub uid: u64,
+    pub name: String,
+}
+
+impl Decode for FriendSearchRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let uid = optional_u64(&fields, 1, "friend search has duplicate uid")?;
+        let name = decode_optional_string(
+            payload,
+            2,
+            "friend search has duplicate name",
+            "friend search name is too long",
+            64,
+        )?;
+        if uid == 0 && name.is_empty() {
+            return Err(ProtocolError::Invalid("friend search requires uid or name"));
+        }
+        Ok(Self { uid, name })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FriendUpdateUserStateRequest {
+    pub state: i32,
+    pub uid: u64,
+}
+
+impl Decode for FriendUpdateUserStateRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            state: optional_i32(&fields, 1, "friend user state has duplicate state")?,
+            uid: optional_u64(&fields, 2, "friend user state has duplicate uid")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeroLockRequest {
     pub hero_id: u64,
     pub locked: bool,
