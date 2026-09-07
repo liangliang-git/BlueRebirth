@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
@@ -13,11 +15,9 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let Some(account) = context.account.as_deref_mut() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "account is unavailable".to_owned();
-        return Some(Vec::new());
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
     if GameMethod::parse(method).is_family(MethodFamily::HeroAwaken) {
         let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
@@ -40,15 +40,18 @@ fn handle_big_activity(
     account: &mut Value,
     method: &str,
     args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let state = activity_state_mut(account, "bigActivity");
     match method {
-        "bigactivity.GetBigActivityInfo" => Some(big_activity_payload(state)),
+        "bigactivity.GetBigActivityInfo" => reply(method, big_activity_payload(state)),
         "bigactivity.GetBigActivityRank" | "bigactivity.GetBigActivityRankEx" => {
             let start = decode_varint_field(args, 1).max(1);
-            Some(big_activity_rank_payload(server_state, account, start))
+            reply(
+                method,
+                big_activity_rank_payload(server_state, account, start),
+            )
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
 }
 
@@ -57,23 +60,24 @@ fn handle_guild_big_activity(
     account: &mut Value,
     method: &str,
     args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let state = activity_state_mut(account, "guildBigActivity");
     match method {
-        "guildbigactivity.UserData" => Some(guild_big_activity_user_payload(state)),
-        "guildbigactivity.GuildRateData" => Some(guild_big_activity_rate_payload(state)),
+        "guildbigactivity.UserData" => reply(method, guild_big_activity_user_payload(state)),
+        "guildbigactivity.GuildRateData" => reply(method, guild_big_activity_rate_payload(state)),
         "guildbigactivity.PresentItem" => {
             let item_id = decode_varint_field(args, 1).max(0);
             let count = decode_varint_field(args, 2).clamp(1, 99);
             state["lastItemId"] = json!(item_id);
             state["presentCount"] =
                 json!(state_i64(state, "presentCount").saturating_add(i64::from(count)));
-            Some(guild_big_activity_user_payload(state))
+            reply(method, guild_big_activity_user_payload(state))
         }
-        "guildbigactivityrank.GetGuildRankList" => {
-            Some(guild_big_activity_rank_payload(server_state, account))
-        }
-        _ => None,
+        "guildbigactivityrank.GetGuildRankList" => reply(
+            method,
+            guild_big_activity_rank_payload(server_state, account),
+        ),
+        _ => HandlerResult::Empty,
     }
 }
 
@@ -83,17 +87,17 @@ fn handle_hero_awaken(
     method: &str,
     args: &[u8],
     fashion_catalog: Option<&blueoath_protocol::FashionList>,
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     match method {
         "heroawaken.FinishAwaken" => {
             let state = activity_state_mut(account, "heroAwaken");
             state["isFinished"] = json!(decode_varint_field(args, 1) != 0);
-            Some(hero_awaken_finish_payload(state))
+            reply(method, hero_awaken_finish_payload(state))
         }
-        "heroawaken.MilestoneInfo" => Some(hero_awaken_milestone_payload(activity_state_mut(
-            account,
-            "heroAwaken",
-        ))),
+        "heroawaken.MilestoneInfo" => reply(
+            method,
+            hero_awaken_milestone_payload(activity_state_mut(account, "heroAwaken")),
+        ),
         "heroawaken.RewardMilestone" => {
             let milestone = decode_varint_field(args, 1).max(0);
             let total_pt = account
@@ -102,7 +106,7 @@ fn handle_hero_awaken(
                 .and_then(Value::as_i64)
                 .unwrap_or_default();
             if milestone <= 0 || total_pt < i64::from(milestone) {
-                return Some(encode_rewards_list(&[]));
+                return reply(method, encode_rewards_list(&[]));
             }
             let already_claimed = account
                 .get("heroAwaken")
@@ -114,7 +118,7 @@ fn handle_hero_awaken(
                         .any(|value| value.as_i64() == Some(i64::from(milestone)))
                 });
             if already_claimed {
-                return Some(encode_rewards_list(&[]));
+                return reply(method, encode_rewards_list(&[]));
             }
             let reward_id = catalog
                 .activity
@@ -146,10 +150,14 @@ fn handle_hero_awaken(
                 let state = activity_state_mut(account, "heroAwaken");
                 push_unique_i32(&mut state["claimedMilestones"], milestone);
             }
-            Some(encode_rewards_list(&rewards))
+            reply(method, encode_rewards_list(&rewards))
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
 }
 
 fn activity_state_mut<'a>(account: &'a mut Value, key: &str) -> &'a mut Value {
@@ -467,7 +475,18 @@ fn push_unique_i32(target: &mut Value, value: i32) {
 
 #[cfg(test)]
 mod tests {
+    use crate::common::response::HandlerResult;
+
     use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
+    }
 
     #[test]
     fn big_activity_rank_aggregates_accounts_and_keeps_current_rank() {
