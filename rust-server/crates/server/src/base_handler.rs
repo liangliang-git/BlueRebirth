@@ -4,7 +4,7 @@
 use serde_json::{json, Value};
 
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 pub(super) fn handle_typed(
@@ -12,7 +12,7 @@ pub(super) fn handle_typed(
     state: &ServerState,
     method: &str,
     request_args: &[u8],
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     match method {
         "strategy.GetStrategy" => {
@@ -30,11 +30,10 @@ pub(super) fn handle_typed(
                 .activities
                 .progress
                 .insert(format!("compat:strategy:{strategy_id}:level"), level);
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "strategy.GetStrategy",
                 typed_strategy_info_payload(account),
-            );
+            ));
             HandlerResult::PushOnly
         }
         "strategy.Reset" => {
@@ -52,11 +51,10 @@ pub(super) fn handle_typed(
                 .activities
                 .progress
                 .insert("compat:strategy:resetNum".to_owned(), reset_num);
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "strategy.GetStrategy",
                 typed_strategy_info_payload(account),
-            );
+            ));
             HandlerResult::PushOnly
         }
         "strategy.Apply" => {
@@ -72,16 +70,14 @@ pub(super) fn handle_typed(
                 return HandlerResult::Error(GameError::NotFound("fleet"));
             };
             fleet.tactic_id = request.strategy_id as u32;
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "tactic.GetHerosTactic",
                 FleetInfoCodec::encode(&fleet_info_from_typed_account(account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "strategy.GetStrategy",
                 typed_strategy_info_payload(account),
-            );
+            ));
             HandlerResult::PushOnly
         }
         "supportfleet.SupportFleetInfo" => {
@@ -138,11 +134,10 @@ pub(super) fn handle_typed(
                         .filter_map(|hero_id| blueoath_domain::HeroId::new(hero_id).ok())
                         .collect(),
                 });
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "supportfleet.SupportFleetInfo",
                 typed_support_info_payload(account),
-            );
+            ));
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "supportfleet.CompleteSupport" | "supportfleet.CancelSupport" => {
@@ -240,27 +235,23 @@ pub(super) fn handle_typed(
                 typed_support_grant(account, &entry.hero_ids, *goods_type, *item_id, *amount);
             }
             typed_support_remove(account, id);
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "supportfleet.SupportFleetInfo",
                 typed_support_info_payload(account),
-            );
+            ));
             if !rewards.is_empty() {
-                append_method_push(
-                    pre_pushes,
+                effects.push_pre(Response::raw(
                     "user.UpdateUserInfo",
                     UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-                );
-                append_method_push(
-                    pre_pushes,
+                ));
+                effects.push_pre(Response::raw(
                     "bag.UpdateBagData",
                     BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-                );
-                append_method_push(
-                    pre_pushes,
+                ));
+                effects.push_pre(Response::raw(
                     "hero.UpdateHeroBagData",
                     HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-                );
+                ));
             }
             let settlement = SupportSettlement {
                 reward_type: if completion_type == 3 {
@@ -313,11 +304,10 @@ pub(super) fn handle_typed(
                 ));
             }
             account.supply.hero_ids = hero_ids;
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "user.UpdateUserInfo",
                 UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-            );
+            ));
             HandlerResult::PushOnly
         }
         "user.KickInfo"
@@ -346,7 +336,7 @@ pub(super) fn handle_typed(
                 .activities
                 .progress
                 .insert(key.to_owned(), u64::from(current_unix_seconds()));
-            append_method_push(pre_pushes, "jopen.GetJopen", typed_jopen_payload(account));
+            effects.push_pre(Response::raw("jopen.GetJopen", typed_jopen_payload(account)));
             HandlerResult::PushOnly
         }
         "milestone.GetMilestone" => {
@@ -528,11 +518,10 @@ pub(super) fn handle_typed(
                 .resources
                 .debit(blueoath_domain::CurrencyKind::Diamond, 10);
             let _ = account.resources.credit(kind, amount);
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "user.UpdateUserInfo",
                 UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-            );
+            ));
             HandlerResult::PushOnly
         }
         "user.GetSupply" => {
@@ -1436,8 +1425,8 @@ mod tests {
             .credit(blueoath_domain::CurrencyKind::Diamond, 20)
             .unwrap();
         let state = ServerState::new("typed-buy-resource", "Captain", "1.0.0");
-        let mut pushes = Vec::new();
-        let result = handle_typed(&mut account, &state, "user.BuyGold", &[], &mut pushes);
+        let mut effects = ResponseEffects::default();
+        let result = handle_typed(&mut account, &state, "user.BuyGold", &[], &mut effects);
         assert!(matches!(result, HandlerResult::PushOnly));
         assert_eq!(
             account
@@ -1453,7 +1442,7 @@ mod tests {
                 .get(),
             1_000
         );
-        assert_eq!(pushes.len(), 1);
+        assert_eq!(effects.into_parts().0.len(), 1);
     }
 
     #[test]
@@ -1463,7 +1452,7 @@ mod tests {
             "Captain",
         );
         let state = ServerState::new("typed-base-state", "Captain", "1.0.0");
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         account.fleet.fleets.insert(
             blueoath_domain::FleetId::new(1).unwrap(),
@@ -1482,7 +1471,7 @@ mod tests {
                 &state,
                 "strategy.Learn",
                 &strategy,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::PushOnly
         ));
@@ -1495,7 +1484,7 @@ mod tests {
         append_varint_field(&mut apply, 3, 1);
         append_varint_field(&mut apply, 4, 1);
         assert!(matches!(
-            handle_typed(&mut account, &state, "strategy.Apply", &apply, &mut pushes,),
+            handle_typed(&mut account, &state, "strategy.Apply", &apply, &mut effects,),
             HandlerResult::PushOnly
         ));
         assert_eq!(account.fleet.fleets.values().next().unwrap().tactic_id, 7);
@@ -1513,7 +1502,7 @@ mod tests {
                 &state,
                 "supportfleet.StartSupport",
                 &support_start,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::Reply(_)
         ));
@@ -1527,7 +1516,7 @@ mod tests {
                 &state,
                 "supportfleet.CancelSupport",
                 &support_cancel,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::Reply(_)
         ));
@@ -1541,7 +1530,7 @@ mod tests {
                 &state,
                 "supply.SupplySwitch",
                 &supply_switch,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::PushOnly
         ));
@@ -1551,19 +1540,13 @@ mod tests {
         );
 
         assert!(matches!(
-            handle_typed(&mut account, &state, "jopen.FetchHero", &[], &mut pushes,),
+            handle_typed(&mut account, &state, "jopen.FetchHero", &[], &mut effects,),
             HandlerResult::PushOnly
         ));
         assert!(account
             .activities
             .progress
             .contains_key("compat:jopen:fetchHeroTime"));
-        assert_eq!(
-            TMessageCodec::decode_response(pushes.last().unwrap())
-                .unwrap()
-                .method,
-            "jopen.GetJopen"
-        );
 
         let mut milestone = Vec::new();
         append_varint_field(&mut milestone, 1, 9);
@@ -1574,7 +1557,7 @@ mod tests {
                 &state,
                 "milestone.FetchReward",
                 &milestone,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::Reply(_)
         ));
@@ -1583,7 +1566,7 @@ mod tests {
             &state,
             "milestone.GetMilestone",
             &[],
-            &mut pushes,
+            &mut effects,
         );
         let HandlerResult::Reply(response) = result else {
             panic!("expected milestone response");
@@ -1596,7 +1579,7 @@ mod tests {
         let mut plot = Vec::new();
         append_varint_field(&mut plot, 1, 42);
         assert!(matches!(
-            handle_typed(&mut account, &state, "guide.PlotReward", &plot, &mut pushes,),
+            handle_typed(&mut account, &state, "guide.PlotReward", &plot, &mut effects,),
             HandlerResult::Reply(_)
         ));
         assert!(account.guide.plot_rewards.contains(&42));
@@ -1612,7 +1595,7 @@ mod tests {
                 &state,
                 "guide.Setting",
                 &guide_setting,
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::Reply(_)
         ));
@@ -1632,7 +1615,7 @@ mod tests {
             &state,
             "user.SetMiniGameScore",
             &score_request,
-            &mut pushes,
+            &mut effects,
         );
         let HandlerResult::Reply(response) = result else {
             panic!("expected mini-game score response");
@@ -1649,12 +1632,14 @@ mod tests {
             &state,
             "user.SetMiniGameScore",
             &lower_score_request,
-            &mut pushes,
+            &mut effects,
         );
         let HandlerResult::Reply(response) = result else {
             panic!("expected lower mini-game score response");
         };
         assert_eq!(decode_varint_field(&response.payload, 1), 80);
+        let (pre, _, _) = effects.into_parts();
+        assert!(pre.iter().any(|response| response.method == "jopen.GetJopen"));
     }
 
     #[test]
@@ -1686,14 +1671,14 @@ mod tests {
             .insert("teacher\u{1f}prestige".to_owned(), 123);
         let mut state = ServerState::new("current", "Captain", "1.4.0");
         state.social_store = Some(store);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         let result = handle_typed(
             &mut current,
             &state,
             "usersvr.GetOtherInfo",
             &[],
-            &mut pushes,
+            &mut effects,
         );
         let HandlerResult::Reply(response) = result else {
             panic!("expected typed other-user response");
@@ -1708,7 +1693,7 @@ mod tests {
             &state,
             "user.TeacherRank",
             &request,
-            &mut pushes,
+            &mut effects,
         );
         let HandlerResult::Reply(response) = result else {
             panic!("expected typed teacher rank response");

@@ -838,19 +838,26 @@ where
             || method.is_family(MethodFamily::Jopen)
             || method.is_family(MethodFamily::Guide) =>
         {
+            let mut base_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 base_handler::handle_typed(
                     typed,
                     state,
                     request.method.as_str(),
                     request_args,
-                    &mut pre_pushes,
+                    &mut base_effects,
                 )
             } else {
                 HandlerResult::Error(GameError::InvalidRequest(
                     "base request requires typed account",
                 ))
             };
+            apply_response_effects(
+                base_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
