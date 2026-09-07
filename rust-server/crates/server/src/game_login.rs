@@ -1442,11 +1442,12 @@ where
             }
             let payload = result.into_payload();
             if handler_error.is_none() {
-                sync_typed_battle_state(
+                sync_typed_battle_state_with_catalog(
                     typed_account.as_deref_mut(),
                     account.as_deref(),
                     request.method.as_str(),
                     request_args,
+                    battle_catalog,
                     current_unix_seconds(),
                 );
             }
@@ -2277,11 +2278,30 @@ where
     Ok(true)
 }
 
+#[cfg(test)]
 pub(super) fn sync_typed_battle_state(
     typed_account: Option<&mut AccountState>,
     legacy_account: Option<&Value>,
     method: &str,
     request_args: &[u8],
+    now: u32,
+) {
+    sync_typed_battle_state_with_catalog(
+        typed_account,
+        legacy_account,
+        method,
+        request_args,
+        None,
+        now,
+    );
+}
+
+fn sync_typed_battle_state_with_catalog(
+    typed_account: Option<&mut AccountState>,
+    legacy_account: Option<&Value>,
+    method: &str,
+    request_args: &[u8],
+    battle_catalog: Option<&BattleCatalog>,
     now: u32,
 ) {
     let Some(typed_account) = typed_account else {
@@ -2318,7 +2338,39 @@ pub(super) fn sync_typed_battle_state(
             ) else {
                 return;
             };
-            if BattleService::start(typed_account, chapter_id, copy_id, fleet_id, u64::from(now))
+            let hero_ids = session
+                .and_then(|session| session.get("heroIds"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_u64)
+                .collect::<Vec<_>>();
+            let hero_ids = if hero_ids.is_empty() {
+                typed_account
+                    .fleet
+                    .fleets
+                    .get(&fleet_id)
+                    .map(|fleet| fleet.members.iter().map(|id| id.get()).collect::<Vec<_>>())
+                    .unwrap_or_default()
+            } else {
+                hero_ids
+            };
+            let supply_ok = battle_catalog.is_none()
+                || consume_battle_supply_typed(
+                    typed_account,
+                    battle_catalog,
+                    request.copy_id,
+                    &hero_ids,
+                    1,
+                );
+            if supply_ok
+                && BattleService::start(
+                    typed_account,
+                    chapter_id,
+                    copy_id,
+                    fleet_id,
+                    u64::from(now),
+                )
                 .is_ok()
             {
                 if let Some(active) = typed_account.battle.active.as_mut() {

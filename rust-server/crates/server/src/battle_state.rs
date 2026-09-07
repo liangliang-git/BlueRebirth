@@ -885,6 +885,61 @@ pub(super) fn consume_battle_supply(
     true
 }
 
+pub(super) fn consume_battle_supply_typed(
+    account: &mut blueoath_domain::AccountState,
+    catalog: Option<&BattleCatalog>,
+    copy_id: i32,
+    hero_ids: &[u64],
+    count: i32,
+) -> bool {
+    if !(1..=99).contains(&count) || hero_ids.is_empty() {
+        return false;
+    }
+    let Some(catalog) = catalog else {
+        return false;
+    };
+    let (base, factor) = catalog
+        .supply_cost_by_copy
+        .get(&copy_id)
+        .copied()
+        .unwrap_or_default();
+    let mut ship_cost = 0_i64;
+    let mut seen = std::collections::HashSet::new();
+    for id in hero_ids {
+        if !seen.insert(*id) {
+            continue;
+        }
+        let Some(hero) = account
+            .dock
+            .heroes
+            .values()
+            .find(|hero| hero.id.get() == *id)
+        else {
+            return false;
+        };
+        if factor > 0 {
+            let template_id = i32::try_from(hero.template_id.get()).unwrap_or_default();
+            ship_cost = ship_cost.saturating_add(
+                catalog
+                    .ship_supply_cost
+                    .get(&template_id)
+                    .copied()
+                    .unwrap_or_default(),
+            );
+        }
+    }
+    let cost = base
+        .saturating_add(ship_cost.saturating_mul(factor).saturating_add(9999) / 10000)
+        .saturating_mul(i64::from(count));
+    let Ok(cost) = u64::try_from(cost.max(0)) else {
+        return false;
+    };
+    account
+        .resources
+        .debit(blueoath_domain::CurrencyKind::Supply, cost)
+        .is_ok()
+}
+
 pub(super) fn add_commander_battle_exp(
     account: &mut Value,
     gained: i32,

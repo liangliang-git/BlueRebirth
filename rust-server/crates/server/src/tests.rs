@@ -1870,6 +1870,52 @@ fn battle_supply_charges_fleet_and_sweep_count_without_partial_debit() {
     ));
 }
 
+#[test]
+fn typed_battle_supply_debit_is_atomic_and_validates_owned_heroes() {
+    let mut account = NewAccountFactory::create(ProfileId::new("typed-supply").unwrap(), "Supply");
+    let hero_id = account.dock.heroes.keys().next().unwrap().get();
+    let template_id = account
+        .dock
+        .heroes
+        .values()
+        .next()
+        .unwrap()
+        .template_id
+        .get();
+    let mut catalog = BattleCatalog::default();
+    catalog.supply_cost_by_copy.insert(10001, (10, 20000));
+    catalog
+        .ship_supply_cost
+        .insert(i32::try_from(template_id).unwrap(), 4);
+    let before = account
+        .resources
+        .amount(blueoath_domain::CurrencyKind::Supply);
+    assert!(super::consume_battle_supply_typed(
+        &mut account,
+        Some(&catalog),
+        10001,
+        &[hero_id],
+        3,
+    ));
+    assert_eq!(
+        account
+            .resources
+            .amount(blueoath_domain::CurrencyKind::Supply),
+        before
+            .checked_sub(blueoath_domain::CurrencyKind::Supply, 54)
+            .unwrap()
+    );
+    let after = account.clone();
+    assert!(!super::consume_battle_supply_typed(
+        &mut account,
+        Some(&catalog),
+        10001,
+        &[999],
+        1,
+    ));
+    assert_eq!(account, after);
+}
+
 async fn battle_route_test_request(
     account: &mut serde_json::Value,
     state: &ServerState,
