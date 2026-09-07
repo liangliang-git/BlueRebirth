@@ -738,13 +738,18 @@ where
                 if typed.guild.is_some() {
                     guild_handler::push_guild_state_typed(&mut login_effects, typed);
                 }
+                append_typed_user_login_bootstrap(
+                    &mut login_effects,
+                    state,
+                    typed,
+                    chapter_catalog,
+                );
                 apply_response_effects(
                     login_effects,
                     &mut pre_pushes,
                     &mut post_pushes,
                     &mut handler_error,
                 );
-                append_typed_user_login_bootstrap(&mut pre_pushes, state, typed, chapter_catalog);
             } else {
                 #[cfg(test)]
                 if let Some(account) = account.as_deref() {
@@ -2819,7 +2824,7 @@ where
 }
 
 fn append_typed_user_login_bootstrap(
-    pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
     state: &ServerState,
     account: &AccountState,
     chapter_catalog: Option<&ChapterCatalog>,
@@ -2839,18 +2844,15 @@ fn append_typed_user_login_bootstrap(
         .iter()
         .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
         .collect::<Vec<_>>();
-    append_method_push(
-        pushes,
+    effects.push_pre(super::common::response::Response::raw(
         "user.UpdateUserInfo",
         UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-    );
-    append_method_push(
-        pushes,
+    ));
+    effects.push_pre(super::common::response::Response::raw(
         "guide.GuideInfo",
         GuideInfoCodec::encode_initial_progress_completed(),
-    );
-    append_method_push(
-        pushes,
+    ));
+    effects.push_pre(super::common::response::Response::raw(
         "copy.GetCopy",
         CopyInfoCodec::encode_with_progress(
             1,
@@ -2858,9 +2860,8 @@ fn append_typed_user_login_bootstrap(
             copy_progress_max_or_first(&catalog.plot, &passed),
             &passed,
         ),
-    );
-    append_method_push(
-        pushes,
+    ));
+    effects.push_pre(super::common::response::Response::raw(
         "copy.GetCopy",
         CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
             &catalog.sea,
@@ -2869,37 +2870,39 @@ fn append_typed_user_login_bootstrap(
             &[],
             1,
         ),
-    );
-    append_method_push(
-        pushes,
+    ));
+    effects.push_pre(super::common::response::Response::raw(
         "copy.GetCopy",
         CopyInfoCodec::encode(
             33,
             &catalog.mubar,
             catalog.mubar.iter().copied().max().unwrap_or_default(),
         ),
-    );
-    append_method_push(
-        pushes,
+    ));
+    effects.push_pre(super::common::response::Response::raw(
         "copy.GetCopy",
         CopyInfoCodec::encode(
             9,
             &catalog.daily,
             catalog.daily.iter().copied().max().unwrap_or_default(),
         ),
-    );
-    append_method_push(
-        pushes,
+    ));
+    effects.push_pre(super::common::response::Response::raw(
         "dailycopy.UpdateDailyCopyData",
         daily_copy_snapshot_payload_from_typed_account(account, chapter_catalog, now),
-    );
-    append_method_push(pushes, "illustrate.IllustrateInfo", Vec::new());
-    append_method_push(pushes, "illustrate.OldIllustrateInfo", Vec::new());
-    append_method_push(
-        pushes,
+    ));
+    effects.push_pre(super::common::response::Response::raw(
+        "illustrate.IllustrateInfo",
+        Vec::new(),
+    ));
+    effects.push_pre(super::common::response::Response::raw(
+        "illustrate.OldIllustrateInfo",
+        Vec::new(),
+    ));
+    effects.push_pre(super::common::response::Response::raw(
         "illustrate.Memory",
         story_memory_payload(chapter_catalog.map(|catalog| catalog.memories.as_slice())),
-    );
+    ));
 }
 
 fn legacy_only_method(method: &str) -> bool {
