@@ -140,6 +140,14 @@ pub(super) fn handle_typed_with_catalog(
                 Err(error) => HandlerResult::Error(error),
             }
         }
+        "copy.QuitBase" => {
+            account.battle.active = None;
+            HandlerResult::Reply(Response::raw(method, request_args.to_vec()))
+        }
+        "copy.GetRandomFactors" => HandlerResult::Reply(Response::raw(
+            method,
+            encode_random_factor_payload(decode_varint_field(request_args, 1), battle_catalog),
+        )),
         _ => {
             if method != "copy.AttackBase" {
                 return HandlerResult::Empty;
@@ -1136,5 +1144,27 @@ mod tests {
             .battle
             .passed_copies
             .contains(&CopyId::new(9).unwrap()));
+    }
+
+    #[test]
+    fn typed_quit_clears_active_battle_session() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("battle-quit").unwrap(), "Battle");
+        account.battle.active = Some(blueoath_domain::BattleSession {
+            chapter_id: ChapterId::new(1).unwrap(),
+            copy_id: CopyId::new(9).unwrap(),
+            current_fleet: 1,
+            started_at: 1,
+            expires_at: 2,
+            revision: 0,
+            remaining_fleet_ids: Vec::new(),
+            hero_ids: Vec::new(),
+            attack_count: 0,
+        });
+        assert!(matches!(
+            handle_typed(&mut account, "copy.QuitBase", &[]),
+            HandlerResult::Reply(_)
+        ));
+        assert!(account.battle.active.is_none());
     }
 }

@@ -2489,6 +2489,8 @@ fn legacy_only_method(method: &str) -> bool {
             | "copy.PassBase"
             | "copy.PvpStartBase"
             | "copy.StartBase"
+            | "copy.QuitBase"
+            | "copy.GetRandomFactors"
             | "dailycopy.GetData"
             | "dailycopy.SelectEx"
             | "dailycopy.UpdateDailyCopyData"
