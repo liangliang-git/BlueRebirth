@@ -975,6 +975,7 @@ pub(super) fn set_fleet_on_typed_account(
     true
 }
 
+#[cfg(test)]
 pub(super) fn set_fleet_from_account(account: &mut Value, fleet: &FleetInfo) {
     let tactics = fleet
         .tactics
@@ -1332,6 +1333,7 @@ pub(super) fn preset_fleet_info_from_account(account: &Value) -> PresetFleetInfo
     }
 }
 
+#[cfg(test)]
 pub(super) fn set_preset_fleet_from_account(account: &mut Value, value: &PresetFleetInfo) {
     let Some(root) = account.as_object_mut() else {
         return;

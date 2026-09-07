@@ -999,6 +999,7 @@ pub(super) fn sea_difficulty_for_account(account: &Value) -> i32 {
         .clamp(1, 7)
 }
 
+#[cfg(test)]
 pub(super) fn set_sea_difficulty(account: &mut Value, difficulty: i32) {
     if let Some(character) = account.get_mut("character").and_then(Value::as_object_mut) {
         character.insert("seaDifficulty".to_owned(), json!(difficulty.clamp(1, 7)));
