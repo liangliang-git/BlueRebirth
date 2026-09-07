@@ -4,6 +4,63 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
+pub(super) fn handle_typed(
+    account: &mut blueoath_domain::AccountState,
+    state: &ServerState,
+    method: &str,
+    request_args: &[u8],
+    pre_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    match method {
+        "user.BuyGold" | "user.BuySupply" | "user.BuyPvePt" => {
+            if ResourcePurchaseRequest::decode(request_args).is_err() {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "resource purchase request is invalid",
+                ));
+            }
+            let (kind, amount) = match method {
+                "user.BuyGold" => (blueoath_domain::CurrencyKind::Gold, 1_000_u64),
+                "user.BuySupply" => (blueoath_domain::CurrencyKind::Supply, 100_u64),
+                "user.BuyPvePt" => (blueoath_domain::CurrencyKind::PvePoint, 10_u64),
+                _ => unreachable!(),
+            };
+            if account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Diamond)
+                .get()
+                < 10
+                || account.resources.amount(kind).get() > u64::MAX - amount
+            {
+                return HandlerResult::Error(GameError::InsufficientResource(
+                    blueoath_domain::CurrencyKind::Diamond,
+                ));
+            }
+            let _ = account
+                .resources
+                .debit(blueoath_domain::CurrencyKind::Diamond, 10);
+            let _ = account.resources.credit(kind, amount);
+            append_method_push(
+                pre_pushes,
+                "user.UpdateUserInfo",
+                UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+            );
+            HandlerResult::PushOnly
+        }
+        "user.GetSupply" => {
+            let Ok(request) = UserSupplyRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "supply request is invalid",
+                ));
+            };
+            let mut payload = Vec::new();
+            append_varint_field(&mut payload, 1, request.supply_id as u64);
+            append_varint_field(&mut payload, 2, 0);
+            HandlerResult::Reply(Response::raw(method, payload))
+        }
+        _ => HandlerResult::Empty,
+    }
+}
+
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
@@ -950,6 +1007,37 @@ mod tests {
         assert_eq!(character_i64(&account, "gold"), 1_000);
         assert_eq!(character_i64(&account, "buyGoldNum"), 1);
         assert_eq!(character_i64(&account, "buyGoldTime"), 42);
+    }
+
+    #[test]
+    fn typed_buy_resource_updates_domain_ledger() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("typed-buy-resource").unwrap(),
+            "Captain",
+        );
+        account
+            .resources
+            .credit(blueoath_domain::CurrencyKind::Diamond, 20)
+            .unwrap();
+        let state = ServerState::new("typed-buy-resource", "Captain", "1.0.0");
+        let mut pushes = Vec::new();
+        let result = handle_typed(&mut account, &state, "user.BuyGold", &[], &mut pushes);
+        assert!(matches!(result, HandlerResult::PushOnly));
+        assert_eq!(
+            account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Diamond)
+                .get(),
+            10_010
+        );
+        assert_eq!(
+            account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Gold)
+                .get(),
+            1_000
+        );
+        assert_eq!(pushes.len(), 1);
     }
 
     #[test]

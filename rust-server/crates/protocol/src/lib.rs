@@ -550,6 +550,32 @@ impl Decode for BagCompositeRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ResourcePurchaseRequest;
+
+impl Decode for ResourcePurchaseRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        decode_varint_fields(payload)?;
+        Ok(Self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserSupplyRequest {
+    pub supply_id: i32,
+}
+
+impl Decode for UserSupplyRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let supply_id = required_field(&fields, 1, "supply request is missing id")?;
+        if supply_id <= 0 {
+            return Err(ProtocolError::Invalid("supply request is invalid"));
+        }
+        Ok(Self { supply_id })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeroLockRequest {
     pub hero_id: u64,
