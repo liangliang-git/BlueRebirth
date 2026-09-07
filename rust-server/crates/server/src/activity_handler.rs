@@ -41,6 +41,8 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "activitysecretcopy.UpdateActivitySecretCopyInfo"
             | "activitysecretcopy.GetReward"
             | "activityvalentineloveletter.UpdateActivityValentineLoveLetterInfo"
+            | "activityvalentineloveletter.GetReward"
+            | "activityvalentineloveletter.GetRewardBySecretary"
             | "activityVideo.GetActivityVideo"
             | "activityVideo.SetActivityVideo"
             | "activitychristmasshop.UpdateActivityChristmasShopInfo"
@@ -61,6 +63,8 @@ pub(super) fn handle_typed(
             | "activityextractur.Draw"
             | "activitybirthday.MakeBirthdayCake"
             | "activitybirthday.GetCakeAffairReward"
+            | "activityvalentineloveletter.GetReward"
+            | "activityvalentineloveletter.GetRewardBySecretary"
             | "activityVideo.SetActivityVideo"
             | "activitycodeexchange.ExchangeCode"
             | "activitycodeexchange.ExchangeReward"
@@ -72,6 +76,10 @@ pub(super) fn handle_typed(
             }
             "activitybirthday.MakeBirthdayCake" | "activitybirthday.GetCakeAffairReward" => {
                 handle_typed_birthday_reward(account, method, request_args)
+            }
+            "activityvalentineloveletter.GetReward"
+            | "activityvalentineloveletter.GetRewardBySecretary" => {
+                handle_typed_valentine_reward(account, method, request_args)
             }
             "activityVideo.SetActivityVideo" => handle_typed_video_set(account, request_args),
             "activitycodeexchange.ExchangeCode" | "activitycodeexchange.ExchangeReward" => {
@@ -541,6 +549,77 @@ fn handle_typed_birthday_reward(
         }
         _ => HandlerResult::Error(GameError::InvalidRequest("birthday method is unsupported")),
     }
+}
+
+fn handle_typed_valentine_reward(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    let by_secretary = method.ends_with("BySecretary");
+    let index = decode_varint_field(request_args, 1).max(0) as u64;
+    if !by_secretary && index == 0 {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "valentine reward index is invalid",
+        ));
+    }
+    let claim_kind = if by_secretary { "secretary" } else { "hero" };
+    let claim_key = activity_key("activityValentine", &format!("claim:{claim_kind}:{index}"));
+    if account.activities.progress.contains_key(&claim_key) {
+        return typed_reply(
+            method,
+            typed_valentine_payload(&account.activities.progress),
+        );
+    }
+    let ship_tid = if by_secretary {
+        activity_value(
+            &account.activities.progress,
+            "activityValentine",
+            "curActShip",
+        ) as i32
+    } else {
+        activity_value(
+            &account.activities.progress,
+            "activityValentine",
+            &format!("loveShip:{index}:shipTid"),
+        ) as i32
+    };
+    if ship_tid <= 0 {
+        return HandlerResult::Error(GameError::InvalidState(
+            "valentine ship state is unavailable",
+        ));
+    }
+    let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
+    let reward_id = catalog
+        .valentine_gifts
+        .values()
+        .find(|gift| json_i32(gift, "ship_fleet_id") == Some(ship_tid))
+        .and_then(|gift| json_i32(gift, "attach_reward"));
+    let Some(reward_id) = reward_id else {
+        return HandlerResult::Error(GameError::InvalidState(
+            "valentine reward is not configured",
+        ));
+    };
+    let rewards = catalog
+        .rewards_by_id
+        .get(&reward_id)
+        .cloned()
+        .unwrap_or_default();
+    if rewards.is_empty() || !task_state::can_grant_typed_task_rewards(account, &rewards) {
+        return HandlerResult::Error(GameError::InvalidState("valentine reward is unsupported"));
+    }
+    for reward in &rewards {
+        if !task_state::grant_typed_task_reward(account, reward) {
+            return HandlerResult::Error(GameError::InvalidState(
+                "valentine reward is unsupported",
+            ));
+        }
+    }
+    account.activities.progress.insert(claim_key, 1);
+    typed_reply(
+        method,
+        typed_valentine_payload(&account.activities.progress),
+    )
 }
 
 fn typed_activity_currency(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
@@ -3134,6 +3213,10 @@ mod tests {
         append_varint_field(&mut cake, 1, 1);
         assert!(matches!(
             handle_typed(&mut account, "activitybirthday.MakeBirthdayCake", &cake),
+            HandlerResult::Error(_)
+        ));
+        assert!(matches!(
+            handle_typed(&mut account, "activityvalentineloveletter.GetReward", &[]),
             HandlerResult::Error(_)
         ));
     }
