@@ -176,6 +176,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
             revision: 0,
         }),
         resources: Default::default(),
+        ..AccountState::default()
     };
     AccountRepository::create(&store, &account).unwrap();
     AccountRepository::transact(&store, &profile_id, |account| {
@@ -195,5 +196,69 @@ fn typed_repository_transaction_commits_domain_mutation() {
             .get(),
         25
     );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn account_snapshot_write_projects_core_rows_into_normalized_tables() {
+    let (store, root) = store();
+    let account = json!({
+        "character": {
+            "uid": 7,
+            "name": "Captain",
+            "level": 3,
+            "exp": 12,
+            "secretaryId": 1,
+            "gold": 100,
+            "diamond": 20,
+            "supply": 50,
+            "pvePt": 4,
+            "head": 1021051,
+            "headFrame": 2
+        },
+        "dock": {"heroes": [{
+            "heroId": 1,
+            "templateId": 10210511,
+            "level": 2,
+            "exp": 5,
+            "mood": 100,
+            "affection": 200,
+            "curHp": 99,
+            "lock": true,
+            "equipSlots": [3, 0]
+        }]},
+        "equip": {"items": [{
+            "equipId": 3,
+            "templateId": 30091,
+            "enhanceLv": 1,
+            "star": 2,
+            "enhanceExp": 4,
+            "heroId": 1
+        }]},
+        "bag": {"items": [{"templateId": 60000, "num": 8}]},
+        "fleet": {"tactics": [{"formationId": 2, "strategyId": 4}]},
+        "battleSession": {"copyId": 1001, "startedAt": 10},
+        "tasks": {"records": [{"taskId": 9, "type": 1, "progress": 2, "completed": true}]}
+    });
+
+    store.save_account("normalized", &account).unwrap();
+    let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
+    for (table, expected) in [
+        ("characters", 1),
+        ("heroes", 1),
+        ("equipments", 1),
+        ("hero_equip_slots", 2),
+        ("inventory", 1),
+        ("fleets", 1),
+        ("battle_sessions", 1),
+        ("tasks", 1),
+    ] {
+        let count: i64 = connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, expected, "table {table}");
+    }
     let _ = std::fs::remove_dir_all(root);
 }

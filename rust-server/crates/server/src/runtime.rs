@@ -69,6 +69,7 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
         affection: Arc::new(load_affection_catalog(config.client_path.as_ref())),
         combination: Arc::new(load_combination_catalog(config.client_path.as_ref())),
     });
+    catalogs.validate().map_err(ServerError::Catalog)?;
     let profile_id = config.profile_id.clone();
     let profile_name = config.profile_name.clone();
     let version = config.version.clone();

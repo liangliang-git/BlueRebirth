@@ -1,0 +1,185 @@
+use blueoath_domain::{
+    AccountState, BattleSession, ChapterId, CopyId, DomainError, FleetId, HeroId, ResourceLedger,
+};
+use thiserror::Error;
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum GameServiceError {
+    #[error("domain error: {0}")]
+    Domain(#[from] DomainError),
+    #[error("battle session already active")]
+    BattleAlreadyActive,
+    #[error("battle session is not active")]
+    BattleNotActive,
+    #[error("battle session does not match requested copy")]
+    BattleCopyMismatch,
+    #[error("hero is not owned by account: {0:?}")]
+    HeroNotOwned(HeroId),
+    #[error("fleet is not configured: {0:?}")]
+    FleetNotConfigured(FleetId),
+}
+
+pub struct ResourceService;
+
+impl ResourceService {
+    pub fn credit(
+        account: &mut AccountState,
+        kind: blueoath_domain::CurrencyKind,
+        amount: u64,
+    ) -> Result<(), GameServiceError> {
+        account.resources.credit(kind, amount)?;
+        Ok(())
+    }
+
+    pub fn debit(
+        account: &mut AccountState,
+        kind: blueoath_domain::CurrencyKind,
+        amount: u64,
+    ) -> Result<(), GameServiceError> {
+        account.resources.debit(kind, amount)?;
+        Ok(())
+    }
+
+    pub fn snapshot(account: &AccountState) -> ResourceLedger {
+        account.resources.clone()
+    }
+}
+
+pub struct RewardService;
+
+impl RewardService {
+    pub fn grant(
+        account: &mut AccountState,
+        rewards: impl IntoIterator<Item = (blueoath_domain::CurrencyKind, u64)>,
+    ) -> Result<(), GameServiceError> {
+        for (kind, amount) in rewards {
+            ResourceService::credit(account, kind, amount)?;
+        }
+        Ok(())
+    }
+}
+
+pub struct ProgressService;
+
+impl ProgressService {
+    pub fn mark_copy_passed(account: &mut AccountState, copy_id: CopyId) -> bool {
+        account.battle.passed_copies.insert(copy_id)
+    }
+
+    pub fn is_copy_passed(account: &AccountState, copy_id: CopyId) -> bool {
+        account.battle.passed_copies.contains(&copy_id)
+    }
+}
+
+pub struct BattleService;
+
+impl BattleService {
+    pub fn start(
+        account: &mut AccountState,
+        chapter_id: ChapterId,
+        copy_id: CopyId,
+        fleet_id: FleetId,
+        now: u64,
+    ) -> Result<(), GameServiceError> {
+        if account.battle.active.is_some() {
+            return Err(GameServiceError::BattleAlreadyActive);
+        }
+        if !account.fleet.fleets.contains_key(&fleet_id) {
+            return Err(GameServiceError::FleetNotConfigured(fleet_id));
+        }
+        let fleet = &account.fleet.fleets[&fleet_id];
+        for hero_id in &fleet.members {
+            if !account.dock.heroes.contains_key(hero_id) {
+                return Err(GameServiceError::HeroNotOwned(*hero_id));
+            }
+        }
+        account.battle.active = Some(BattleSession {
+            chapter_id,
+            copy_id,
+            current_fleet: fleet_id.get() as u32,
+            started_at: now,
+            expires_at: now,
+            revision: 0,
+        });
+        Ok(())
+    }
+
+    pub fn settle(
+        account: &mut AccountState,
+        copy_id: CopyId,
+        victory: bool,
+    ) -> Result<bool, GameServiceError> {
+        let Some(session) = account.battle.active.take() else {
+            return Err(GameServiceError::BattleNotActive);
+        };
+        if session.copy_id != copy_id {
+            account.battle.active = Some(session);
+            return Err(GameServiceError::BattleCopyMismatch);
+        }
+        Ok(victory && account.battle.passed_copies.insert(copy_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blueoath_domain::{
+        AccountState, CurrencyKind, FleetRecord, HeroState, NewAccountFactory, ProfileId,
+        TemplateId,
+    };
+
+    fn account() -> AccountState {
+        let mut account = NewAccountFactory::create(ProfileId::new("game").unwrap(), "Game");
+        let hero_id = HeroId::new(7).unwrap();
+        account.dock.heroes.insert(
+            hero_id,
+            HeroState {
+                id: hero_id,
+                template_id: TemplateId::new(70).unwrap(),
+                level: 1,
+                exp: 0,
+                mood: 1,
+                affection: 0,
+                hp: 1,
+                locked: false,
+                equip_slots: Vec::new(),
+            },
+        );
+        account.fleet.fleets.insert(
+            FleetId::new(1).unwrap(),
+            FleetRecord {
+                members: vec![hero_id],
+                ..FleetRecord::default()
+            },
+        );
+        account
+    }
+
+    #[test]
+    fn resource_and_reward_services_are_atomic_per_command() {
+        let mut account = account();
+        RewardService::grant(
+            &mut account,
+            [(CurrencyKind::Gold, 30), (CurrencyKind::Diamond, 2)],
+        )
+        .unwrap();
+        ResourceService::debit(&mut account, CurrencyKind::Gold, 10).unwrap();
+        assert_eq!(account.resources.amount(CurrencyKind::Gold).get(), 20);
+        assert_eq!(account.resources.amount(CurrencyKind::Diamond).get(), 2);
+    }
+
+    #[test]
+    fn battle_service_is_idempotent_for_settlement() {
+        let mut account = account();
+        let chapter_id = ChapterId::new(1).unwrap();
+        let copy_id = CopyId::new(2).unwrap();
+        let fleet_id = FleetId::new(1).unwrap();
+        BattleService::start(&mut account, chapter_id, copy_id, fleet_id, 10).unwrap();
+        assert!(BattleService::settle(&mut account, copy_id, true).unwrap());
+        assert!(ProgressService::is_copy_passed(&account, copy_id));
+        assert_eq!(
+            BattleService::settle(&mut account, copy_id, true),
+            Err(GameServiceError::BattleNotActive)
+        );
+    }
+}

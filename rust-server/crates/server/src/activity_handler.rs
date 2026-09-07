@@ -3,22 +3,7 @@ use serde_json::{json, Value};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
-    [
-        "activitybirthday.",
-        "activitychristmasshop.",
-        "activitycodeexchange.",
-        "activityextract.",
-        "activityextractur.",
-        "activityfashion.",
-        "activitypapercut.",
-        "activitysecretcopy.",
-        "activitySSR.",
-        "activitySSRrolls.",
-        "activityvalentineloveletter.",
-        "activityVideo.",
-    ]
-    .iter()
-    .any(|prefix| method.starts_with(prefix))
+    GameMethod::parse(method).is_family(MethodFamily::Activity)
 }
 
 pub(super) fn handle<'state, 'account, 'scratch>(

@@ -3,10 +3,10 @@ use serde_json::{json, Value};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
-    method.starts_with("bigactivity.")
-        || method.starts_with("guildbigactivity.")
-        || method.starts_with("guildbigactivityrank.")
-        || method.starts_with("heroawaken.")
+    matches!(
+        GameMethod::parse(method).family(),
+        MethodFamily::BigActivity | MethodFamily::GuildBigActivity | MethodFamily::HeroAwaken
+    )
 }
 
 pub(super) fn handle<'state, 'account, 'scratch>(
@@ -19,7 +19,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
         *context.response_err_msg = "account is unavailable".to_owned();
         return Some(Vec::new());
     };
-    if method.starts_with("heroawaken.") {
+    if GameMethod::parse(method).is_family(MethodFamily::HeroAwaken) {
         let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
         return handle_hero_awaken(
             account,
@@ -29,7 +29,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             context.catalogs.fashion,
         );
     }
-    if method.starts_with("bigactivity.") {
+    if GameMethod::parse(method).is_family(MethodFamily::BigActivity) {
         return handle_big_activity(context.state, account, method, request_args);
     }
     handle_guild_big_activity(context.state, account, method, request_args)

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use thiserror::Error;
 
@@ -17,6 +17,8 @@ pub enum DomainError {
     NegativeResource,
     #[error("resource amount overflow")]
     ResourceOverflow,
+    #[error("invalid state: {0}")]
+    InvalidState(&'static str),
     #[error("insufficient {kind:?}: required {required}, available {available}")]
     InsufficientResource {
         kind: CurrencyKind,
@@ -25,7 +27,7 @@ pub enum DomainError {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ProfileId(String);
 
 impl ProfileId {
@@ -133,6 +135,118 @@ pub struct ResourceLedger {
     amounts: BTreeMap<CurrencyKind, ResourceAmount>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CharacterState {
+    pub uid: u64,
+    pub name: String,
+    pub level: u32,
+    pub exp: u64,
+    pub secretary_id: Option<HeroId>,
+    pub head: u32,
+    pub head_frame: u32,
+    pub resources: ResourceLedger,
+}
+
+impl Default for CharacterState {
+    fn default() -> Self {
+        Self {
+            uid: 1,
+            name: "Commander".to_owned(),
+            level: 1,
+            exp: 0,
+            secretary_id: None,
+            head: 0,
+            head_frame: 0,
+            resources: ResourceLedger::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeroState {
+    pub id: HeroId,
+    pub template_id: TemplateId,
+    pub level: u32,
+    pub exp: u64,
+    pub mood: u32,
+    pub affection: u64,
+    pub hp: u64,
+    pub locked: bool,
+    pub equip_slots: Vec<Option<EquipId>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DockState {
+    pub heroes: BTreeMap<HeroId, HeroState>,
+    pub equipments: BTreeMap<EquipId, EquipmentState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EquipmentState {
+    pub id: EquipId,
+    pub template_id: TemplateId,
+    pub enhance_level: u32,
+    pub star: u32,
+    pub enhance_exp: u64,
+    pub hero_id: Option<HeroId>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FleetState {
+    pub fleets: BTreeMap<FleetId, FleetRecord>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FleetRecord {
+    pub formation_id: u32,
+    pub tactic_id: u32,
+    pub members: Vec<HeroId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BattleSession {
+    pub chapter_id: ChapterId,
+    pub copy_id: CopyId,
+    pub current_fleet: u32,
+    pub started_at: u64,
+    pub expires_at: u64,
+    pub revision: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BattleProgressState {
+    pub active: Option<BattleSession>,
+    pub passed_copies: BTreeSet<CopyId>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DailyCopyState {
+    pub reset_day: u32,
+    pub challenge_times: BTreeMap<ChapterId, u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskState {
+    pub progress: BTreeMap<u64, u64>,
+    pub completed: BTreeSet<u64>,
+    pub claimed: BTreeSet<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildingState {
+    pub levels: BTreeMap<u64, u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SocialState {
+    pub friends: BTreeSet<ProfileId>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivityState {
+    pub progress: BTreeMap<String, u64>,
+}
+
 impl ResourceLedger {
     pub fn amount(&self, kind: CurrencyKind) -> ResourceAmount {
         self.amounts
@@ -166,6 +280,81 @@ pub struct ProfileState {
 pub struct AccountState {
     pub profile: Option<ProfileState>,
     pub resources: ResourceLedger,
+    #[serde(default)]
+    pub character: CharacterState,
+    #[serde(default)]
+    pub dock: DockState,
+    #[serde(default)]
+    pub fleet: FleetState,
+    #[serde(default)]
+    pub battle: BattleProgressState,
+    #[serde(default)]
+    pub daily_copy: DailyCopyState,
+    #[serde(default)]
+    pub tasks: TaskState,
+    #[serde(default)]
+    pub buildings: BuildingState,
+    #[serde(default)]
+    pub social: SocialState,
+    #[serde(default)]
+    pub activities: ActivityState,
+}
+
+impl AccountState {
+    pub fn new(profile: ProfileState) -> Self {
+        Self {
+            profile: Some(profile),
+            ..Self::default()
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), DomainError> {
+        if self.character.uid == 0 {
+            return Err(DomainError::InvalidState("character uid must be positive"));
+        }
+        if self.character.level == 0 {
+            return Err(DomainError::InvalidState(
+                "character level must be positive",
+            ));
+        }
+        for hero in self.dock.heroes.values() {
+            if hero.level == 0 {
+                return Err(DomainError::InvalidState("hero level must be positive"));
+            }
+            if hero
+                .equip_slots
+                .iter()
+                .flatten()
+                .any(|id| !self.dock.equipments.contains_key(id))
+            {
+                return Err(DomainError::InvalidState(
+                    "hero references missing equipment",
+                ));
+            }
+        }
+        for equipment in self.dock.equipments.values() {
+            if let Some(hero_id) = equipment.hero_id {
+                if !self.dock.heroes.contains_key(&hero_id) {
+                    return Err(DomainError::InvalidState(
+                        "equipment references missing hero",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+pub struct NewAccountFactory;
+
+impl NewAccountFactory {
+    pub fn create(profile_id: ProfileId, name: impl Into<String>) -> AccountState {
+        AccountState::new(ProfileState {
+            id: profile_id,
+            name: name.into(),
+            revision: 0,
+        })
+    }
 }
 
 #[derive(Debug, Error)]
@@ -189,7 +378,7 @@ pub trait AccountRepository {
 
 #[cfg(test)]
 mod tests {
-    use super::{CurrencyKind, DomainError, ProfileId, ResourceLedger};
+    use super::{CurrencyKind, DomainError, NewAccountFactory, ProfileId, ResourceLedger};
 
     #[test]
     fn validates_profile_ids_at_domain_boundary() {
@@ -210,5 +399,13 @@ mod tests {
         ledger.credit(CurrencyKind::Gold, 10).unwrap();
         ledger.debit(CurrencyKind::Gold, 4).unwrap();
         assert_eq!(ledger.amount(CurrencyKind::Gold).get(), 6);
+    }
+
+    #[test]
+    fn new_account_factory_creates_valid_typed_state() {
+        let account = NewAccountFactory::create(ProfileId::new("captain").unwrap(), "Captain");
+        assert!(account.validate().is_ok());
+        assert_eq!(account.character.level, 1);
+        assert!(account.profile.is_some());
     }
 }

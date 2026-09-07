@@ -44,6 +44,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "blueoath-game"
+version = "0.1.0"
+dependencies = [
+ "blueoath-domain",
+ "thiserror",
+]
+
+[[package]]
 name = "blueoath-protocol"
 version = "0.1.0"
 dependencies = [
@@ -56,6 +64,7 @@ name = "blueoath-server"
 version = "0.1.0"
 dependencies = [
  "blueoath-domain",
+ "blueoath-game",
  "blueoath-protocol",
  "blueoath-storage",
  "blueoath-transport",

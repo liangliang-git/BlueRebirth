@@ -3,16 +3,14 @@ use serde_json::{json, Value};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
-    [
-        "battlepass.",
-        "activitybattlepass.",
-        "exchange.",
-        "foodCompose.",
-        "worldevent.",
-        "worldeventrank.",
-    ]
-    .iter()
-    .any(|prefix| method.starts_with(prefix))
+    matches!(
+        GameMethod::parse(method).family(),
+        MethodFamily::BattlePass
+            | MethodFamily::ActivityBattlePass
+            | MethodFamily::Exchange
+            | MethodFamily::FoodCompose
+            | MethodFamily::WorldEvent
+    )
 }
 
 pub(super) fn handle<'state, 'account, 'scratch>(
@@ -31,7 +29,11 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             handle_battlepass_action(context, method, request_args, false)
         }
         "battlepass.RecieveTaskReward" | "activitybattlepass.RecieveTaskReward" => {
-            handle_battlepass_task_reward(context, request_args, method.starts_with("activity"))
+            handle_battlepass_task_reward(
+                context,
+                request_args,
+                GameMethod::parse(method).is_family(MethodFamily::ActivityBattlePass),
+            )
         }
         "battlepass.BuyPassType"
         | "activitybattlepass.BuyPassType"
@@ -40,10 +42,10 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             context,
             method,
             request_args,
-            method.starts_with("activity"),
+            GameMethod::parse(method).is_family(MethodFamily::ActivityBattlePass),
         ),
         "battlepass.UpdateBattlePassInfo" | "activitybattlepass.UpdateBattlePassInfo" => {
-            let activity = method.starts_with("activity");
+            let activity = GameMethod::parse(method).is_family(MethodFamily::ActivityBattlePass);
             Some(battlepass_info_payload(
                 context.account.as_deref()?,
                 gameplay_catalog(),

@@ -1,4 +1,8 @@
-use blueoath_protocol::{CopyStartRequest, Decode, ProtocolError};
+use blueoath_protocol::{
+    ChangeNameRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest, Decode,
+    ProtocolError, SeaDifficultyRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
+    SetSecretaryRequest,
+};
 
 #[test]
 fn decodes_copy_start_request_with_typed_fields_and_repeated_buffs() {
@@ -35,5 +39,82 @@ fn rejects_missing_or_duplicate_required_copy_id() {
         Err(ProtocolError::Invalid(
             "copy start request has duplicate copy id"
         ))
+    ));
+}
+
+#[test]
+fn decodes_typed_user_profile_updates() {
+    assert_eq!(
+        SetSecretaryRequest::decode(&[0x08, 0x2a])
+            .unwrap()
+            .secretary_id,
+        42
+    );
+    assert_eq!(SetHeadRequest::decode(&[0x10, 0x09]).unwrap().head, 9);
+    assert_eq!(
+        SetHeadFrameRequest::decode(&[0x08, 0x0b])
+            .unwrap()
+            .head_frame,
+        11
+    );
+    assert_eq!(
+        ChangeNameRequest::decode(&[0x0a, 0x03, b'C', b'a', b'p'])
+            .unwrap()
+            .name,
+        "Cap"
+    );
+    assert_eq!(
+        SetMessageRequest::decode(&[0x0a, 0x02, b'h', b'i'])
+            .unwrap()
+            .message,
+        "hi"
+    );
+}
+
+#[test]
+fn rejects_missing_duplicate_and_oversized_user_fields() {
+    assert!(matches!(
+        SetSecretaryRequest::decode(&[]),
+        Err(ProtocolError::Invalid("secretary request is missing id"))
+    ));
+    assert!(matches!(
+        SetSecretaryRequest::decode(&[0x08, 1, 0x08, 2]),
+        Err(ProtocolError::Invalid("secretary request has duplicate id"))
+    ));
+
+    let mut oversized = vec![0x0a, 65];
+    oversized.extend(std::iter::repeat_n(b'x', 65));
+    assert!(matches!(
+        ChangeNameRequest::decode(&oversized),
+        Err(ProtocolError::Invalid("name is too long"))
+    ));
+}
+
+#[test]
+fn decodes_typed_copy_and_daily_requests() {
+    let daily = DailyCopyEnterRequest::decode(&[0x08, 1, 0x10, 2, 0x18, 3]).unwrap();
+    assert_eq!(
+        (daily.chapter_id, daily.copy_id, daily.tactic_id),
+        (1, 2, 3)
+    );
+
+    let record = CopyRecordRequest::decode(&[0x08, 7, 0x10, 2]).unwrap();
+    assert_eq!(record.index, 2);
+
+    let sea = SeaDifficultyRequest::decode(&[0x08, 9, 0x10, 3]).unwrap();
+    assert_eq!((sea.copy_id, sea.difficulty), (9, 3));
+}
+
+#[test]
+fn rejects_invalid_typed_copy_requests() {
+    assert!(matches!(
+        DailyCopyEnterRequest::decode(&[0x08, 1, 0x10, 2]),
+        Err(ProtocolError::Invalid(
+            "daily copy request is missing tactic id"
+        ))
+    ));
+    assert!(matches!(
+        SeaDifficultyRequest::decode(&[0x08, 9, 0x10, 8]),
+        Err(ProtocolError::Invalid("sea request has invalid value"))
     ));
 }

@@ -1,7 +1,8 @@
 use blueoath_domain::{AccountRepository, AccountState, ProfileId, RepositoryError};
 use chrono::{SecondsFormat, Utc};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -179,6 +180,7 @@ impl ProfileStore {
                updated_utc = excluded.updated_utc",
             params![profile_id, account_json, timestamp()],
         )?;
+        project_normalized_core(&transaction, profile_id, account)?;
         transaction.execute(
             "INSERT INTO account_revisions(profile_id, revision, updated_utc)
              VALUES (?1, ?2, ?3)
@@ -240,6 +242,331 @@ impl ProfileStore {
     }
 }
 
+fn project_normalized_core(
+    transaction: &Transaction<'_>,
+    profile_id: &str,
+    account: &Value,
+) -> Result<(), StorageError> {
+    let character = account
+        .get("character")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let profile_name = character
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(profile_id);
+    transaction.execute(
+        "INSERT INTO profiles(id, name, state_json, updated_utc)
+         VALUES (?1, ?2, '{}', ?3)
+         ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_utc = excluded.updated_utc",
+        params![profile_id, profile_name, timestamp()],
+    )?;
+
+    transaction.execute(
+        "DELETE FROM task_claims WHERE profile_id = ?1",
+        params![profile_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM tasks WHERE profile_id = ?1",
+        params![profile_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM battle_sessions WHERE profile_id = ?1",
+        params![profile_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM fleet_members WHERE profile_id = ?1",
+        params![profile_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM fleets WHERE profile_id = ?1",
+        params![profile_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM hero_equip_slots WHERE profile_id = ?1",
+        params![profile_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM equipments WHERE profile_id = ?1",
+        params![profile_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM heroes WHERE profile_id = ?1",
+        params![profile_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM inventory WHERE profile_id = ?1",
+        params![profile_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM characters WHERE profile_id = ?1",
+        params![profile_id],
+    )?;
+
+    transaction.execute(
+        "INSERT INTO characters(
+            profile_id, uid, name, level, exp, secretary_id, gold, diamond,
+            supply, pve_pt, head, head_frame
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            profile_id,
+            positive_field(&character, "uid", 1),
+            profile_name,
+            positive_field(&character, "level", 1),
+            non_negative_field(&character, "exp"),
+            non_negative_field(&character, "secretaryId"),
+            non_negative_field(&character, "gold"),
+            non_negative_field(&character, "diamond"),
+            non_negative_field(&character, "supply"),
+            non_negative_field(&character, "pvePt"),
+            non_negative_field(&character, "head"),
+            non_negative_field(&character, "headFrame"),
+        ],
+    )?;
+
+    let mut hero_ids = BTreeSet::new();
+    let mut equipment_ids = BTreeSet::new();
+    if let Some(heroes) = account
+        .get("dock")
+        .and_then(|dock| dock.get("heroes"))
+        .and_then(Value::as_array)
+    {
+        for hero in heroes {
+            let Some(hero) = hero.as_object() else {
+                continue;
+            };
+            let hero_id = positive_field(hero, "heroId", 0);
+            let template_id = positive_field(hero, "templateId", 0);
+            if hero_id == 0 || template_id == 0 {
+                continue;
+            }
+            transaction.execute(
+                "INSERT INTO heroes(
+                    profile_id, hero_id, template_id, level, exp, mood,
+                    affection, hp, lock_state, created_utc
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 ON CONFLICT(profile_id, hero_id) DO UPDATE SET
+                   template_id = excluded.template_id,
+                   level = excluded.level,
+                   exp = excluded.exp,
+                   mood = excluded.mood,
+                   affection = excluded.affection,
+                   hp = excluded.hp,
+                   lock_state = excluded.lock_state",
+                params![
+                    profile_id,
+                    hero_id,
+                    template_id,
+                    positive_field(hero, "level", 1),
+                    non_negative_field(hero, "exp"),
+                    non_negative_field(hero, "mood"),
+                    non_negative_field(hero, "affection"),
+                    non_negative_field(hero, "curHp"),
+                    bool_field(hero, "lock"),
+                    timestamp(),
+                ],
+            )?;
+            hero_ids.insert(hero_id);
+        }
+    }
+
+    if let Some(equipments) = account
+        .get("equip")
+        .and_then(|equip| equip.get("items"))
+        .and_then(Value::as_array)
+    {
+        for equipment in equipments {
+            let Some(equipment) = equipment.as_object() else {
+                continue;
+            };
+            let equip_id = positive_field(equipment, "equipId", 0);
+            let template_id = positive_field(equipment, "templateId", 0);
+            if equip_id == 0 || template_id == 0 {
+                continue;
+            }
+            let hero_id = positive_field(equipment, "heroId", 0);
+            let hero_id = hero_ids.contains(&hero_id).then_some(hero_id);
+            transaction.execute(
+                "INSERT INTO equipments(
+                    profile_id, equip_id, template_id, enhance_level, star,
+                    enhance_exp, hero_id
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(profile_id, equip_id) DO UPDATE SET
+                   template_id = excluded.template_id,
+                   enhance_level = excluded.enhance_level,
+                   star = excluded.star,
+                   enhance_exp = excluded.enhance_exp,
+                   hero_id = excluded.hero_id",
+                params![
+                    profile_id,
+                    equip_id,
+                    template_id,
+                    non_negative_field(equipment, "enhanceLv"),
+                    non_negative_field(equipment, "star"),
+                    non_negative_field(equipment, "enhanceExp"),
+                    hero_id,
+                ],
+            )?;
+            equipment_ids.insert(equip_id);
+        }
+    }
+
+    if let Some(heroes) = account
+        .get("dock")
+        .and_then(|dock| dock.get("heroes"))
+        .and_then(Value::as_array)
+    {
+        for hero in heroes {
+            let Some(hero) = hero.as_object() else {
+                continue;
+            };
+            let hero_id = positive_field(hero, "heroId", 0);
+            if hero_id == 0 || !hero_ids.contains(&hero_id) {
+                continue;
+            }
+            if let Some(slots) = hero.get("equipSlots").and_then(Value::as_array) {
+                for (slot_index, slot) in slots.iter().enumerate() {
+                    let equip_id = slot.as_i64().unwrap_or_default();
+                    let equip_id = equipment_ids.contains(&equip_id).then_some(equip_id);
+                    transaction.execute(
+                        "INSERT INTO hero_equip_slots(
+                            profile_id, hero_id, slot_index, equip_id
+                         ) VALUES (?1, ?2, ?3, ?4)
+                         ON CONFLICT(profile_id, hero_id, slot_index) DO UPDATE SET
+                           equip_id = excluded.equip_id",
+                        params![profile_id, hero_id, slot_index as i64, equip_id],
+                    )?;
+                }
+            }
+        }
+    }
+
+    if let Some(items) = account
+        .get("bag")
+        .and_then(|bag| bag.get("items"))
+        .and_then(Value::as_array)
+    {
+        for item in items {
+            let Some(item) = item.as_object() else {
+                continue;
+            };
+            let template_id = positive_field(item, "templateId", 0);
+            if template_id == 0 {
+                continue;
+            }
+            transaction.execute(
+                "INSERT INTO inventory(profile_id, template_id, amount)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(profile_id, template_id) DO UPDATE SET
+                   amount = inventory.amount + excluded.amount",
+                params![profile_id, template_id, non_negative_field(item, "num")],
+            )?;
+        }
+    }
+
+    if let Some(tactics) = account
+        .get("fleet")
+        .and_then(|fleet| fleet.get("tactics"))
+        .and_then(Value::as_array)
+    {
+        for (index, tactic) in tactics.iter().enumerate() {
+            let Some(tactic) = tactic.as_object() else {
+                continue;
+            };
+            let fleet_id = positive_field(tactic, "modeId", index as i64 + 1);
+            transaction.execute(
+                "INSERT INTO fleets(profile_id, fleet_id, formation_id, tactic_id)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(profile_id, fleet_id) DO UPDATE SET
+                   formation_id = excluded.formation_id,
+                   tactic_id = excluded.tactic_id",
+                params![
+                    profile_id,
+                    fleet_id,
+                    non_negative_field(tactic, "formationId"),
+                    non_negative_field(tactic, "strategyId"),
+                ],
+            )?;
+        }
+    }
+
+    if let Some(session) = account.get("battleSession").and_then(Value::as_object) {
+        let copy_id = positive_field(session, "copyId", 0);
+        if copy_id > 0 {
+            let started_at = non_negative_field(session, "startedAt");
+            transaction.execute(
+                "INSERT INTO battle_sessions(
+                    profile_id, chapter_id, copy_id, current_fleet, state,
+                    started_at, expires_at, revision
+                 ) VALUES (?1, 1, ?2, 0, 'active', ?3, ?3, 0)",
+                params![profile_id, copy_id, started_at],
+            )?;
+        }
+    }
+
+    let task_reset_day = account
+        .get("tasks")
+        .and_then(Value::as_object)
+        .map(|tasks| non_negative_field(tasks, "dailyResetDay"))
+        .unwrap_or_default();
+    if let Some(records) = account
+        .get("tasks")
+        .and_then(|tasks| tasks.get("records"))
+        .and_then(Value::as_array)
+    {
+        for record in records {
+            let Some(record) = record.as_object() else {
+                continue;
+            };
+            let task_id = positive_field(record, "taskId", 0);
+            if task_id == 0 {
+                continue;
+            }
+            transaction.execute(
+                "INSERT INTO tasks(
+                    profile_id, task_id, task_type, progress, completed, reset_day
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(profile_id, task_id) DO UPDATE SET
+                   task_type = excluded.task_type,
+                   progress = excluded.progress,
+                   completed = excluded.completed,
+                   reset_day = excluded.reset_day",
+                params![
+                    profile_id,
+                    task_id,
+                    non_negative_field(record, "type"),
+                    non_negative_field(record, "progress"),
+                    bool_field(record, "completed") | bool_field(record, "isFinished"),
+                    task_reset_day,
+                ],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn non_negative_field(object: &serde_json::Map<String, Value>, key: &str) -> i64 {
+    object
+        .get(key)
+        .and_then(Value::as_i64)
+        .unwrap_or_default()
+        .max(0)
+}
+
+fn positive_field(object: &serde_json::Map<String, Value>, key: &str, default: i64) -> i64 {
+    object
+        .get(key)
+        .and_then(Value::as_i64)
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
+}
+
+fn bool_field(object: &serde_json::Map<String, Value>, key: &str) -> i64 {
+    object.get(key).and_then(Value::as_bool).unwrap_or(false) as i64
+}
+
 impl AccountRepository for ProfileStore {
     fn load(&self, profile_id: &ProfileId) -> Result<Option<AccountState>, RepositoryError> {
         self.load_account(profile_id.as_str())
@@ -255,6 +582,7 @@ impl AccountRepository for ProfileStore {
         let profile = account.profile.as_ref().ok_or_else(|| {
             RepositoryError::Storage("account profile is required for creation".to_owned())
         })?;
+        account.validate()?;
         let value = serde_json::to_value(account)
             .map_err(|error| RepositoryError::Storage(error.to_string()))?;
         self.save_account(profile.id.as_str(), &value)
@@ -276,8 +604,10 @@ impl AccountRepository for ProfileStore {
             .unwrap_or_else(|| AccountState {
                 profile: None,
                 resources: Default::default(),
+                ..AccountState::default()
             });
         let result = operation(&mut account)?;
+        account.validate()?;
         let value = serde_json::to_value(&account)
             .map_err(|error| RepositoryError::Storage(error.to_string()))?;
         self.save_account(profile_id.as_str(), &value)

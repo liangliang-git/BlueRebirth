@@ -3,7 +3,10 @@ use serde_json::{json, Value};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
-    method.starts_with("magazine.") || method.starts_with("interactionitem.")
+    matches!(
+        GameMethod::parse(method).family(),
+        MethodFamily::Magazine | MethodFamily::InteractionItem
+    )
 }
 
 pub(super) fn handle<'state, 'account, 'scratch>(
@@ -12,7 +15,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     request_args: &[u8],
 ) -> Option<Vec<u8>> {
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
-    if method.starts_with("magazine.") {
+    if GameMethod::parse(method).is_family(MethodFamily::Magazine) {
         return handle_magazine(context, catalog, method, request_args);
     }
     handle_interaction_item(context, catalog, method, request_args)

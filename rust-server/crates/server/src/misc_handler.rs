@@ -3,40 +3,17 @@ use serde_json::json;
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
-    [
-        "activitybirthday.",
-        "activitychristmasshop.",
-        "activitycodeexchange.",
-        "activityextract.",
-        "activityextractur.",
-        "activityfashion.",
-        "activitypapercut.",
-        "activitysecretcopy.",
-        "activitySSR.",
-        "activitySSRrolls.",
-        "activityvalentineloveletter.",
-        "activityVideo.",
-        "adventure.",
-        "bigactivity.",
-        "boss.",
-        "chat.",
-        "guildbigactivity.",
-        "guildbigactivityrank.",
-        "guildbox.",
-        "guildOffer.",
-        "guildofferrank.",
-        "guildtask.",
-        "guildwar.",
-        "heroawaken.",
-        "invitescore.",
-        "shiptask.",
-        "sportsmeet.",
-        "sportsmeetrank.",
-        "worldevent.",
-        "worldeventrank.",
-    ]
-    .iter()
-    .any(|prefix| method.starts_with(prefix))
+    matches!(
+        GameMethod::parse(method).family(),
+        MethodFamily::Adventure
+            | MethodFamily::Boss
+            | MethodFamily::Chat
+            | MethodFamily::GuildBox
+            | MethodFamily::InviteScore
+            | MethodFamily::ShipTask
+            | MethodFamily::SportsMeet
+            | MethodFamily::SportsMeetRank
+    )
 }
 
 pub(super) fn handle<'state, 'account, 'scratch>(
@@ -157,7 +134,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
         | "battlepass.GetAllReward"
         | "activitybattlepass.GetReward"
         | "activitybattlepass.GetAllReward" => {
-            let key = if method.starts_with("activity") {
+            let key = if GameMethod::parse(method).is_family(MethodFamily::Activity) {
                 "activityBattlePassClaimed"
             } else {
                 "battlePassClaimed"
@@ -271,7 +248,11 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             record_compat_route(account, m, request_args);
             Some(Vec::new())
         }
-        m if m.starts_with("battlepass.") || m.starts_with("activitybattlepass.") => {
+        m if matches!(
+            GameMethod::parse(m).family(),
+            MethodFamily::BattlePass | MethodFamily::ActivityBattlePass
+        ) =>
+        {
             account["lastBattlePassAction"] = json!({
                 "method": m,
                 "args": request_args,

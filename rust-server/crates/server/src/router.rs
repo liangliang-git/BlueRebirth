@@ -65,6 +65,7 @@ pub enum MethodFamily {
     Tower,
     User,
     UserServer,
+    WorldEvent,
     Unknown,
 }
 
@@ -110,6 +111,18 @@ impl<'a> GameMethod<'a> {
 fn family_for(name: &str) -> MethodFamily {
     const PREFIXES: &[(&str, MethodFamily)] = &[
         ("activitybattlepass.", MethodFamily::ActivityBattlePass),
+        ("activitybirthday.", MethodFamily::Activity),
+        ("activitychristmasshop.", MethodFamily::Activity),
+        ("activitycodeexchange.", MethodFamily::Activity),
+        ("activityextractur.", MethodFamily::Activity),
+        ("activityextract.", MethodFamily::Activity),
+        ("activityfashion.", MethodFamily::Activity),
+        ("activitypapercut.", MethodFamily::Activity),
+        ("activitysecretcopy.", MethodFamily::Activity),
+        ("activitySSRrolls.", MethodFamily::Activity),
+        ("activitySSR.", MethodFamily::Activity),
+        ("activityvalentineloveletter.", MethodFamily::Activity),
+        ("activityVideo.", MethodFamily::Activity),
         ("activityTower.", MethodFamily::ActivityTower),
         ("activity.", MethodFamily::Activity),
         ("adventure.", MethodFamily::Adventure),
@@ -137,6 +150,7 @@ fn family_for(name: &str) -> MethodFamily {
         ("guildbigactivityrank.", MethodFamily::GuildBigActivity),
         ("guildbigactivity.", MethodFamily::GuildBigActivity),
         ("guildofferrank.", MethodFamily::GuildOfferRank),
+        ("guildOfferUser.", MethodFamily::GuildOffer),
         ("guildOffer.", MethodFamily::GuildOffer),
         ("guildtask.", MethodFamily::GuildTask),
         ("guildwar.", MethodFamily::GuildWar),
@@ -170,6 +184,8 @@ fn family_for(name: &str) -> MethodFamily {
         ("tower.", MethodFamily::Tower),
         ("user.", MethodFamily::User),
         ("usersvr.", MethodFamily::UserServer),
+        ("worldeventrank.", MethodFamily::WorldEvent),
+        ("worldevent.", MethodFamily::WorldEvent),
     ];
 
     PREFIXES
@@ -231,5 +247,13 @@ mod tests {
             MethodFamily::SportsMeetRank
         );
         assert_eq!(family_for("matchsvr_1.Ready"), MethodFamily::MatchServer);
+    }
+
+    #[test]
+    fn classifies_extended_protocol_names_at_one_boundary() {
+        assert_eq!(family_for("activitybirthday.Get"), MethodFamily::Activity);
+        assert_eq!(family_for("activitySSRrolls.Draw"), MethodFamily::Activity);
+        assert_eq!(family_for("guildOfferUser.Get"), MethodFamily::GuildOffer);
+        assert_eq!(family_for("worldeventrank.Rank"), MethodFamily::WorldEvent);
     }
 }

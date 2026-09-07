@@ -74,6 +74,7 @@ use config::{normalize_multiplier, normalize_profile_id, scale_reward, DEFAULT_P
 pub use config::{
     BattleOutcome, Formation, ServerConfig, ServerConfigError, ServerState, Ship, Stage,
 };
+pub use blueoath_game::{BattleService, ProgressService, ResourceService, RewardService};
 use construction_state::*;
 use equip_state::*;
 pub use frame_service::process_frame;
@@ -131,6 +132,8 @@ pub enum ServerError {
     Storage(#[from] StorageError),
     #[error("blocking storage task failed: {0}")]
     StorageTask(String),
+    #[error("catalog validation failed: {0}")]
+    Catalog(String),
 }
 
 /// Processes one game-login NetSocket frame. Account-backed reads and high-frequency profile,

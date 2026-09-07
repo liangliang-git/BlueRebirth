@@ -117,6 +117,195 @@ impl Decode for CopyStartRequest {
     }
 }
 
+macro_rules! single_varint_request {
+    ($name:ident, $field_name:ident, $field:expr, $missing:expr, $duplicate:expr) => {
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub struct $name {
+            pub $field_name: i32,
+        }
+
+        impl Decode for $name {
+            fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+                Ok(Self {
+                    $field_name: decode_required_varint(payload, $field, $missing, $duplicate)?,
+                })
+            }
+        }
+    };
+}
+
+single_varint_request!(
+    SetSecretaryRequest,
+    secretary_id,
+    1,
+    "secretary request is missing id",
+    "secretary request has duplicate id"
+);
+single_varint_request!(
+    SetHeadFrameRequest,
+    head_frame,
+    1,
+    "head frame request is missing id",
+    "head frame request has duplicate id"
+);
+single_varint_request!(
+    SetHeadRequest,
+    head,
+    2,
+    "head request is missing id",
+    "head request has duplicate id"
+);
+
+macro_rules! single_string_request {
+    ($name:ident, $field_name:ident, $missing:expr, $duplicate:expr, $too_long:expr, $max:expr) => {
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub struct $name {
+            pub $field_name: String,
+        }
+
+        impl Decode for $name {
+            fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+                Ok(Self {
+                    $field_name: decode_required_string(
+                        payload, 1, $missing, $duplicate, $too_long, $max,
+                    )?,
+                })
+            }
+        }
+    };
+}
+
+single_string_request!(
+    ChangeNameRequest,
+    name,
+    "name is missing",
+    "name has duplicate value",
+    "name is too long",
+    64
+);
+single_string_request!(
+    SetMessageRequest,
+    message,
+    "message is missing",
+    "message has duplicate value",
+    "message is too long",
+    256
+);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DailyCopyEnterRequest {
+    pub chapter_id: i32,
+    pub copy_id: i32,
+    pub tactic_id: i32,
+}
+
+impl Decode for DailyCopyEnterRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let chapter_id = required_field(&fields, 1, "daily copy request is missing chapter id")?;
+        let copy_id = required_field(&fields, 2, "daily copy request is missing copy id")?;
+        let tactic_id = required_field(&fields, 3, "daily copy request is missing tactic id")?;
+        if chapter_id <= 0 || copy_id <= 0 || tactic_id <= 0 {
+            return Err(ProtocolError::Invalid("daily copy request has invalid id"));
+        }
+        Ok(Self {
+            chapter_id,
+            copy_id,
+            tactic_id,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyRecordRequest {
+    pub copy_id: i32,
+    pub index: i32,
+}
+
+impl Decode for CopyRecordRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let copy_id = required_field(&fields, 1, "copy record request is missing copy id")?;
+        let index = optional_i32(&fields, 2, "copy record request has duplicate index")?;
+        if copy_id <= 0 || index < 0 {
+            return Err(ProtocolError::Invalid("copy record request has invalid id"));
+        }
+        Ok(Self { copy_id, index })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeaDifficultyRequest {
+    pub copy_id: i32,
+    pub difficulty: i32,
+}
+
+impl Decode for SeaDifficultyRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let copy_id = required_field(&fields, 1, "sea request is missing copy id")?;
+        let difficulty = required_field(&fields, 2, "sea request is missing difficulty")?;
+        if copy_id <= 0 || !(1..=7).contains(&difficulty) {
+            return Err(ProtocolError::Invalid("sea request has invalid value"));
+        }
+        Ok(Self {
+            copy_id,
+            difficulty,
+        })
+    }
+}
+
+fn decode_required_varint(
+    payload: &[u8],
+    field: u32,
+    missing: &'static str,
+    duplicate: &'static str,
+) -> Result<i32, ProtocolError> {
+    let mut reader = PbReader::new(payload);
+    let mut value = None;
+    while let Some((current, wire)) = reader.next_field()? {
+        if current == field && wire == 0 {
+            if value.is_some() {
+                return Err(ProtocolError::Invalid(duplicate));
+            }
+            value = Some(reader.read_varint()?);
+        } else {
+            reader.skip(wire)?;
+        }
+    }
+    value
+        .map(|value| to_i32(value, "typed request field is out of range"))
+        .transpose()?
+        .ok_or(ProtocolError::Invalid(missing))
+}
+
+fn decode_required_string(
+    payload: &[u8],
+    field: u32,
+    missing: &'static str,
+    duplicate: &'static str,
+    too_long: &'static str,
+    max_length: usize,
+) -> Result<String, ProtocolError> {
+    let mut reader = PbReader::new(payload);
+    let mut value = None;
+    while let Some((current, wire)) = reader.next_field()? {
+        if current == field && wire == 2 {
+            if value.is_some() {
+                return Err(ProtocolError::Invalid(duplicate));
+            }
+            let text = reader.read_string()?;
+            if text.chars().count() > max_length {
+                return Err(ProtocolError::Invalid(too_long));
+            }
+            value = Some(text);
+        } else {
+            reader.skip(wire)?;
+        }
+    }
+    value.ok_or(ProtocolError::Invalid(missing))
+}
+
 fn optional_i32(
     fields: &BTreeMap<u32, Vec<u64>>,
     field: u32,
@@ -126,6 +315,18 @@ fn optional_i32(
         [] => Ok(0),
         [value] => to_i32(*value, "typed request field is out of range"),
         [_first, _second, ..] => Err(ProtocolError::Invalid(duplicate_error)),
+    }
+}
+
+fn required_field(
+    fields: &BTreeMap<u32, Vec<u64>>,
+    field: u32,
+    missing: &'static str,
+) -> Result<i32, ProtocolError> {
+    match fields.get(&field).map(Vec::as_slice).unwrap_or_default() {
+        [] => Err(ProtocolError::Invalid(missing)),
+        [value] => to_i32(*value, "typed request field is out of range"),
+        [_first, _second, ..] => Err(ProtocolError::Invalid("typed request has duplicate field")),
     }
 }
 

@@ -3,10 +3,10 @@ use serde_json::{json, Value};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
-    method.starts_with("guildOffer.")
-        || method.starts_with("guildOfferUser.")
-        || method.starts_with("guildofferrank.")
-        || method.starts_with("guildwar.")
+    matches!(
+        GameMethod::parse(method).family(),
+        MethodFamily::GuildOffer | MethodFamily::GuildOfferRank | MethodFamily::GuildWar
+    )
 }
 
 pub(super) fn handle<'state, 'account, 'scratch>(
@@ -14,7 +14,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     method: &str,
     request_args: &[u8],
 ) -> Option<Vec<u8>> {
-    if method.starts_with("guildwar.") {
+    if GameMethod::parse(method).is_family(MethodFamily::GuildWar) {
         return handle_guildwar(context, method, request_args);
     }
     handle_guild_offer(context, method, request_args)

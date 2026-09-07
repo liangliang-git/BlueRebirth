@@ -87,6 +87,45 @@ pub(super) struct ChapterStarRewards {
 }
 
 impl ChapterCatalog {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        for (name, values) in [
+            ("plot", &self.plot),
+            ("sea", &self.sea),
+            ("mubar", &self.mubar),
+            ("daily", &self.daily),
+            ("goods_copy", &self.goods_copy),
+            ("tower", &self.tower),
+            ("equip_new_test", &self.equip_new_test),
+        ] {
+            if values.iter().any(|id| *id <= 0) {
+                return Err(format!("chapter catalog {name} contains non-positive id"));
+            }
+        }
+        if self.sea_initial < 0 || self.tower_chapter_id < 0 {
+            return Err("chapter catalog contains invalid default id".to_owned());
+        }
+        if self
+            .daily_chapters
+            .iter()
+            .any(|(chapter_id, group_id)| *chapter_id <= 0 || *group_id <= 0)
+        {
+            return Err("chapter catalog contains invalid daily group reference".to_owned());
+        }
+        for (chapter_id, rewards) in &self.star_rewards_by_chapter {
+            if *chapter_id <= 0
+                || rewards.level_ids.is_empty()
+                || rewards.star_conditions.len() != rewards.reward_ids.len()
+                || rewards.star_conditions.iter().any(|stars| *stars < 0)
+                || rewards.reward_ids.iter().any(|reward_id| *reward_id <= 0)
+            {
+                return Err(format!(
+                    "chapter catalog star rewards invalid for {chapter_id}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn with_mini_game_rows(
         mut self,
         rows: impl IntoIterator<Item = (i32, Value)>,
@@ -376,6 +415,20 @@ pub(super) struct GameCatalogs {
 }
 
 impl GameCatalogs {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        self.chapters.validate()?;
+        self.battle.validate()?;
+        if self
+            .tasks
+            .rewards_by_id
+            .keys()
+            .any(|reward_id| *reward_id <= 0)
+        {
+            return Err("task catalog contains non-positive reward id".to_owned());
+        }
+        Ok(())
+    }
+
     pub(super) fn login_catalogs(&self) -> GameLoginCatalogs<'_> {
         GameLoginCatalogs {
             fashion: Some(&self.fashion),
@@ -619,6 +672,37 @@ pub(super) struct BattleCatalog {
     pub(super) supply_cost_by_copy: std::collections::HashMap<i32, (i64, i64)>,
     pub(super) ship_supply_cost: std::collections::HashMap<i32, i64>,
     pub(super) drop_quantities: BattleDropQuantities,
+}
+
+impl BattleCatalog {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        for (copy_id, copy) in &self.copies {
+            if *copy_id <= 0 || copy.config_id <= 0 || copy.fleet_ids.is_empty() {
+                return Err(format!("battle copy {copy_id} has invalid identity"));
+            }
+            if copy.fleet_ids.iter().any(|fleet_id| *fleet_id <= 0) {
+                return Err(format!("battle copy {copy_id} has invalid fleet id"));
+            }
+        }
+        if self
+            .daily_group_by_copy
+            .iter()
+            .any(|(copy_id, group_id)| *copy_id <= 0 || *group_id <= 0)
+        {
+            return Err("battle daily copy reference is invalid".to_owned());
+        }
+        if self
+            .fleet_enemies
+            .iter()
+            .any(|(fleet_id, enemies)| *fleet_id <= 0 || enemies.iter().any(|enemy| *enemy <= 0))
+        {
+            return Err("battle fleet enemy reference is invalid".to_owned());
+        }
+        if self.enemies.keys().any(|enemy_id| *enemy_id <= 0) {
+            return Err("battle enemy catalog contains non-positive id".to_owned());
+        }
+        Ok(())
+    }
 }
 
 type BattleRewardTuple = (i32, i32, i32);

@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
-    method.starts_with("guildtask.")
+    GameMethod::parse(method).is_family(MethodFamily::GuildTask)
 }
 
 pub(super) fn handle<'state, 'account, 'scratch>(

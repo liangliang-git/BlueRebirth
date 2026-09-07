@@ -1,3 +1,8 @@
+//! Transitional feature boundary for low-traffic protocol methods.
+//!
+//! New routes must not be added here. Existing methods move into typed feature
+//! modules as their request and state models are completed.
+
 use serde_json::{json, Value};
 
 use super::battle_state::{battle_copy_passed, record_battle_pass};

@@ -50,8 +50,8 @@ mod guildtask_handler;
 mod hero_handler;
 #[path = "invitescore_handler.rs"]
 mod invitescore_handler;
-#[path = "legacy_handler.rs"]
-mod legacy_handler;
+#[path = "compat_feature.rs"]
+mod compat_feature;
 #[path = "misc_extended_handler.rs"]
 mod misc_extended_handler;
 #[path = "misc_handler.rs"]
@@ -65,7 +65,7 @@ mod sportsmeet_handler;
 #[path = "teaching_handler.rs"]
 mod teaching_handler;
 #[cfg(test)]
-pub(super) use legacy_handler::pass_mini_game;
+pub(super) use compat_feature::pass_mini_game;
 #[path = "progression_handler.rs"]
 mod progression_handler;
 #[path = "talent_handler.rs"]
@@ -221,7 +221,7 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            legacy_handler::handle(&mut context, request.method.as_str(), request_args)
+            compat_feature::handle(&mut context, request.method.as_str(), request_args)
         }
         _ if method.is_family(MethodFamily::Hero) => {
             let mut context = GameLoginRequestContext {
@@ -294,38 +294,72 @@ where
             Some(UserLoginCodec::encode_response("ok", "", 0))
         }
         "user.SetUserSecretary" => {
-            if let Some(account) = account.as_deref_mut() {
-                set_character_i64(account, "secretaryId", decode_varint_field(request_args, 1));
+            match SetSecretaryRequest::decode(request_args) {
+                Ok(typed) => {
+                    if let Some(account) = account.as_deref_mut() {
+                        set_character_i64(account, "secretaryId", typed.secretary_id);
+                    }
+                }
+                Err(_) => {
+                    response_err = 1;
+                    response_err_msg = "secretary request is invalid".to_owned();
+                }
             }
             Some(Vec::new())
         }
         "user.ChangeName" => {
-            if let Some(value) = decode_string_field(request_args, 1) {
-                if let Some(account) = account.as_deref_mut() {
-                    set_character_string(account, "name", value);
+            match ChangeNameRequest::decode(request_args) {
+                Ok(typed) => {
+                    if let Some(account) = account.as_deref_mut() {
+                        set_character_string(account, "name", typed.name);
+                    }
+                }
+                Err(_) => {
+                    response_err = 1;
+                    response_err_msg = "name request is invalid".to_owned();
                 }
             }
             Some(Vec::new())
         }
         "user.SetMessage" => {
-            if let Some(account) = account.as_deref_mut() {
-                set_character_string(
-                    account,
-                    "message",
-                    decode_string_field(request_args, 1).unwrap_or_default(),
-                );
+            match SetMessageRequest::decode(request_args) {
+                Ok(typed) => {
+                    if let Some(account) = account.as_deref_mut() {
+                        set_character_string(account, "message", typed.message);
+                    }
+                }
+                Err(_) => {
+                    response_err = 1;
+                    response_err_msg = "message request is invalid".to_owned();
+                }
             }
             Some(Vec::new())
         }
         "user.SetPlayerHeadFrame" => {
-            if let Some(account) = account.as_deref_mut() {
-                set_character_i64(account, "headFrame", decode_varint_field(request_args, 1));
+            match SetHeadFrameRequest::decode(request_args) {
+                Ok(typed) => {
+                    if let Some(account) = account.as_deref_mut() {
+                        set_character_i64(account, "headFrame", typed.head_frame);
+                    }
+                }
+                Err(_) => {
+                    response_err = 1;
+                    response_err_msg = "head frame request is invalid".to_owned();
+                }
             }
             Some(Vec::new())
         }
         "user.SetHead" => {
-            if let Some(account) = account.as_deref_mut() {
-                set_character_i64(account, "head", decode_varint_field(request_args, 2));
+            match SetHeadRequest::decode(request_args) {
+                Ok(typed) => {
+                    if let Some(account) = account.as_deref_mut() {
+                        set_character_i64(account, "head", typed.head);
+                    }
+                }
+                Err(_) => {
+                    response_err = 1;
+                    response_err_msg = "head request is invalid".to_owned();
+                }
             }
             Some(Vec::new())
         }
@@ -978,12 +1012,20 @@ where
             tower_handler::handle_activity(&mut context, request.method.as_str(), request_args)
         }
         "copy.ChooseSfLv" => {
-            let copy_id = decode_varint_field(request_args, 1);
-            let requested = decode_varint_field(request_args, 2);
+            let (copy_id, requested) = match SeaDifficultyRequest::decode(request_args) {
+                Ok(request) => (request.copy_id, request.difficulty),
+                Err(_) => {
+                    response_err = 1;
+                    response_err_msg = "sea difficulty request is invalid".to_owned();
+                    (-1, 0)
+                }
+            };
             let known_copy = chapter_catalog
                 .map(|catalog| catalog.sea.contains(&copy_id))
                 .unwrap_or(copy_id > 0);
-            if !known_copy {
+            if copy_id < 0 {
+                Some(Vec::new())
+            } else if !known_copy {
                 response_err = 1;
                 response_err_msg = "sea copy is invalid".to_owned();
                 Some(Vec::new())

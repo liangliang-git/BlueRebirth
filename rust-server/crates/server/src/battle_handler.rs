@@ -31,7 +31,15 @@ pub(super) fn handle<'state, 'account, 'scratch>(
 
     match method {
         "copy.GetRecord" => {
-            let copy_id = decode_varint_field(request_args, 1);
+            let request = match CopyRecordRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    *response_err = 1;
+                    *response_err_msg = "copy record request is invalid".to_owned();
+                    return Some(Vec::new());
+                }
+            };
+            let copy_id = request.copy_id;
             if copy_id <= 0 {
                 *response_err = 1;
                 *response_err_msg = "copy id is invalid".to_owned();
@@ -44,8 +52,16 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             }
         }
         "copy.DeleteRecord" => {
-            let copy_id = decode_varint_field(request_args, 1);
-            let index = decode_varint_field(request_args, 2);
+            let request = match CopyRecordRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    *response_err = 1;
+                    *response_err_msg = "copy record request is invalid".to_owned();
+                    return Some(Vec::new());
+                }
+            };
+            let copy_id = request.copy_id;
+            let index = request.index;
             if copy_id <= 0 || index < 0 {
                 *response_err = 1;
                 *response_err_msg = "copy record is invalid".to_owned();
@@ -67,8 +83,16 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             }
         }
         "copy.TacticOn" => {
-            let copy_id = decode_varint_field(request_args, 1);
-            let index = decode_varint_field(request_args, 2);
+            let request = match CopyRecordRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    *response_err = 1;
+                    *response_err_msg = "copy record request is invalid".to_owned();
+                    return Some(Vec::new());
+                }
+            };
+            let copy_id = request.copy_id;
+            let index = request.index;
             if copy_id <= 0 || index < 0 {
                 *response_err = 1;
                 *response_err_msg = "copy record is invalid".to_owned();
@@ -97,11 +121,19 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             ))
         }
         "dailycopy.CopyEnter" => {
-            let chapter_id = decode_varint_field(request_args, 1);
-            let copy_id = decode_varint_field(request_args, 2);
+            let request = match DailyCopyEnterRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    *response_err = 1;
+                    *response_err_msg = "daily copy enter request is invalid".to_owned();
+                    return Some(Vec::new());
+                }
+            };
+            let chapter_id = request.chapter_id;
+            let copy_id = request.copy_id;
             // Client names field 3 TacticId, even though the decompiled local
             // variable is fleetId. It selects player's tactic used for sortie.
-            let tactic_id = decode_varint_field(request_args, 3);
+            let tactic_id = request.tactic_id;
             let daily_group = chapter_catalog.and_then(|catalog| {
                 catalog
                     .daily_chapters
