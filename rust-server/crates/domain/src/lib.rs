@@ -332,6 +332,49 @@ pub struct SocialState {
     pub applied: BTreeSet<u64>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuildMemberState {
+    pub uid: u64,
+    pub name: String,
+    pub post: u32,
+    pub contribute: u64,
+    pub today_contribute: u64,
+    pub power: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuildApplicationState {
+    pub uid: u64,
+    pub name: String,
+    pub time: u64,
+    pub quality: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuildState {
+    pub id: u64,
+    pub name: String,
+    pub emblem: u32,
+    pub frame: u32,
+    pub enounce: String,
+    pub notice: String,
+    pub level: u32,
+    pub exp: u64,
+    pub member_num: u32,
+    pub leader_id: u64,
+    pub leader_name: String,
+    pub limit_level: u32,
+    pub power: u64,
+    pub honor: u64,
+    pub create_time: u64,
+    pub chat_room: String,
+    pub my_post: u32,
+    pub join_time: u64,
+    pub apply_num: u32,
+    pub members: Vec<GuildMemberState>,
+    pub applications: Vec<GuildApplicationState>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatMessageState {
     pub id: u64,
@@ -520,6 +563,8 @@ pub struct AccountState {
     pub buildings: BuildingState,
     #[serde(default)]
     pub social: SocialState,
+    #[serde(default)]
+    pub guild: Option<GuildState>,
     #[serde(default)]
     pub chat: ChatState,
     #[serde(default)]

@@ -1,7 +1,8 @@
 use blueoath_domain::{
     AccountRepository, AccountState, BattleSession, ChapterId, ChatBarrageState, ChatMessageState,
-    CopyId, EquipId, EquipmentState, FleetId, FleetRecord, HeroId, HeroState, NewAccountFactory,
-    PresetFleetState, ProfileId, ProfileState, TemplateId,
+    CopyId, EquipId, EquipmentState, FleetId, FleetRecord, GuildApplicationState, GuildMemberState,
+    GuildState, HeroId, HeroState, NewAccountFactory, PresetFleetState, ProfileId, ProfileState,
+    TemplateId,
 };
 use blueoath_storage::{ProfileStore, StorageError, StoredProfileState, StoredShip};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -251,7 +252,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 18);
+    assert_eq!(version, 19);
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
@@ -448,6 +449,31 @@ fn typed_repository_transaction_commits_domain_mutation() {
         .entry(106)
         .or_default()
         .insert(20);
+    account.guild = Some(GuildState {
+        id: 9000001,
+        name: "Typed Fleet".to_owned(),
+        emblem: 2,
+        level: 3,
+        leader_id: 10,
+        leader_name: "Captain".to_owned(),
+        member_num: 1,
+        my_post: 1,
+        members: vec![GuildMemberState {
+            uid: 10,
+            name: "Captain".to_owned(),
+            post: 1,
+            contribute: 7,
+            today_contribute: 2,
+            power: 99,
+        }],
+        applications: vec![GuildApplicationState {
+            uid: 11,
+            name: "Applicant".to_owned(),
+            time: 100,
+            quality: 4,
+        }],
+        ..Default::default()
+    });
     account.battle.active = Some(BattleSession {
         chapter_id: ChapterId::new(3).unwrap(),
         copy_id: CopyId::new(300).unwrap(),
@@ -545,6 +571,10 @@ fn typed_repository_transaction_commits_domain_mutation() {
         .used_reward_info
         .get(&106)
         .is_some_and(|claims| claims.contains(&20)));
+    let guild = loaded.guild.as_ref().unwrap();
+    assert_eq!(guild.name, "Typed Fleet");
+    assert_eq!(guild.members[0].contribute, 7);
+    assert_eq!(guild.applications[0].quality, 4);
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())

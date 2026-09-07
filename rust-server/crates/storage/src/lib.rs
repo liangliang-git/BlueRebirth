@@ -2,8 +2,8 @@ use blueoath_domain::{
     AccountRepository, AccountState, ActivityTowerState, BathroomHeroState, ChapterId,
     CharacterState, ChatBarrageState, ChatMessageState, ConstructionJobState,
     ConstructionProjectState, CopyId, CurrencyKind, EquipId, EquipmentState, FleetId, FleetRecord,
-    HeroId, HeroState, NewAccountFactory, PresetFleetState, ProfileId, ProfileState,
-    RepositoryError, TemplateId, TowerRewardState,
+    GuildApplicationState, GuildMemberState, GuildState, HeroId, HeroState, NewAccountFactory,
+    PresetFleetState, ProfileId, ProfileState, RepositoryError, TemplateId, TowerRewardState,
 };
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -1283,6 +1283,93 @@ impl ProfileStore {
                 _ => {}
             }
         }
+        if let Some(values) = connection
+            .query_row(
+                "SELECT guild_id, name, emblem, frame, enounce, notice, level, exp,
+                        member_num, leader_id, leader_name, limit_level, power, honor,
+                        create_time, chat_room, my_post, join_time, apply_num
+                 FROM guilds WHERE profile_id = ?1",
+                params![profile_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
+                        row.get::<_, i64>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, i64>(11)?,
+                        row.get::<_, i64>(12)?,
+                        row.get::<_, i64>(13)?,
+                        row.get::<_, i64>(14)?,
+                        row.get::<_, String>(15)?,
+                        row.get::<_, i64>(16)?,
+                        row.get::<_, i64>(17)?,
+                        row.get::<_, i64>(18)?,
+                    ))
+                },
+            )
+            .optional()?
+        {
+            let mut guild = GuildState {
+                id: positive_u64(values.0, "guild id")?,
+                name: values.1,
+                emblem: non_negative_u32(values.2, "guild emblem")?,
+                frame: non_negative_u32(values.3, "guild frame")?,
+                enounce: values.4,
+                notice: values.5,
+                level: non_negative_u32(values.6, "guild level")?,
+                exp: non_negative_u64(values.7, "guild exp")?,
+                member_num: non_negative_u32(values.8, "guild member number")?,
+                leader_id: non_negative_u64(values.9, "guild leader id")?,
+                leader_name: values.10,
+                limit_level: non_negative_u32(values.11, "guild limit level")?,
+                power: non_negative_u64(values.12, "guild power")?,
+                honor: non_negative_u64(values.13, "guild honor")?,
+                create_time: non_negative_u64(values.14, "guild create time")?,
+                chat_room: values.15,
+                my_post: non_negative_u32(values.16, "guild post")?,
+                join_time: non_negative_u64(values.17, "guild join time")?,
+                apply_num: non_negative_u32(values.18, "guild apply number")?,
+                ..GuildState::default()
+            };
+            let mut members = connection.prepare(
+                "SELECT uid, name, post, contribute, today_contribute, power
+                 FROM guild_members WHERE profile_id = ?1 ORDER BY uid",
+            )?;
+            for row in members.query_map(params![profile_id.as_str()], |row| {
+                Ok(GuildMemberState {
+                    uid: row.get::<_, i64>(0)? as u64,
+                    name: row.get(1)?,
+                    post: row.get::<_, i64>(2)? as u32,
+                    contribute: row.get::<_, i64>(3)? as u64,
+                    today_contribute: row.get::<_, i64>(4)? as u64,
+                    power: row.get::<_, i64>(5)? as u64,
+                })
+            })? {
+                guild.members.push(row?);
+            }
+            let mut applications = connection.prepare(
+                "SELECT uid, name, applied_at, quality
+                 FROM guild_applications WHERE profile_id = ?1 ORDER BY applied_at, uid",
+            )?;
+            for row in applications.query_map(params![profile_id.as_str()], |row| {
+                Ok(GuildApplicationState {
+                    uid: row.get::<_, i64>(0)? as u64,
+                    name: row.get(1)?,
+                    time: row.get::<_, i64>(2)? as u64,
+                    quality: row.get::<_, i64>(3)? as u32,
+                })
+            })? {
+                guild.applications.push(row?);
+            }
+            account.guild = Some(guild);
+        }
         account
             .validate()
             .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
@@ -1412,6 +1499,69 @@ impl ProfileStore {
             params![profile.id.as_str(), profile.name, timestamp()],
         )?;
         clear_normalized_account(&transaction, profile.id.as_str())?;
+
+        if let Some(guild) = &account.guild {
+            transaction.execute(
+                "INSERT INTO guilds(
+                    profile_id, guild_id, name, emblem, frame, enounce, notice, level, exp,
+                    member_num, leader_id, leader_name, limit_level, power, honor,
+                    create_time, chat_room, my_post, join_time, apply_num
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                           ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(guild.id, "guild id")?,
+                    guild.name,
+                    typed_i64(guild.emblem, "guild emblem")?,
+                    typed_i64(guild.frame, "guild frame")?,
+                    guild.enounce,
+                    guild.notice,
+                    typed_i64(guild.level, "guild level")?,
+                    typed_i64(guild.exp, "guild exp")?,
+                    typed_i64(guild.member_num, "guild member number")?,
+                    typed_i64(guild.leader_id, "guild leader id")?,
+                    guild.leader_name,
+                    typed_i64(guild.limit_level, "guild limit level")?,
+                    typed_i64(guild.power, "guild power")?,
+                    typed_i64(guild.honor, "guild honor")?,
+                    typed_i64(guild.create_time, "guild create time")?,
+                    guild.chat_room,
+                    typed_i64(guild.my_post, "guild post")?,
+                    typed_i64(guild.join_time, "guild join time")?,
+                    typed_i64(guild.apply_num, "guild apply number")?,
+                ],
+            )?;
+            for member in &guild.members {
+                transaction.execute(
+                    "INSERT INTO guild_members(
+                        profile_id, uid, name, post, contribute, today_contribute, power
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        profile.id.as_str(),
+                        typed_i64(member.uid, "guild member uid")?,
+                        member.name,
+                        typed_i64(member.post, "guild member post")?,
+                        typed_i64(member.contribute, "guild member contribution")?,
+                        typed_i64(member.today_contribute, "guild today contribution")?,
+                        typed_i64(member.power, "guild member power")?,
+                    ],
+                )?;
+            }
+            for application in &guild.applications {
+                transaction.execute(
+                    "INSERT INTO guild_applications(
+                        profile_id, uid, name, applied_at, quality
+                     ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        profile.id.as_str(),
+                        typed_i64(application.uid, "guild application uid")?,
+                        application.name,
+                        typed_i64(application.time, "guild application time")?,
+                        typed_i64(application.quality, "guild application quality")?,
+                    ],
+                )?;
+            }
+        }
 
         let character = &account.character;
         transaction.execute(
@@ -2262,6 +2412,9 @@ fn clear_normalized_account(
     profile_id: &str,
 ) -> Result<(), StorageError> {
     for table in [
+        "guild_applications",
+        "guild_members",
+        "guilds",
         "task_claims",
         "building_hero_assignments",
         "preset_fleet_members",
@@ -2400,6 +2553,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0016_battle_session_typed_state.sql"),
     include_str!("../../../migrations/0017_drop_json_accounts.sql"),
     include_str!("../../../migrations/0018_typed_tower_state.sql"),
+    include_str!("../../../migrations/0019_guild_typed_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {
