@@ -89,10 +89,24 @@ pub(super) fn handle_typed(
             }
             HandlerResult::PushOnly
         }
-        "archiveCopy.IsLoad"
-        | "prefs.SavePrefs"
-        | "statcount.GetStatCount"
-        | "miniGame.StartMiniGame" => HandlerResult::PushOnly,
+        "archiveCopy.IsLoad" => {
+            let copy_id = decode_varint_field(request_args, 1);
+            if copy_id <= 0 {
+                return invalid("archive copy id is invalid");
+            }
+            account
+                .activities
+                .progress
+                .insert("archiveCopy:copyId".to_owned(), copy_id as u64);
+            account.activities.progress.insert(
+                "archiveCopy:loadedAt".to_owned(),
+                u64::from(current_unix_seconds()),
+            );
+            HandlerResult::PushOnly
+        }
+        "prefs.SavePrefs" | "statcount.GetStatCount" | "miniGame.StartMiniGame" => {
+            HandlerResult::PushOnly
+        }
         _ => HandlerResult::Empty,
     }
 }
@@ -401,5 +415,15 @@ mod tests {
             panic!("expected typed copy extra response");
         };
         assert_eq!(decode_repeated_message_field(&response.payload, 1).len(), 1);
+        let mut archive = Vec::new();
+        append_varint_field(&mut archive, 1, 91);
+        assert!(matches!(
+            handle_typed(&mut account, "archiveCopy.IsLoad", &archive),
+            HandlerResult::PushOnly
+        ));
+        assert_eq!(
+            account.activities.progress.get("archiveCopy:copyId"),
+            Some(&91)
+        );
     }
 }
