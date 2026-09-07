@@ -7,6 +7,7 @@ use serde_json::Value;
 use super::*;
 
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn study_skill_state(account: &mut Value, hero_id: u64, skill_id: i32) -> bool {
     if hero_id == 0 || skill_id <= 0 {
         return false;
@@ -152,6 +153,7 @@ pub(super) fn start_study_state(
     true
 }
 
+#[cfg(test)]
 #[cfg(test)]
 pub(super) fn finish_study_state(
     account: &mut Value,
