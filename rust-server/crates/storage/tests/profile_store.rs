@@ -441,6 +441,25 @@ fn typed_repository_transaction_commits_domain_mutation() {
 }
 
 #[test]
+fn typed_loader_does_not_treat_profile_row_as_complete_account() {
+    let (store, root) = store();
+    let state = StoredProfileState {
+        level: 1,
+        fuel: 0,
+        coins: 0,
+        completed_stages: 0,
+        ships: Vec::new(),
+        formation_ship_ids: Vec::new(),
+    };
+    store.save("profile-only", "Profile", &state).unwrap();
+    assert!(store
+        .load_typed_account(&ProfileId::new("profile-only").unwrap())
+        .unwrap()
+        .is_none());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn account_snapshot_write_projects_core_rows_into_normalized_tables() {
     let (store, root) = store();
     let account = json!({

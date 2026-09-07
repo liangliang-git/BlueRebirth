@@ -165,6 +165,17 @@ impl ProfileStore {
             .unwrap_or(i64::try_from(revision).unwrap_or_default());
         let revision = u64::try_from(revision)
             .map_err(|_| StorageError::InvalidTypedAccount("negative revision".to_owned()))?;
+        let has_typed_character = connection
+            .query_row(
+                "SELECT 1 FROM characters WHERE profile_id = ?1 LIMIT 1",
+                params![profile_id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .is_some();
+        if !has_typed_character {
+            return Ok(None);
+        }
         let mut account = AccountState::new(ProfileState {
             id: profile_id.clone(),
             name,
