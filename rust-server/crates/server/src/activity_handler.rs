@@ -170,13 +170,13 @@ pub(super) fn handle_typed(
             typed_reply(method, typed_birthday_payload(progress))
         }
         "activitybirthday.FeedBirthdayCake" => {
-            let team_id = decode_varint_field(request_args, 1).max(0) as u64;
-            let cake = decode_varint_field(request_args, 2).max(0) as u64;
-            if team_id == 0 || cake == 0 {
+            let Ok(request) = BirthdayFeedRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "birthday feed request is invalid",
                 ));
-            }
+            };
+            let team_id = request.team_id as u64;
+            let cake = request.cake as u64;
             set_activity_value(
                 progress,
                 "activityBirthday",

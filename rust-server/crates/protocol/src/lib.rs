@@ -1970,6 +1970,24 @@ impl Decode for HeroAwakenRewardRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BirthdayFeedRequest {
+    pub team_id: i32,
+    pub cake: i32,
+}
+
+impl Decode for BirthdayFeedRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let team_id = required_field(&fields, 1, "birthday feed is missing team id")?;
+        let cake = required_field(&fields, 2, "birthday feed is missing cake")?;
+        if team_id <= 0 || cake <= 0 {
+            return Err(ProtocolError::Invalid("birthday feed request is invalid"));
+        }
+        Ok(Self { team_id, cake })
+    }
+}
+
 impl Decode for GuildTaskDonateRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

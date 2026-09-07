@@ -1,8 +1,8 @@
 use blueoath_protocol::{
-    BigActivityRankRequest, BuildShipRequest, BuildShipRewardRequest, ChangeNameRequest,
-    ChangeWorldChannelRequest, CopyAttackRequest, CopyPassRequest, CopyRecordRequest,
-    CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode, FriendSearchRequest,
-    FriendTargetRequest, GetBarrageByIdRequest, GuildActivityPresentRequest,
+    BigActivityRankRequest, BirthdayFeedRequest, BuildShipRequest, BuildShipRewardRequest,
+    ChangeNameRequest, ChangeWorldChannelRequest, CopyAttackRequest, CopyPassRequest,
+    CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode,
+    FriendSearchRequest, FriendTargetRequest, GetBarrageByIdRequest, GuildActivityPresentRequest,
     GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildTaskDonateRequest, GuildTaskIdRequest,
     GuildTaskMemberRequest, HeroAwakenFinishRequest, HeroAwakenRewardRequest,
     InviteRecordVersionRequest, InviteStateTypeRequest, OutpostBuildingRequest,
@@ -339,6 +339,13 @@ fn decodes_typed_activity_requests() {
     assert_eq!(
         HeroAwakenRewardRequest::decode(&[0x08, 5]).unwrap(),
         HeroAwakenRewardRequest { milestone: 5 }
+    );
+    assert_eq!(
+        BirthdayFeedRequest::decode(&[0x08, 3, 0x10, 4]).unwrap(),
+        BirthdayFeedRequest {
+            team_id: 3,
+            cake: 4,
+        }
     );
 }
 
