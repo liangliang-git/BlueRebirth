@@ -246,6 +246,10 @@ pub struct TaskState {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuildingState {
     pub levels: BTreeMap<u64, u32>,
+    #[serde(default)]
+    pub template_ids: BTreeMap<u64, u64>,
+    #[serde(default)]
+    pub land_indices: BTreeMap<u64, u32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

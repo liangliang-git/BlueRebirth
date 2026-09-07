@@ -177,7 +177,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
     assert_eq!(state_json_columns, 0);
     for column in ["class_id", "create_time", "message"] {
         let count: i64 = connection
@@ -366,6 +366,12 @@ fn typed_repository_transaction_commits_domain_mutation() {
         .challenge_times
         .insert(ChapterId::new(3).unwrap(), 4);
     account.buildings.levels.insert(11, 6);
+    account.buildings.template_ids.insert(11, 41);
+    account.buildings.land_indices.insert(11, 6);
+    account
+        .inventory
+        .items
+        .insert(TemplateId::new(30001).unwrap(), 17);
     account.battle.active = Some(BattleSession {
         chapter_id: ChapterId::new(3).unwrap(),
         copy_id: CopyId::new(300).unwrap(),
@@ -412,6 +418,12 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert!(loaded.tasks.completed.contains(&7));
     assert_eq!(loaded.daily_copy.reset_day, 42);
     assert_eq!(loaded.buildings.levels.get(&11), Some(&6));
+    assert_eq!(loaded.buildings.template_ids.get(&11), Some(&41));
+    assert_eq!(loaded.buildings.land_indices.get(&11), Some(&6));
+    assert_eq!(
+        loaded.inventory.items.get(&TemplateId::new(30001).unwrap()),
+        Some(&17)
+    );
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())

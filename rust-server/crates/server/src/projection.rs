@@ -651,6 +651,65 @@ pub(super) fn default_building_info(now: u32) -> UserBuildingInfo {
     }
 }
 
+pub(super) fn building_info_from_typed_account(
+    account: &blueoath_domain::AccountState,
+    now: u32,
+) -> UserBuildingInfo {
+    if account.buildings.levels.is_empty() {
+        return default_building_info(now);
+    }
+    let buildings = account
+        .buildings
+        .levels
+        .iter()
+        .filter_map(|(building_id, level)| {
+            Some(BuildingInfo {
+                id: i32::try_from(*building_id).ok()?,
+                template_id: i32::try_from(
+                    account
+                        .buildings
+                        .template_ids
+                        .get(building_id)
+                        .copied()
+                        .unwrap_or(*building_id),
+                )
+                .ok()?,
+                level: i32::try_from(*level).ok()?,
+                status: 1,
+                last_update_time: i64::from(now),
+                last_build_update_time: i64::from(now),
+                ..BuildingInfo::default()
+            })
+        })
+        .collect::<Vec<_>>();
+    if buildings.is_empty() {
+        return default_building_info(now);
+    }
+    let lands = buildings
+        .iter()
+        .enumerate()
+        .map(|(index, building)| BuildingLandInfo {
+            index: account
+                .buildings
+                .land_indices
+                .get(&(building.id as u64))
+                .copied()
+                .and_then(|value| i32::try_from(value).ok())
+                .unwrap_or_else(|| i32::try_from(index + 1).unwrap_or(i32::MAX)),
+            building_id: building.id,
+        })
+        .collect();
+    UserBuildingInfo {
+        buildings,
+        lands,
+        worker_strength: 1_500_000,
+        worker_recover: 10,
+        food_max: 100,
+        electric_max: 100,
+        worker_update_time: i64::from(now),
+    }
+}
+
 pub(super) fn fleet_info_from_account(account: &Value) -> FleetInfo {
     let fleet = account.get("fleet");
     let tactics: Vec<FleetTactic> = fleet

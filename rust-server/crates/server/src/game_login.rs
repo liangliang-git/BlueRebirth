@@ -1033,21 +1033,46 @@ where
             || method.is_family(MethodFamily::BuildNotes)
             || method.is_family(MethodFamily::Discuss) =>
         {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            let result = if let Some(typed) = typed_account.as_ref() {
+                let result = building_handler::handle_typed(
+                    typed,
+                    request.method.as_str(),
+                    current_unix_seconds(),
+                );
+                if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
+                    result
+                } else {
+                    let mut context = GameLoginRequestContext {
+                        state,
+                        account: &mut account,
+                        catalogs: *catalogs,
+                        pre_pushes: &mut pre_pushes,
+                        post_pushes: &mut post_pushes,
+                        handler_error: &mut handler_error,
+                        pass_details: &mut pass_details,
+                        pass_rewards: &mut pass_rewards,
+                        pass_hero_ids: &mut pass_hero_ids,
+                        pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                        pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                    };
+                    building_handler::handle(&mut context, request.method.as_str(), request_args)
+                }
+            } else {
+                let mut context = GameLoginRequestContext {
+                    state,
+                    account: &mut account,
+                    catalogs: *catalogs,
+                    pre_pushes: &mut pre_pushes,
+                    post_pushes: &mut post_pushes,
+                    handler_error: &mut handler_error,
+                    pass_details: &mut pass_details,
+                    pass_rewards: &mut pass_rewards,
+                    pass_hero_ids: &mut pass_hero_ids,
+                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                };
+                building_handler::handle(&mut context, request.method.as_str(), request_args)
             };
-            let result =
-                building_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -1696,10 +1721,15 @@ where
             NetSocketFrameCodec::write(stream, 0, &push).await?;
             let push = TMessageCodec::encode_response(&TResponse {
                 method: "building.UpdateBuildingInfo".to_owned(),
-                ret: Some(UserBuildingInfoCodec::encode(&building_info_from_account(
-                    account,
-                    current_unix_seconds(),
-                ))),
+                ret: Some(UserBuildingInfoCodec::encode(
+                    &typed_account_view
+                        .map(|typed| {
+                            building_info_from_typed_account(typed, current_unix_seconds())
+                        })
+                        .unwrap_or_else(|| {
+                            building_info_from_account(account, current_unix_seconds())
+                        }),
+                )),
                 time: current_unix_seconds(),
                 ..TResponse::default()
             });

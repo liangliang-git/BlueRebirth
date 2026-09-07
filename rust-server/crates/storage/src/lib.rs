@@ -451,20 +451,34 @@ impl ProfileStore {
         }
 
         let mut statement = connection.prepare(
-            "SELECT building_id, level
+            "SELECT building_id, template_id, level, land_index
              FROM buildings WHERE profile_id = ?1 ORDER BY building_id",
         )?;
         let buildings = statement
             .query_map(params![profile_id.as_str()], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        for (building_id, level) in buildings {
-            account.buildings.levels.insert(
-                u64::try_from(building_id).map_err(|_| {
-                    StorageError::InvalidTypedAccount("building id is invalid".to_owned())
-                })?,
-                non_negative_u32(level, "building level")?,
+        for (building_id, template_id, level, land_index) in buildings {
+            let building_id = u64::try_from(building_id).map_err(|_| {
+                StorageError::InvalidTypedAccount("building id is invalid".to_owned())
+            })?;
+            account
+                .buildings
+                .levels
+                .insert(building_id, non_negative_u32(level, "building level")?);
+            account.buildings.template_ids.insert(
+                building_id,
+                non_negative_u64(template_id, "building template id")?,
+            );
+            account.buildings.land_indices.insert(
+                building_id,
+                non_negative_u32(land_index, "building land index")?,
             );
         }
 
@@ -895,12 +909,30 @@ impl ProfileStore {
         }
         for (building_id, level) in &account.buildings.levels {
             transaction.execute(
-                "INSERT INTO buildings(profile_id, building_id, level, land_index)
-                 VALUES (?1, ?2, ?3, 0)",
+                "INSERT INTO buildings(profile_id, building_id, level, land_index, template_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     profile.id.as_str(),
                     typed_i64(*building_id, "building id")?,
                     typed_i64(*level, "building level")?,
+                    typed_i64(
+                        account
+                            .buildings
+                            .land_indices
+                            .get(building_id)
+                            .copied()
+                            .unwrap_or_default(),
+                        "building land index",
+                    )?,
+                    typed_i64(
+                        account
+                            .buildings
+                            .template_ids
+                            .get(building_id)
+                            .copied()
+                            .unwrap_or(*building_id),
+                        "building template id",
+                    )?,
                 ],
             )?;
         }
@@ -1624,16 +1656,18 @@ fn project_normalized_core(
                 continue;
             }
             transaction.execute(
-                "INSERT INTO buildings(profile_id, building_id, level, land_index)
-                 VALUES (?1, ?2, ?3, ?4)
+                "INSERT INTO buildings(profile_id, building_id, level, land_index, template_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
                  ON CONFLICT(profile_id, building_id) DO UPDATE SET
                    level = excluded.level,
-                   land_index = excluded.land_index",
+                   land_index = excluded.land_index,
+                   template_id = excluded.template_id",
                 params![
                     profile_id,
                     building_id,
                     non_negative_field(building, "level"),
                     non_negative_field(building, "landIndex"),
+                    positive_field(building, "tid", positive_field(building, "templateId", 0),),
                 ],
             )?;
         }
@@ -1731,6 +1765,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0007_normalized_profile_runtime.sql"),
     include_str!("../../../migrations/0008_character_profile_fields.sql"),
     include_str!("../../../migrations/0009_chat_state.sql"),
+    include_str!("../../../migrations/0010_building_template_id.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

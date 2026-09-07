@@ -10,11 +10,11 @@ use super::{
     battle_attack_payload_with_damage, battle_copy_passed, battle_enemy_ids,
     battle_pass_payload_with_experience, battle_pass_payload_with_rewards,
     battle_position_fleet_id, battle_session_fleet_ids, battle_start_payload, bootstrap_response,
-    building_info_from_account, buildship_info_payload, change_building_level,
-    collect_building_rewards, complete_support_state, complete_task, completed_copy_ids,
-    construction_info_payload, consume_bag_item, consume_hero_skill_upgrade_materials,
-    copy_progress_max_or_first, copy_progress_max_or_initial, copy_request_type,
-    daily_copy_group_progress_from_account, daily_copy_progress_from_account,
+    building_info_from_account, building_info_from_typed_account, buildship_info_payload,
+    change_building_level, collect_building_rewards, complete_support_state, complete_task,
+    completed_copy_ids, construction_info_payload, consume_bag_item,
+    consume_hero_skill_upgrade_materials, copy_progress_max_or_first, copy_progress_max_or_initial,
+    copy_request_type, daily_copy_group_progress_from_account, daily_copy_progress_from_account,
     decode_hero_add_exp_request, decode_mop_up_arg, decode_repeated_message_field,
     decode_repeated_varint_field, decode_varint_field, default_account_snapshot,
     dismantle_equip_state, draw_build_drop_reward_with_roll, draw_build_ship_reward_with_roll,
@@ -158,6 +158,21 @@ fn typed_bag_projection_reads_normalized_inventory_rows() {
         Some(17)
     );
     assert!(bag.items.iter().any(|item| item.template_id == 10182));
+}
+
+#[test]
+fn typed_building_projection_reads_normalized_building_rows() {
+    let mut account = NewAccountFactory::create(ProfileId::new("typed-building").unwrap(), "Base");
+    account.buildings.levels.insert(9, 4);
+    account.buildings.template_ids.insert(9, 41);
+    account.buildings.land_indices.insert(9, 6);
+
+    let building = building_info_from_typed_account(&account, 123);
+    assert_eq!(building.buildings.len(), 1);
+    assert_eq!(building.buildings[0].id, 9);
+    assert_eq!(building.buildings[0].template_id, 41);
+    assert_eq!(building.buildings[0].level, 4);
+    assert_eq!(building.lands[0].index, 6);
 }
 
 #[test]

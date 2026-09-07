@@ -4,6 +4,20 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
+pub(super) fn handle_typed(
+    account: &blueoath_domain::AccountState,
+    method: &str,
+    now: u32,
+) -> HandlerResult {
+    match method {
+        "building.UpdateBuildingInfo" => HandlerResult::Reply(Response::raw(
+            method,
+            UserBuildingInfoCodec::encode(&building_info_from_typed_account(account, now)),
+        )),
+        _ => HandlerResult::Empty,
+    }
+}
+
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
