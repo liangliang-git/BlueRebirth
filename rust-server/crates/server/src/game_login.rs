@@ -2405,10 +2405,19 @@ fn legacy_only_method(method: &str) -> bool {
             | "dailycopy.GetData"
             | "dailycopy.SelectEx"
             | "dailycopy.UpdateDailyCopyData"
+            | "bag.GetBagInfo"
+            | "player.CreateUser"
+            | "player.GetUserList"
+            | "player.Login"
+            | "tactic.GetHerosTactic"
+            | "tactic.SetHerosTactic"
     ) {
         return false;
     }
     if activity_handler::handles(method) {
+        return true;
+    }
+    if GameMethod::parse(method).family() == MethodFamily::Unknown {
         return true;
     }
     matches!(
@@ -2600,5 +2609,18 @@ fn sync_typed_battle_state_with_catalog(
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod route_guard_tests {
+    use super::legacy_only_method;
+
+    #[test]
+    fn typed_runtime_rejects_unknown_and_legacy_exact_routes() {
+        assert!(legacy_only_method("repair.RepairHero"));
+        assert!(legacy_only_method("archiveCopy.IsLoad"));
+        assert!(!legacy_only_method("player.Login"));
+        assert!(!legacy_only_method("copy.GetCopy"));
     }
 }
