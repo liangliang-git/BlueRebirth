@@ -27,14 +27,19 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "activitySSRrolls.ActivityRollsRand"
             | "activitybirthday.BirthdayRefresh"
             | "activitybirthday.UpdateBirthdayInfo"
+            | "activitybirthday.FeedBirthdayCake"
             | "activityfashion.PushActivityFashionInfo"
             | "activitycodeexchange.UpdateActivityCodeExgInfo"
             | "activitypapercut.UpdateActivityPaperCutInfo"
             | "activitysecretcopy.UpdateActivitySecretCopyInfo"
+            | "activitysecretcopy.GetReward"
             | "activityvalentineloveletter.UpdateActivityValentineLoveLetterInfo"
             | "activityVideo.GetActivityVideo"
             | "activityVideo.SetActivityVideo"
             | "activitychristmasshop.UpdateActivityChristmasShopInfo"
+            | "activitychristmasshop.OpenSpecialBlindBox"
+            | "activitychristmasshop.SetToy"
+            | "activitychristmasshop.GiveMeCrystalBall"
     )
 }
 
@@ -111,6 +116,28 @@ pub(super) fn handle_typed(
         "activitybirthday.BirthdayRefresh" | "activitybirthday.UpdateBirthdayInfo" => {
             typed_reply(method, typed_birthday_payload(progress))
         }
+        "activitybirthday.FeedBirthdayCake" => {
+            let team_id = decode_varint_field(request_args, 1).max(0) as u64;
+            let cake = decode_varint_field(request_args, 2).max(0) as u64;
+            if team_id == 0 || cake == 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "birthday feed request is invalid",
+                ));
+            }
+            set_activity_value(
+                progress,
+                "activityBirthday",
+                &format!("girl:{team_id}:teamId"),
+                team_id,
+            );
+            set_activity_value(
+                progress,
+                "activityBirthday",
+                &format!("girl:{team_id}:cake"),
+                cake,
+            );
+            typed_reply(method, typed_birthday_payload(progress))
+        }
         "activityfashion.PushActivityFashionInfo" => {
             typed_reply(method, typed_fashion_payload(progress))
         }
@@ -123,11 +150,55 @@ pub(super) fn handle_typed(
         "activitysecretcopy.UpdateActivitySecretCopyInfo" => {
             typed_reply(method, typed_secret_copy_payload(progress))
         }
+        "activitysecretcopy.GetReward" => {
+            let rate_index = decode_varint_field(request_args, 1).max(0) as u64;
+            if rate_index == 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "secret copy reward index is invalid",
+                ));
+            }
+            let key = format!("activity:activitySecretCopy:reward:{rate_index}:getReward");
+            if progress.contains_key(&key) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "secret copy reward was already claimed",
+                ));
+            }
+            progress.insert(key, 1);
+            typed_reply(method, typed_secret_copy_payload(progress))
+        }
         "activityvalentineloveletter.UpdateActivityValentineLoveLetterInfo" => {
             typed_reply(method, typed_valentine_payload(progress))
         }
         "activityVideo.GetActivityVideo" => typed_reply(method, typed_video_payload(progress)),
         "activitychristmasshop.UpdateActivityChristmasShopInfo" => {
+            typed_reply(method, typed_christmas_payload(progress))
+        }
+        "activitychristmasshop.OpenSpecialBlindBox" => {
+            let item_id = decode_varint_field(request_args, 1).max(0) as u64;
+            if item_id == 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "christmas special box id is invalid",
+                ));
+            }
+            progress.insert(
+                format!("activity:activityChristmasShop:specialBox:{item_id}"),
+                1,
+            );
+            let mut output = Vec::new();
+            append_varint_field(&mut output, 1, item_id);
+            typed_reply(method, output)
+        }
+        "activitychristmasshop.SetToy" => {
+            set_activity_value(
+                progress,
+                "activityChristmasShop",
+                "crystalBallToyId",
+                decode_varint_field(request_args, 1).max(0) as u64,
+            );
+            typed_reply(method, typed_christmas_payload(progress))
+        }
+        "activitychristmasshop.GiveMeCrystalBall" => {
+            set_activity_value(progress, "activityChristmasShop", "isGiveCrystalBall", 1);
             typed_reply(method, typed_christmas_payload(progress))
         }
         _ => HandlerResult::Error(GameError::InvalidRequest(
@@ -285,6 +356,31 @@ fn typed_birthday_payload(progress: &std::collections::BTreeMap<String, u64>) ->
         1,
         activity_value(progress, "activityBirthday", "birthdayAffair"),
     );
+    let mut teams = std::collections::BTreeSet::new();
+    for key in progress.keys() {
+        if let Some(team_id) = key
+            .strip_prefix("activity:activityBirthday:girl:")
+            .and_then(|value| value.split_once(':'))
+            .and_then(|(id, _)| id.parse::<u64>().ok())
+        {
+            teams.insert(team_id);
+        }
+    }
+    for team_id in teams {
+        let mut girl = Vec::new();
+        append_varint_field(&mut girl, 1, 0);
+        append_varint_field(
+            &mut girl,
+            2,
+            activity_value(
+                progress,
+                "activityBirthday",
+                &format!("girl:{team_id}:cake"),
+            ),
+        );
+        append_varint_field(&mut girl, 3, team_id);
+        append_message_field(&mut output, 2, &girl);
+    }
     output
 }
 
@@ -451,6 +547,21 @@ fn typed_valentine_payload(progress: &std::collections::BTreeMap<String, u64>) -
 
 fn typed_christmas_payload(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
     let mut output = Vec::new();
+    let mut boxes = std::collections::BTreeSet::new();
+    for key in progress.keys() {
+        if let Some(id) = key
+            .strip_prefix("activity:activityChristmasShop:specialBox:")
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            boxes.insert(id);
+        }
+    }
+    for id in boxes {
+        let mut item = Vec::new();
+        append_varint_field(&mut item, 1, id);
+        append_varint_field(&mut item, 2, 1);
+        append_message_field(&mut output, 5, &item);
+    }
     append_varint_field(
         &mut output,
         3,
@@ -2436,5 +2547,29 @@ mod tests {
                 .get("activity:activityExtract:realDrawId"),
             Some(&1)
         );
+        let mut feed = Vec::new();
+        append_varint_field(&mut feed, 1, 8);
+        append_varint_field(&mut feed, 2, 3);
+        assert!(matches!(
+            handle_typed(&mut account, "activitybirthday.FeedBirthdayCake", &feed),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account
+                .activities
+                .progress
+                .get("activity:activityBirthday:girl:8:cake"),
+            Some(&3)
+        );
+        let mut claim = Vec::new();
+        append_varint_field(&mut claim, 1, 2);
+        assert!(matches!(
+            handle_typed(&mut account, "activitysecretcopy.GetReward", &claim),
+            HandlerResult::Reply(_)
+        ));
+        assert!(account
+            .activities
+            .progress
+            .contains_key("activity:activitySecretCopy:reward:2:getReward"));
     }
 }
