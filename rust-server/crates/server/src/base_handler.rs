@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+#[cfg(test)]
 use serde_json::{json, Value};
 
 use super::common::error::GameError;
