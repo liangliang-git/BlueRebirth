@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
-use serde_json::{json, Value};
+#[cfg(test)]
+use serde_json::json;
+use serde_json::Value;
 
 use super::*;
 
@@ -371,6 +373,7 @@ pub(super) fn advance_task_event_with_param(
     advance_task_event_impl(account, catalog, event_type, Some(target_param), delta, now)
 }
 
+#[cfg(test)]
 fn advance_task_event_impl(
     account: &mut Value,
     catalog: Option<&TaskCatalog>,

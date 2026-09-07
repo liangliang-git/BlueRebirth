@@ -106,8 +106,10 @@ use wire::{
     append_bytes_field, append_message_field, append_varint, append_varint_field, read_varint,
 };
 
+pub(crate) use runtime::current_unix_millis;
+#[cfg(test)]
+pub(crate) use runtime::normalize_task_state;
 pub use runtime::run;
-pub(crate) use runtime::{current_unix_millis, normalize_task_state};
 
 const SEA_DIFFICULTY_UNLOCK_LEVEL: i32 = 60;
 #[cfg(test)]

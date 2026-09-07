@@ -737,6 +737,7 @@ pub(super) fn current_unix_millis() -> u32 {
     KCP_CLOCK.get_or_init(Instant::now).elapsed().as_millis() as u32
 }
 
+#[cfg(test)]
 pub(super) fn normalize_task_state(account: &mut Value, now: u32) -> bool {
     let day = (i64::from(now) + 8 * 60 * 60) / 86_400;
     let week = (day + 3) / 7;
@@ -779,6 +780,7 @@ pub(super) fn normalize_task_state(account: &mut Value, now: u32) -> bool {
     changed
 }
 
+#[cfg(test)]
 fn value_i64_any_object(object: &serde_json::Map<String, Value>, keys: &[&str]) -> i64 {
     keys.iter()
         .find_map(|key| object.get(*key).and_then(Value::as_i64))

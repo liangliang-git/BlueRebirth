@@ -1828,6 +1828,7 @@ pub(super) fn goods_copy_snapshot_payload(
 /// Normalize persisted DailyCopy state to configured chapters/groups and current China day.
 /// C# performs this before both GetData and SelectEx; doing it here keeps server-owned state
 /// stable after client disconnects and ensures unknown client IDs cannot be persisted.
+#[cfg(test)]
 pub(super) fn normalize_daily_copy_state(
     account: &mut Value,
     chapter_catalog: Option<&ChapterCatalog>,

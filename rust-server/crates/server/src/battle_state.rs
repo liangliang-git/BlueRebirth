@@ -1685,6 +1685,7 @@ pub(super) fn record_battle_pass(
     }
 }
 
+#[cfg(test)]
 fn record_copy_history(account: &mut Value, copy_id: i32, battle_time: i32) {
     let tactic = account
         .get("fleet")
