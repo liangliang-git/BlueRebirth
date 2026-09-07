@@ -1,10 +1,10 @@
 use blueoath_protocol::{
-    ChangeNameRequest, ChangeWorldChannelRequest, CopyAttackRequest, CopyPassRequest,
-    CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode,
-    FriendSearchRequest, FriendTargetRequest, GetBarrageByIdRequest, ProtocolError,
-    SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest,
-    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, TaskAllRewardRequest,
-    TaskRewardRequest,
+    BuildShipRequest, BuildShipRewardRequest, ChangeNameRequest, ChangeWorldChannelRequest,
+    CopyAttackRequest, CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
+    DailyCopySelectExRequest, Decode, FriendSearchRequest, FriendTargetRequest,
+    GetBarrageByIdRequest, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
+    SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
+    SetSecretaryRequest, TaskAllRewardRequest, TaskRewardRequest,
 };
 
 #[test]
@@ -232,6 +232,20 @@ fn decodes_typed_chat_requests_with_length_limits() {
             len: 10,
         }
     );
+    assert_eq!(
+        BuildShipRequest::decode(&[0x08, 2, 0x10, 10]).unwrap(),
+        BuildShipRequest {
+            pool_id: 2,
+            pulls: 10,
+        }
+    );
+    assert_eq!(
+        BuildShipRewardRequest::decode(&[0x08, 2, 0x10, 10]).unwrap(),
+        BuildShipRewardRequest {
+            pool_id: 2,
+            milestone: 10,
+        }
+    );
 }
 
 #[test]
@@ -247,5 +261,9 @@ fn rejects_invalid_typed_chat_requests() {
     assert!(matches!(
         GetBarrageByIdRequest::decode(&[0x18, 101]),
         Err(ProtocolError::Invalid("barrage query is invalid"))
+    ));
+    assert!(matches!(
+        BuildShipRewardRequest::decode(&[0x08, 0, 0x10, 1]),
+        Err(ProtocolError::Invalid("build reward request is invalid"))
     ));
 }

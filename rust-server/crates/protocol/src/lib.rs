@@ -1613,6 +1613,42 @@ impl Decode for SendBarrageRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildShipRequest {
+    pub pool_id: i32,
+    pub pulls: i32,
+}
+
+impl Decode for BuildShipRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let pool_id = optional_i32(&fields, 1, "build ship request has duplicate pool id")?;
+        let pulls = optional_i32(&fields, 2, "build ship request has duplicate pulls")?;
+        if pool_id <= 0 || !(0..=10).contains(&pulls) {
+            return Err(ProtocolError::Invalid("build ship request is invalid"));
+        }
+        Ok(Self { pool_id, pulls })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildShipRewardRequest {
+    pub pool_id: i32,
+    pub milestone: i32,
+}
+
+impl Decode for BuildShipRewardRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let pool_id = required_field(&fields, 1, "build reward is missing pool id")?;
+        let milestone = required_field(&fields, 2, "build reward is missing milestone")?;
+        if pool_id <= 0 || milestone <= 0 {
+            return Err(ProtocolError::Invalid("build reward request is invalid"));
+        }
+        Ok(Self { pool_id, milestone })
+    }
+}
+
 impl Decode for SeaDifficultyRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

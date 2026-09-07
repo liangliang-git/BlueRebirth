@@ -20,8 +20,16 @@ pub(super) fn handle_typed(
             buildship_info_payload_from_typed(account, now),
         )),
         "buildship.BuildShip" => {
-            let pool_id = decode_varint_field(request_args, 1);
-            let pulls = decode_varint_field(request_args, 2).clamp(1, 10);
+            let request = match BuildShipRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "build ship request is invalid",
+                    ));
+                }
+            };
+            let pool_id = request.pool_id;
+            let pulls = request.pulls.clamp(1, 10);
             if !typed_build_pool_known(catalog, pool_id) || !build_drop_exists(catalog, pool_id) {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "build pool is unavailable",
@@ -126,13 +134,16 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, encode_buildship_ret(&rewards)))
         }
         "buildship.BuildShipBox" | "buildship.BuildShipReward" => {
-            let pool_id = decode_varint_field(request_args, 1);
-            let milestone = decode_varint_field(request_args, 2);
-            if pool_id <= 0 || milestone <= 0 {
-                return HandlerResult::Error(GameError::InvalidRequest(
-                    "build reward milestone is invalid",
-                ));
-            }
+            let request = match BuildShipRewardRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "build reward request is invalid",
+                    ));
+                }
+            };
+            let pool_id = request.pool_id;
+            let milestone = request.milestone;
             let pool_key = pool_id as u64;
             let milestone_key = milestone as u32;
             let draw_count = account
