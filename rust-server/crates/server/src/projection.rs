@@ -467,23 +467,29 @@ pub(super) fn equip_list_from_typed_account(account: &blueoath_domain::AccountSt
         .dock
         .equipments
         .values()
-        .map(|equipment| EquipInfo {
-            equip_id: u32::try_from(equipment.id.get()).unwrap_or(u32::MAX),
-            template_id: i32::try_from(equipment.template_id.get()).unwrap_or(i32::MAX),
-            enhance_level: i32::try_from(equipment.enhance_level).unwrap_or(i32::MAX),
-            star: i32::try_from(equipment.star).unwrap_or(i32::MAX),
-            hero_id: equipment
-                .hero_id
-                .map(|id| u32::try_from(id.get()).unwrap_or(u32::MAX))
-                .unwrap_or_default(),
-            enhance_exp: i32::try_from(equipment.enhance_exp).unwrap_or(i32::MAX),
-            ..EquipInfo::default()
-        })
+        .map(equip_info_from_typed_equipment)
         .collect();
     EquipList {
         bag_size: 2000,
         items,
         nums: Vec::new(),
+    }
+}
+
+pub(super) fn equip_info_from_typed_equipment(
+    equipment: &blueoath_domain::EquipmentState,
+) -> EquipInfo {
+    EquipInfo {
+        equip_id: u32::try_from(equipment.id.get()).unwrap_or(u32::MAX),
+        template_id: i32::try_from(equipment.template_id.get()).unwrap_or(i32::MAX),
+        enhance_level: i32::try_from(equipment.enhance_level).unwrap_or(i32::MAX),
+        star: i32::try_from(equipment.star).unwrap_or(i32::MAX),
+        hero_id: equipment
+            .hero_id
+            .map(|id| u32::try_from(id.get()).unwrap_or(u32::MAX))
+            .unwrap_or_default(),
+        enhance_exp: i32::try_from(equipment.enhance_exp).unwrap_or(i32::MAX),
+        ..EquipInfo::default()
     }
 }
 

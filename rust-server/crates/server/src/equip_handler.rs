@@ -4,6 +4,16 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
+fn typed_currency_kind(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
+    match item_id {
+        1 => Some(blueoath_domain::CurrencyKind::Gold),
+        2 => Some(blueoath_domain::CurrencyKind::Diamond),
+        5 => Some(blueoath_domain::CurrencyKind::Supply),
+        30 => Some(blueoath_domain::CurrencyKind::PvePoint),
+        _ => None,
+    }
+}
+
 pub(super) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
@@ -119,6 +129,182 @@ pub(super) fn handle_typed(
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
             );
             HandlerResult::Reply(Response::raw(method, encode_retire_hero_response(&rewards)))
+        }
+        "equip.RiseStar" => {
+            let Some(catalog) = equip_catalog else {
+                return HandlerResult::Empty;
+            };
+            let equip_id = decode_varint_u64_field(request_args, 1);
+            let consume_ids = decode_repeated_varint_field(request_args, 2)
+                .into_iter()
+                .filter_map(|id| u64::try_from(id).ok())
+                .filter_map(|id| blueoath_domain::EquipId::new(id).ok())
+                .collect::<Vec<_>>();
+            let Some(equip_id) = blueoath_domain::EquipId::new(equip_id).ok() else {
+                return HandlerResult::Error(GameError::InvalidRequest("equipment id is invalid"));
+            };
+            let Some(target) = account.dock.equipments.get(&equip_id).cloned() else {
+                return HandlerResult::Error(GameError::InvalidRequest("equipment was not found"));
+            };
+            let template_id = i32::try_from(target.template_id.get()).unwrap_or_default();
+            let current_star = i32::try_from(target.star).unwrap_or(i32::MAX);
+            let next_star = current_star.saturating_add(1);
+            let star_max = *catalog.star_max_by_template.get(&template_id).unwrap_or(&5);
+            let Some(rule) = catalog.renovate_rules.get(&next_star) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "equipment renovation rule is missing",
+                ));
+            };
+            if next_star > star_max
+                || i32::try_from(target.enhance_level).unwrap_or(i32::MAX) < rule.need_level
+                || consume_ids.len() != rule.self_count
+                || consume_ids.contains(&equip_id)
+                || consume_ids
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+                    != consume_ids.len()
+            {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "equipment renovation requirements are not met",
+                ));
+            }
+            let target_quality = catalog.quality_by_template.get(&template_id).copied();
+            let target_type = target_quality
+                .map(|_| template_id)
+                .and_then(|_| catalog.type_by_template.get(&template_id).copied());
+            for material_id in &consume_ids {
+                let Some(material) = account.dock.equipments.get(material_id) else {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "renovation material was not found",
+                    ));
+                };
+                let material_template =
+                    i32::try_from(material.template_id.get()).unwrap_or_default();
+                let same_template = material_template == template_id;
+                let universal_core = target_quality.is_some_and(|quality| quality >= 3)
+                    && target_type.is_some()
+                    && catalog.type_by_template.get(&material_template) == Some(&129)
+                    && catalog.quality_by_template.get(&material_template)
+                        == target_quality.as_ref();
+                if material.hero_id.is_some() || !(same_template || universal_core) {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "renovation material is invalid",
+                    ));
+                }
+            }
+            let mut costs = Vec::new();
+            for &(goods_type, item_id, amount) in &rule.costs {
+                if amount <= 0 {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "renovation cost is invalid",
+                    ));
+                }
+                let amount = u64::try_from(amount).unwrap_or_default();
+                if goods_type == 5 {
+                    let Some(kind) = typed_currency_kind(item_id) else {
+                        return HandlerResult::Error(GameError::InvalidRequest(
+                            "renovation currency is unsupported",
+                        ));
+                    };
+                    if account.resources.amount(kind).get() < amount {
+                        return HandlerResult::Error(GameError::InvalidRequest(
+                            "renovation currency is insufficient",
+                        ));
+                    }
+                    costs.push((goods_type, item_id, amount));
+                } else if matches!(goods_type, 1 | 6) {
+                    let Some(template_id) = blueoath_domain::TemplateId::new(
+                        u64::try_from(item_id).unwrap_or_default(),
+                    )
+                    .ok() else {
+                        return HandlerResult::Error(GameError::InvalidRequest(
+                            "renovation item is invalid",
+                        ));
+                    };
+                    if account
+                        .inventory
+                        .items
+                        .get(&template_id)
+                        .copied()
+                        .unwrap_or_default()
+                        < amount
+                    {
+                        return HandlerResult::Error(GameError::InvalidRequest(
+                            "renovation item is insufficient",
+                        ));
+                    }
+                    costs.push((goods_type, item_id, amount));
+                } else {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "renovation cost is unsupported",
+                    ));
+                }
+            }
+            let consumed = consume_ids
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>();
+            account
+                .dock
+                .equipments
+                .retain(|id, _| !consumed.contains(id));
+            for hero in account.dock.heroes.values_mut() {
+                for equipped in &mut hero.equip_slots {
+                    if equipped.is_some_and(|id| consumed.contains(&id)) {
+                        *equipped = None;
+                    }
+                }
+            }
+            if let Some(target) = account.dock.equipments.get_mut(&equip_id) {
+                target.star = u32::try_from(next_star).unwrap_or(u32::MAX);
+            }
+            for (goods_type, item_id, amount) in costs {
+                if goods_type == 5 {
+                    if let Some(kind) = typed_currency_kind(item_id) {
+                        let _ = account.resources.debit(kind, amount);
+                    }
+                } else if let Ok(template_id) =
+                    blueoath_domain::TemplateId::new(u64::try_from(item_id).unwrap_or_default())
+                {
+                    if let Some(value) = account.inventory.items.get_mut(&template_id) {
+                        *value = value.saturating_sub(amount);
+                    }
+                }
+            }
+            advance_typed_task_event(account, task_catalog, 2727, 1);
+            let mut equip_push = equip_list_from_typed_account(account);
+            equip_push.items.extend(consume_ids.iter().filter_map(|id| {
+                u32::try_from(id.get()).ok().map(|equip_id| EquipInfo {
+                    equip_id,
+                    template_id: 0,
+                    ..EquipInfo::default()
+                })
+            }));
+            append_method_push(
+                pre_pushes,
+                "equip.UpdateEquipBagData",
+                EquipListCodec::encode(&equip_push),
+            );
+            append_method_push(
+                pre_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "task.TaskInfo",
+                task_info_payload_from_typed_account(account, task_catalog),
+            );
+            let response = account
+                .dock
+                .equipments
+                .get(&equip_id)
+                .map(|equipment| {
+                    EquipListCodec::encode_item(&equip_info_from_typed_equipment(equipment))
+                })
+                .unwrap_or_default();
+            HandlerResult::Reply(Response::raw(method, response))
         }
         "equip.Enhance" => {
             let Some(catalog) = equip_catalog else {
@@ -1170,5 +1356,63 @@ mod tests {
             None
         );
         assert_eq!(pushes.len(), 2);
+    }
+
+    #[test]
+    fn typed_equip_rise_star_consumes_unbound_material() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("equip-star-typed").unwrap(),
+            "Captain",
+        );
+        let hero_id = blueoath_domain::HeroId::new(1).unwrap();
+        account.dock.heroes.get_mut(&hero_id).unwrap().equip_slots[2] = None;
+        account
+            .dock
+            .equipments
+            .get_mut(&blueoath_domain::EquipId::new(2).unwrap())
+            .unwrap()
+            .hero_id = None;
+        let mut catalog = EquipCatalog::default();
+        catalog.star_max_by_template.insert(30_091, 5);
+        catalog.renovate_rules.insert(
+            1,
+            EquipRenovateRule {
+                self_count: 1,
+                ..EquipRenovateRule::default()
+            },
+        );
+        catalog.quality_by_template.insert(30_091, 3);
+        catalog.quality_by_template.insert(30_221, 3);
+        catalog.type_by_template.insert(30_091, 1);
+        catalog.type_by_template.insert(30_221, 129);
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, 1);
+        append_varint_field(&mut args, 2, 2);
+        let mut pushes = Vec::new();
+
+        let result = handle_typed(
+            &mut account,
+            "equip.RiseStar",
+            &args,
+            &mut pushes,
+            Some(&catalog),
+            None,
+        );
+
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert_eq!(
+            account
+                .dock
+                .equipments
+                .get(&blueoath_domain::EquipId::new(1).unwrap())
+                .unwrap()
+                .star,
+            1
+        );
+        assert!(!account
+            .dock
+            .equipments
+            .contains_key(&blueoath_domain::EquipId::new(2).unwrap()));
+        assert_eq!(pushes.len(), 3);
     }
 }
