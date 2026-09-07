@@ -174,6 +174,36 @@ impl BattleService {
         }
         Ok(victory && account.battle.passed_copies.insert(copy_id))
     }
+
+    pub fn record_attack(
+        account: &mut AccountState,
+        copy_id: CopyId,
+        hero_ids: &[HeroId],
+    ) -> Result<(), GameServiceError> {
+        let Some(session) = account.battle.active.as_mut() else {
+            return Err(GameServiceError::BattleNotActive);
+        };
+        if session.copy_id != copy_id {
+            return Err(GameServiceError::BattleCopyMismatch);
+        }
+        if hero_ids.is_empty()
+            || hero_ids
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != hero_ids.len()
+            || hero_ids
+                .iter()
+                .any(|hero_id| !session.hero_ids.contains(hero_id))
+        {
+            return Err(GameServiceError::Domain(DomainError::InvalidState(
+                "battle attack does not match active session",
+            )));
+        }
+        session.attack_count = session.attack_count.saturating_add(1);
+        session.revision = session.revision.saturating_add(1);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -266,5 +296,25 @@ mod tests {
         assert_eq!(session.hero_ids, vec![hero_id]);
         assert_eq!(session.remaining_fleet_ids, vec![1, 2]);
         assert_eq!(session.expires_at, 20);
+    }
+
+    #[test]
+    fn battle_service_records_only_matching_attacks() {
+        let mut account = account();
+        let hero_id = HeroId::new(7).unwrap();
+        BattleService::start(
+            &mut account,
+            ChapterId::new(1).unwrap(),
+            CopyId::new(2).unwrap(),
+            FleetId::new(1).unwrap(),
+            10,
+        )
+        .unwrap();
+        BattleService::record_attack(&mut account, CopyId::new(2).unwrap(), &[hero_id]).unwrap();
+        assert_eq!(account.battle.active.as_ref().unwrap().attack_count, 1);
+        assert!(matches!(
+            BattleService::record_attack(&mut account, CopyId::new(3).unwrap(), &[hero_id]),
+            Err(GameServiceError::BattleCopyMismatch)
+        ));
     }
 }

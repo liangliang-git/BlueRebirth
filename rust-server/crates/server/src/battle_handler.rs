@@ -551,23 +551,22 @@ pub(super) fn handle_typed_with_catalog(
                     "copy attack request is invalid",
                 ));
             };
-            let Some(active) = account.battle.active.as_mut() else {
-                return HandlerResult::Error(GameError::InvalidState(
-                    "battle session is not active",
+            let Ok(copy_id) = blueoath_domain::CopyId::new(request.copy_id) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "battle copy id is invalid",
                 ));
             };
-            if active.copy_id.get() != request.copy_id
-                || request
-                    .hero_ids
-                    .iter()
-                    .any(|hero_id| !active.hero_ids.iter().any(|id| id.get() == *hero_id))
-            {
+            let hero_ids = request
+                .hero_ids
+                .iter()
+                .copied()
+                .filter_map(|hero_id| blueoath_domain::HeroId::new(hero_id).ok())
+                .collect::<Vec<_>>();
+            if BattleService::record_attack(account, copy_id, &hero_ids).is_err() {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "battle attack does not match active session",
                 ));
             }
-            active.attack_count = active.attack_count.saturating_add(1);
-            active.revision = active.revision.saturating_add(1);
             HandlerResult::Reply(Response::raw(
                 method,
                 battle_attack_payload_with_damage(request_args, 0),
