@@ -2216,6 +2216,27 @@ where
     Ok(true)
 }
 
+pub(super) async fn process_game_login_frame_payload_with_typed_account<S>(
+    stream: &mut S,
+    state: &ServerState,
+    typed_account: &mut AccountState,
+    frame: blueoath_transport::NetSocketFrame,
+    catalogs: &GameLoginCatalogs<'_>,
+) -> Result<bool, ServerError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    process_game_login_frame_payload_with_catalogs_typed_mut(
+        stream,
+        state,
+        None,
+        Some(typed_account),
+        frame,
+        catalogs,
+    )
+    .await
+}
+
 fn append_typed_user_login_bootstrap(
     pushes: &mut Vec<Vec<u8>>,
     state: &ServerState,

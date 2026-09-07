@@ -383,11 +383,10 @@ where
     let typed_account_before = typed_account.clone();
     let mut buffered = BufferedNetSocket::from_frame(&frame);
     let login_catalogs = context.catalogs.login_catalogs();
-    let keep_alive = process_game_login_frame_payload_with_catalogs_typed_mut(
+    let keep_alive = process_game_login_frame_payload_with_typed_account(
         &mut buffered,
         &state_snapshot,
-        None,
-        Some(&mut typed_account),
+        &mut typed_account,
         frame,
         &login_catalogs,
     )
@@ -660,11 +659,10 @@ async fn build_kcp_wire_responses(
     NetSocketFrameCodec::write(&mut input, 0, &message.payload).await?;
     input.shutdown().await?;
     let login_catalogs = catalogs.login_catalogs();
-    process_game_login_frame_with_catalogs_typed_mut(
+    process_game_login_frame_with_typed_account_and_catalogs(
         &mut output,
         &state_snapshot,
-        None,
-        Some(&mut typed_account),
+        &mut typed_account,
         &login_catalogs,
     )
     .await?;

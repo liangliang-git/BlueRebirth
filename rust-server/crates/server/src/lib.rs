@@ -85,9 +85,13 @@ pub use frame_service::process_frame;
 use frame_service::{prepare_local_request, storage_failure_response};
 #[cfg(test)]
 pub(crate) use game_login::building_handler::handle_typed as handle_typed_building;
-use game_login::process_game_login_frame_payload_with_catalogs_typed_mut;
 #[cfg(test)]
 pub(crate) use game_login::sync_typed_battle_state;
+use game_login::{
+    process_game_login_frame_payload_with_typed_account,
+};
+#[cfg(test)]
+use game_login::process_game_login_frame_payload_with_catalogs_typed_mut;
 use guild_state::*;
 use hero_state::*;
 pub use local_protocol::dispatch;
@@ -161,14 +165,8 @@ where
 {
     let mut account = transient_typed_account(state);
     let catalogs = GameLoginCatalogs::empty();
-    process_game_login_frame_with_catalogs_typed_mut(
-        stream,
-        state,
-        None,
-        Some(&mut account),
-        &catalogs,
-    )
-    .await
+    process_game_login_frame_with_typed_account_and_catalogs(stream, state, &mut account, &catalogs)
+        .await
 }
 
 fn transient_typed_account(state: &ServerState) -> blueoath_domain::AccountState {
@@ -193,7 +191,23 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let catalogs = GameLoginCatalogs::empty();
-    process_game_login_frame_with_catalogs_typed_mut(stream, state, None, Some(account), &catalogs)
+    process_game_login_frame_with_typed_account_and_catalogs(stream, state, account, &catalogs)
+        .await
+}
+
+pub(crate) async fn process_game_login_frame_with_typed_account_and_catalogs<S>(
+    stream: &mut S,
+    state: &ServerState,
+    account: &mut blueoath_domain::AccountState,
+    catalogs: &GameLoginCatalogs<'_>,
+) -> Result<bool, ServerError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let Some(frame) = NetSocketFrameCodec::read(stream).await? else {
+        return Ok(false);
+    };
+    process_game_login_frame_payload_with_typed_account(stream, state, account, frame, catalogs)
         .await
 }
 
@@ -254,7 +268,8 @@ where
     process_game_login_frame_with_catalogs_typed_mut(stream, state, account, None, catalogs).await
 }
 
-pub(crate) async fn process_game_login_frame_with_catalogs_typed_mut<S>(
+#[cfg(test)]
+async fn process_game_login_frame_with_catalogs_typed_mut<S>(
     stream: &mut S,
     state: &ServerState,
     account: Option<&mut Value>,
