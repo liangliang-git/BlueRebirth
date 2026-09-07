@@ -1293,6 +1293,44 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
         .into_iter()
         .map(|(id, value)| (id, config_extract(&value)))
         .collect();
+    let guild_war_rewards = rows("config_guildwar_reward.db")
+        .into_iter()
+        .map(|(id, value)| {
+            (
+                id,
+                GuildWarRewardConfig {
+                    base_id: json_i32(&value, "base_id").unwrap_or_default(),
+                    stage: json_i32(&value, "stage").unwrap_or_default(),
+                    reward_id: json_i32(&value, "guild_reward").unwrap_or_default(),
+                },
+            )
+        })
+        .collect();
+    let guild_box_scores = rows("config_guildboxscore.db")
+        .into_iter()
+        .map(|(id, value)| {
+            (
+                id,
+                GuildBoxScoreConfig {
+                    reward_id: json_i32(&value, "reward").unwrap_or_default(),
+                },
+            )
+        })
+        .collect();
+    let sportsmeet_awards = rows("config_sportsmeet_award.db")
+        .into_iter()
+        .map(|(id, value)| {
+            (
+                id,
+                SportsMeetAwardConfig {
+                    score: json_i32(&value, "score").unwrap_or_default(),
+                    reward_id: json_i32(&value, "rewards")
+                        .or_else(|| json_i32(&value, "reward"))
+                        .unwrap_or_default(),
+                },
+            )
+        })
+        .collect();
     GameplayCatalog {
         rewards_by_id: load_reward_definitions(&dir),
         battlepass_levels: battlepass_levels("config_battlepass_level.db"),
@@ -1323,16 +1361,16 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
         guild_offer_rewards: rows("config_guildoffer_scorereward.db"),
         guild_war_base_info: rows("config_guildwar_base_info.db"),
         guild_war_rank: rows("config_guildwar_rank.db"),
-        guild_war_rewards: rows("config_guildwar_reward.db"),
+        guild_war_rewards,
         magazine_info,
         magazine_pages: rows("config_magazine_page.db"),
         magazine_tasks: rows("config_task_magazine.db"),
         interaction_items,
         interaction_item_bags: rows("config_interaction_item_bag.db"),
         interaction_figures,
-        guild_box_scores: rows("config_guildboxscore.db"),
+        guild_box_scores,
         valentine_gifts: rows("config_item_valentine_gift.db"),
-        sportsmeet_awards: rows("config_sportsmeet_award.db"),
+        sportsmeet_awards,
         outpost_info: rows("config_outpost_info.db"),
         outpost_levels: rows("config_outpost_level.db"),
     }

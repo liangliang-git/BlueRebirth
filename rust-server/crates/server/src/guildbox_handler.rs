@@ -41,7 +41,8 @@ pub(super) fn handle_typed(
             let reward_id = catalog
                 .guild_box_scores
                 .values()
-                .find_map(|config| json_i32(config, "reward"));
+                .map(|config| config.reward_id)
+                .find(|reward_id| *reward_id > 0);
             let rewards = reward_id
                 .and_then(|id| catalog.rewards_by_id.get(&id))
                 .cloned()

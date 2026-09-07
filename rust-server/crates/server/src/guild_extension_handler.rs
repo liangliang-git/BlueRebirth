@@ -393,9 +393,9 @@ fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
 fn guildwar_reward_list_payload(catalog: &GameplayCatalog) -> Vec<u8> {
     let mut output = Vec::new();
     for row in catalog.guild_war_rewards.values() {
-        let base_id = json_i32(row, "base_id").unwrap_or_default();
-        let stage = json_i32(row, "stage").unwrap_or_default();
-        let reward_id = json_i32(row, "guild_reward").unwrap_or_default();
+        let base_id = row.base_id;
+        let stage = row.stage;
+        let reward_id = row.reward_id;
         if base_id <= 0 || stage <= 0 || reward_id <= 0 {
             continue;
         }

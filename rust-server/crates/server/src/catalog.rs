@@ -683,6 +683,24 @@ pub(super) struct ActivityExtractConfig {
     pub(super) rewards: Vec<(i32, i32)>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct GuildBoxScoreConfig {
+    pub(super) reward_id: i32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct GuildWarRewardConfig {
+    pub(super) base_id: i32,
+    pub(super) stage: i32,
+    pub(super) reward_id: i32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct SportsMeetAwardConfig {
+    pub(super) score: i32,
+    pub(super) reward_id: i32,
+}
+
 #[derive(Clone, Debug, Default)]
 pub(super) struct GameplayCatalog {
     pub(super) rewards_by_id: std::collections::BTreeMap<i32, Vec<ShopReward>>,
@@ -711,16 +729,16 @@ pub(super) struct GameplayCatalog {
     pub(super) guild_offer_rewards: std::collections::BTreeMap<i32, Value>,
     pub(super) guild_war_base_info: std::collections::BTreeMap<i32, Value>,
     pub(super) guild_war_rank: std::collections::BTreeMap<i32, Value>,
-    pub(super) guild_war_rewards: std::collections::BTreeMap<i32, Value>,
+    pub(super) guild_war_rewards: std::collections::BTreeMap<i32, GuildWarRewardConfig>,
     pub(super) magazine_info: std::collections::BTreeMap<i32, MagazineInfoConfig>,
     pub(super) magazine_pages: std::collections::BTreeMap<i32, Value>,
     pub(super) magazine_tasks: std::collections::BTreeMap<i32, Value>,
     pub(super) interaction_items: std::collections::BTreeMap<i32, InteractionItemConfig>,
     pub(super) interaction_item_bags: std::collections::BTreeMap<i32, Value>,
     pub(super) interaction_figures: std::collections::BTreeMap<i32, InteractionFigureConfig>,
-    pub(super) guild_box_scores: std::collections::BTreeMap<i32, Value>,
+    pub(super) guild_box_scores: std::collections::BTreeMap<i32, GuildBoxScoreConfig>,
     pub(super) valentine_gifts: std::collections::BTreeMap<i32, Value>,
-    pub(super) sportsmeet_awards: std::collections::BTreeMap<i32, Value>,
+    pub(super) sportsmeet_awards: std::collections::BTreeMap<i32, SportsMeetAwardConfig>,
     pub(super) outpost_info: std::collections::BTreeMap<i32, Value>,
     pub(super) outpost_levels: std::collections::BTreeMap<i32, Value>,
 }

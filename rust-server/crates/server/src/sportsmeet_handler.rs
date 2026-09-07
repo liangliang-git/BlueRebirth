@@ -91,8 +91,7 @@ fn receive_points_reward_typed(
         let mut points = catalog
             .sportsmeet_awards
             .values()
-            .filter_map(|row| json_i32(row, "score"))
-            .filter_map(|score| u64::try_from(score).ok())
+            .filter_map(|row| u64::try_from(row.score).ok())
             .filter(|score| {
                 *score <= account.sports_meet.points
                     && !account.sports_meet.received_points.contains(score)
@@ -150,14 +149,8 @@ fn sportsmeet_rewards(catalog: &GameplayCatalog, points: u64) -> Vec<ShopReward>
     catalog
         .sportsmeet_awards
         .values()
-        .find(|row| {
-            json_i32(row, "score").and_then(|value| u64::try_from(value).ok()) == Some(points)
-        })
-        .and_then(|row| {
-            json_i32(row, "rewards")
-                .or_else(|| json_i32(row, "reward"))
-                .and_then(|reward_id| catalog.rewards_by_id.get(&reward_id))
-        })
+        .find(|row| u64::try_from(row.score).ok() == Some(points))
+        .and_then(|row| catalog.rewards_by_id.get(&row.reward_id))
         .cloned()
         .unwrap_or_default()
 }
@@ -199,9 +192,13 @@ mod tests {
         );
         account.sports_meet.points = 20;
         let mut catalog = GameplayCatalog::default();
-        catalog
-            .sportsmeet_awards
-            .insert(1, json!({"score": 20, "rewards": 1}));
+        catalog.sportsmeet_awards.insert(
+            1,
+            SportsMeetAwardConfig {
+                score: 20,
+                reward_id: 1,
+            },
+        );
         catalog.rewards_by_id.insert(
             1,
             vec![ShopReward {
