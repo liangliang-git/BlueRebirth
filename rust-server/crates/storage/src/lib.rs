@@ -123,7 +123,8 @@ impl ProfileStore {
         Ok(Some(StoredProfile { id, name, state }))
     }
 
-    pub fn load_account(&self, profile_id: &str) -> Result<Option<Value>, StorageError> {
+    /// Transitional JSON snapshot read. New code must use `AccountRepository::load`.
+    pub fn load_legacy_account(&self, profile_id: &str) -> Result<Option<Value>, StorageError> {
         let connection = self.connection()?;
         connection
             .query_row(
@@ -564,12 +565,17 @@ impl ProfileStore {
         Ok(())
     }
 
-    pub fn save_account(&self, profile_id: &str, account: &Value) -> Result<(), StorageError> {
-        self.save_account_with_revision(profile_id, account, None)
+    /// Transitional JSON snapshot write. Remove after all feature handlers use typed state.
+    pub fn save_legacy_account(
+        &self,
+        profile_id: &str,
+        account: &Value,
+    ) -> Result<(), StorageError> {
+        self.save_legacy_account_with_revision(profile_id, account, None)
             .map(|_| ())
     }
 
-    pub fn load_account_with_revision(
+    pub fn load_legacy_account_with_revision(
         &self,
         profile_id: &str,
     ) -> Result<Option<(Value, u64)>, StorageError> {
@@ -597,7 +603,7 @@ impl ProfileStore {
         Ok(Some((serde_json::from_str(&account_json)?, revision)))
     }
 
-    pub fn save_account_with_revision(
+    pub fn save_legacy_account_with_revision(
         &self,
         profile_id: &str,
         account: &Value,
@@ -892,7 +898,8 @@ impl ProfileStore {
         Ok(profiles)
     }
 
-    pub fn list_accounts(&self) -> Result<Vec<(String, Value)>, StorageError> {
+    /// Transitional JSON directory read for legacy ranking features.
+    pub fn list_legacy_accounts(&self) -> Result<Vec<(String, Value)>, StorageError> {
         let connection = self.connection()?;
         let mut statement =
             connection.prepare("SELECT id, account_json FROM accounts ORDER BY id")?;

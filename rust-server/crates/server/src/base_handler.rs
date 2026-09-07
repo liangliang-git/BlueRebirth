@@ -390,7 +390,7 @@ fn teacher_rank_payload(state: &ServerState, current: &Value, begin: i32, offset
     let mut entries = state
         .social_store
         .as_ref()
-        .and_then(|store| store.list_accounts().ok())
+        .and_then(|store| store.list_legacy_accounts().ok())
         .into_iter()
         .flatten()
         .filter_map(|(_, account)| {
@@ -866,7 +866,7 @@ pub(super) fn other_user_payload(
     let social_account = if requested_uid > 0 {
         state.social_store.as_ref().and_then(|store| {
             store
-                .list_accounts()
+                .list_legacy_accounts()
                 .ok()?
                 .into_iter()
                 .map(|(_, value)| value)
@@ -961,7 +961,7 @@ mod tests {
         ));
         let store = blueoath_storage::ProfileStore::open(&root).unwrap();
         store
-            .save_account(
+            .save_legacy_account(
                 "friend",
                 &json!({
                     "profileId": "friend",

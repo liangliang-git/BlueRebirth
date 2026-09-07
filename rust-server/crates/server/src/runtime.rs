@@ -101,15 +101,15 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
     initial_state.building_oil_multiplier = normalize_multiplier(config.building_oil_multiplier);
     initial_state.building_gold_multiplier = normalize_multiplier(config.building_gold_multiplier);
     initial_state.social_store = Some(store.clone());
-    if store.load_account(&profile_id)?.is_none() {
-        store.save_account(
+    if store.load_legacy_account(&profile_id)?.is_none() {
+        store.save_legacy_account(
             &profile_id,
             &default_account_snapshot(&profile_id, &initial_state.name, current_unix_seconds()),
         )?;
     }
     let mut restored_rooms = Vec::new();
     let mut restored_battles = Vec::new();
-    for (_, account) in store.list_accounts()? {
+    for (_, account) in store.list_legacy_accounts()? {
         if let Some(room) = account.get("pveRoom").filter(|value| value.is_object()) {
             if let Some(room_id) = room.get("roomId").and_then(Value::as_u64) {
                 restored_rooms.push((room_id, room.clone()));
@@ -410,7 +410,7 @@ where
         let hero_skills = Arc::clone(&context.catalogs.hero_skills);
         let task_catalog = Arc::clone(&context.catalogs.tasks);
         tokio::task::spawn_blocking(move || {
-            let mut account = account_store.load_account(&account_profile_id)?;
+            let mut account = account_store.load_legacy_account(&account_profile_id)?;
             if let Some(value) = account.as_mut() {
                 let hero_skills_changed = ensure_hero_pskills(value, &hero_skills);
                 let mood_changed = ensure_hero_mood_state(value);
@@ -425,7 +425,7 @@ where
                     || mood_recovery_changed
                     || achievement_points_changed;
                 if starter_items_changed || normalize_task_state(value, current_unix_seconds()) {
-                    account_store.save_account(&account_profile_id, value)?;
+                    account_store.save_legacy_account(&account_profile_id, value)?;
                 }
             }
             Ok::<_, blueoath_storage::StorageError>(account)
@@ -456,7 +456,7 @@ where
         let account_store = context.store.clone();
         if let Some(account_snapshot) = account.clone() {
             tokio::task::spawn_blocking(move || {
-                account_store.save_account(&account_profile_id, &account_snapshot)
+                account_store.save_legacy_account(&account_profile_id, &account_snapshot)
             })
             .await
             .map_err(|error| ServerError::StorageTask(error.to_string()))??;
@@ -685,8 +685,8 @@ async fn build_kcp_wire_responses(
         let account_store = store.clone();
         let _guard = persist_lock.lock().await;
         tokio::task::spawn_blocking(move || {
-            if account_store.load_account(&profile_id)?.is_none() {
-                account_store.save_account(
+            if account_store.load_legacy_account(&profile_id)?.is_none() {
+                account_store.save_legacy_account(
                     &profile_id,
                     &default_account_snapshot(&profile_id, &profile_id, current_unix_seconds()),
                 )?;
@@ -718,7 +718,7 @@ async fn build_kcp_wire_responses(
         .map_err(|_| ServerError::InvalidMessage("state mutex poisoned".to_owned()))?
         .mood_recovery_multiplier;
     let mut account = tokio::task::spawn_blocking(move || {
-        let mut account = account_store.load_account(&profile_id)?;
+        let mut account = account_store.load_legacy_account(&profile_id)?;
         if let Some(value) = account.as_mut() {
             let hero_skills_changed = ensure_hero_pskills(value, &hero_skills);
             let mood_changed = ensure_hero_mood_state(value);
@@ -733,7 +733,7 @@ async fn build_kcp_wire_responses(
                 || mood_recovery_changed
                 || achievement_points_changed;
             if starter_items_changed || normalize_task_state(value, current_unix_seconds()) {
-                account_store.save_account(&profile_id, value)?;
+                account_store.save_legacy_account(&profile_id, value)?;
             }
         }
         Ok::<_, blueoath_storage::StorageError>(account)
@@ -765,9 +765,11 @@ async fn build_kcp_wire_responses(
         if let Some(snapshot) = account.clone() {
             let profile_id = peer.profile_id.clone();
             let account_store = store.clone();
-            tokio::task::spawn_blocking(move || account_store.save_account(&profile_id, &snapshot))
-                .await
-                .map_err(|error| ServerError::StorageTask(error.to_string()))??;
+            tokio::task::spawn_blocking(move || {
+                account_store.save_legacy_account(&profile_id, &snapshot)
+            })
+            .await
+            .map_err(|error| ServerError::StorageTask(error.to_string()))??;
         }
     }
     let mut responses = Vec::new();
