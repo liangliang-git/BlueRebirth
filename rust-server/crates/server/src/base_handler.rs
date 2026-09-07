@@ -377,12 +377,14 @@ pub(super) fn handle_typed(
         }
         "guide.Setting" => {
             let mut payload = Vec::new();
-            for nested in decode_repeated_message_field(request_args, 1) {
-                let Some(key) = decode_string_field(&nested, 1).filter(|key| !key.is_empty())
-                else {
-                    continue;
-                };
-                let value = decode_string_field(&nested, 2).unwrap_or_default();
+            let Ok(request) = GuideSettingRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "guide setting request is invalid",
+                ));
+            };
+            for entry in request.entries {
+                let key = entry.key;
+                let value = entry.value;
                 account.guide.settings.insert(key.clone(), value.clone());
                 let mut setting = Vec::new();
                 append_bytes_field(&mut setting, 1, key.as_bytes());

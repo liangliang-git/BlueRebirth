@@ -924,7 +924,15 @@ pub(crate) mod legacy_test_handler {
                 }
             }
             "copyinfo.GetCopyInfo" => {
-                let copy_id = decode_varint_field(request_args, 1);
+                let copy_id = match CopyIdRequest::decode(request_args) {
+                    Ok(request) => request.copy_id,
+                    Err(_) => {
+                        *handler_error = Some(GameError::Internal(
+                            "copy info request is invalid".to_owned(),
+                        ));
+                        return Some(Vec::new());
+                    }
+                };
                 Some(CopyInfoCodec::encode_record_response(
                     &copy_info_response_from_account(
                         account.as_deref().unwrap_or(&Value::Null),
@@ -1086,8 +1094,17 @@ pub(crate) mod legacy_test_handler {
                     normalize_daily_copy_state(account, chapter_catalog, current_unix_seconds());
                 }
                 if method == "dailycopy.SelectEx" {
-                    let chapter_id = decode_varint_field(request_args, 1);
-                    let select_ex = decode_varint_u64_field(request_args, 2) != 0;
+                    let request = match DailyCopySelectExRequest::decode(request_args) {
+                        Ok(request) => request,
+                        Err(_) => {
+                            *handler_error = Some(GameError::Internal(
+                                "daily copy select request is invalid".to_owned(),
+                            ));
+                            return Some(Vec::new());
+                        }
+                    };
+                    let chapter_id = request.chapter_id;
+                    let select_ex = request.select_ex;
                     let known_chapter = chapter_catalog
                         .map(|catalog| {
                             catalog
@@ -1354,7 +1371,15 @@ pub(crate) mod legacy_test_handler {
                 // runs combat locally, so AttackBase is not guaranteed to reach
                 // the server. The active server session is the authoritative
                 // sortie context for settlement.
-                let requested_copy_id = decode_varint_field(request_args, 1);
+                let requested_copy_id = match CopyPassBaseRequest::decode(request_args) {
+                    Ok(request) => request.copy_id,
+                    Err(_) => {
+                        *handler_error = Some(GameError::Internal(
+                            "battle pass base request is invalid".to_owned(),
+                        ));
+                        return Some(Vec::new());
+                    }
+                };
                 let active_copy_id = account.as_deref().and_then(|account| {
                     account
                         .get("battleSession")
@@ -1405,6 +1430,7 @@ pub(crate) mod legacy_test_handler {
                         .flatten()
                         .filter_map(Value::as_u64)
                         .collect();
+                    let typed_battle_result = CopyPassRequest::decode(request_args).ok();
                     let battle_result = decode_battle_pass_result(request_args);
                     let battle_time = if battle_result.battle_time > 0 {
                         battle_result.battle_time
@@ -1431,9 +1457,9 @@ pub(crate) mod legacy_test_handler {
                     }
                     // TPassBaseArg.EnemyFleets is field 20. Field 17 is retained
                     // for older client settlement payloads.
-                    let has_fleet_result = !decode_repeated_message_field(request_args, 20)
-                        .is_empty()
-                        || !decode_repeated_message_field(request_args, 17).is_empty();
+                    let has_fleet_result = typed_battle_result
+                        .as_ref()
+                        .is_some_and(|request| !request.passed_fleet_ids.is_empty());
                     if has_fleet_result
                         && !validate_battle_fleet_pass(
                             account.get("battleSession").unwrap_or(&Value::Null),
@@ -1674,7 +1700,9 @@ pub(crate) mod legacy_test_handler {
                 Some(response_payload)
             }
             "copy.GetRandomFactors" => Some(encode_random_factor_payload(
-                decode_varint_field(request_args, 1),
+                CopyIdRequest::decode(request_args)
+                    .map(|request| request.copy_id)
+                    .unwrap_or_default(),
                 battle_catalog,
             )),
             _ => None,

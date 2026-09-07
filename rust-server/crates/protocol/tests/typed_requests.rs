@@ -8,10 +8,11 @@ use blueoath_protocol::{
     BuildShipRewardRequest, ChangeNameRequest, ChangeWorldChannelRequest,
     ChristmasBuyBlindBoxRequest, ChristmasBuyItemRequest, CoopChangeChapterRequest,
     CoopCreateRoomRequest, CoopKickRequest, CoopMatchTypeRequest, CoopPasswordRequest,
-    CoopRoomHeroesRequest, CoopRoomIdRequest, CopyAttackRequest, CopyIdRequest, CopyPassRequest,
-    CopyRecordRequest, CopyRewardCountRequest, CopyStartRequest, DailyCopyEnterRequest,
-    DailyCopySelectExRequest, Decode, DiscussRequest, ExchangeRequest, FashionPurchaseRequest,
-    FoodComposeRequest, FriendSearchRequest, FriendTargetRequest, GetBarrageByIdRequest,
+    CoopRoomHeroesRequest, CoopRoomIdRequest, CopyAttackRequest, CopyIdRequest,
+    CopyPassBaseRequest, CopyPassRequest, CopyRecordRequest, CopyRewardCountRequest,
+    CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode, DiscussRequest,
+    ExchangeRequest, FashionPurchaseRequest, FoodComposeRequest, FriendSearchRequest,
+    FriendTargetRequest, GetBarrageByIdRequest, GuideSettingEntry, GuideSettingRequest,
     GuildActivityPresentRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildCreateRequest,
     GuildIdRequest, GuildListRequest, GuildModifyRequest, GuildOfferRequest, GuildSearchRequest,
     GuildTaskDonateRequest, GuildTaskIdRequest, GuildTaskMemberRequest, GuildWarBaseRequest,
@@ -692,6 +693,43 @@ fn decodes_typed_progression_requests() {
                 item_id: 3,
                 count: 4,
             }],
+        }
+    );
+}
+
+#[test]
+fn decodes_typed_battle_and_guide_requests() {
+    assert_eq!(
+        CopyPassBaseRequest::decode(&[]).unwrap(),
+        CopyPassBaseRequest { copy_id: 0 }
+    );
+    assert_eq!(
+        CopyPassBaseRequest::decode(&[0x08, 9]).unwrap(),
+        CopyPassBaseRequest { copy_id: 9 }
+    );
+    assert_eq!(
+        DailyCopySelectExRequest::decode(&[0x08, 2, 0x10, 1]).unwrap(),
+        DailyCopySelectExRequest {
+            chapter_id: 2,
+            select_ex: true,
+        }
+    );
+    assert_eq!(
+        GuideSettingRequest::decode(&[
+            0x0a, 6, 0x0a, 1, b'a', 0x12, 1, b'b', 0x0a, 6, 0x0a, 1, b'c', 0x12, 1, b'd',
+        ])
+        .unwrap(),
+        GuideSettingRequest {
+            entries: vec![
+                GuideSettingEntry {
+                    key: "a".to_owned(),
+                    value: "b".to_owned(),
+                },
+                GuideSettingEntry {
+                    key: "c".to_owned(),
+                    value: "d".to_owned(),
+                },
+            ],
         }
     );
 }

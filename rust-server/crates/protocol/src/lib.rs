@@ -212,6 +212,22 @@ impl Decode for CopyIdRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CopyPassBaseRequest {
+    pub copy_id: i32,
+}
+
+impl Decode for CopyPassBaseRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let copy_id = optional_i32(&fields, 1, "copy pass base has duplicate copy id")?;
+        if copy_id < 0 {
+            return Err(ProtocolError::Invalid("copy pass base copy id is invalid"));
+        }
+        Ok(Self { copy_id })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CopyTypeRequest {
     pub copy_type: i32,
@@ -1234,6 +1250,43 @@ impl Decode for FriendUpdateUserStateRequest {
 pub struct DailyCopySelectExRequest {
     pub chapter_id: i32,
     pub select_ex: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuideSettingEntry {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuideSettingRequest {
+    pub entries: Vec<GuideSettingEntry>,
+}
+
+impl Decode for GuideSettingRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let mut entries = Vec::new();
+        for nested in decode_repeated_message_fields(payload, 1)? {
+            let mut reader = PbReader::new(&nested);
+            let mut key = None;
+            let mut value = String::new();
+            while let Some((field, wire)) = reader.next_field()? {
+                if wire != 2 {
+                    reader.skip(wire)?;
+                    continue;
+                }
+                match field {
+                    1 => key = Some(reader.read_string()?),
+                    2 => value = reader.read_string()?,
+                    _ => reader.skip(wire)?,
+                }
+            }
+            if let Some(key) = key.filter(|key| !key.is_empty()) {
+                entries.push(GuideSettingEntry { key, value });
+            }
+        }
+        Ok(Self { entries })
+    }
 }
 
 impl Decode for DailyCopySelectExRequest {
