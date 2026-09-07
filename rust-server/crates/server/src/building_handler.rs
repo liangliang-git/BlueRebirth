@@ -168,6 +168,79 @@ pub(super) fn handle_typed_with_multipliers(
             );
             HandlerResult::Reply(Response::raw(method, encode_rewards_list(&rewards)))
         }
+        "build.BuildInfo" | "build.BuildsInfo" => HandlerResult::Reply(Response::raw(
+            method,
+            typed_construction_info_payload(account, now),
+        )),
+        "build.BuildingByFormula" => {
+            let Ok(request) = BuildFormulaRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "construction request is invalid",
+                ));
+            };
+            if !start_typed_construction(account, &request, now) {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "construction request cannot start",
+                ));
+            }
+            append_method_push(
+                pre_pushes,
+                "build.BuildsInfo",
+                typed_construction_info_payload(account, now),
+            );
+            append_method_push(
+                pre_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            HandlerResult::PushOnly
+        }
+        "build.BuildQuicklyFinish" => {
+            let Ok(request) = ConstructionIndexesRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "construction finish request is invalid",
+                ));
+            };
+            if !finish_typed_construction(account, &request, now) {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "construction quick-finish failed",
+                ));
+            }
+            append_method_push(
+                pre_pushes,
+                "build.BuildsInfo",
+                typed_construction_info_payload(account, now),
+            );
+            append_method_push(
+                pre_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            HandlerResult::PushOnly
+        }
+        "build.BuildReceive" => {
+            let Ok(request) = ConstructionReceiveRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "construction receive request is invalid",
+                ));
+            };
+            let Some(rewards) = receive_typed_construction(account, &request, now) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "no completed construction",
+                ));
+            };
+            append_method_push(
+                pre_pushes,
+                "hero.UpdateHeroBagData",
+                HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "build.BuildsInfo",
+                typed_construction_info_payload(account, now),
+            );
+            HandlerResult::Reply(Response::raw(method, encode_rewards_list(&rewards)))
+        }
         "building.UpdateHeroAddition" => {
             append_typed_building_refresh(pre_pushes, account, now);
             HandlerResult::PushOnly
@@ -227,6 +300,284 @@ fn add_typed_building(
         .land_indices
         .insert(building_id, u32::try_from(land_index).ok()?);
     Some(building_id)
+}
+
+fn typed_project_payload(project: &blueoath_domain::ConstructionProjectState) -> Vec<u8> {
+    let mut output = Vec::new();
+    for (resource_id, count) in [(10029, project.steel), (10030, project.aluminium)] {
+        let mut item = Vec::new();
+        append_varint_field(&mut item, 1, resource_id);
+        append_varint_field(&mut item, 2, u64::from(count));
+        append_message_field(&mut output, 1, &item);
+    }
+    append_varint_field(&mut output, 2, u64::from(project.gold));
+    output
+}
+
+fn typed_construction_info_payload(account: &blueoath_domain::AccountState, now: u32) -> Vec<u8> {
+    let mut groups = [Vec::new(), Vec::new(), Vec::new()];
+    for job in &account.buildings.construction_jobs {
+        let completed = job.completed || job.end_at > 0 && job.end_at <= u64::from(now);
+        let mut formula = Vec::new();
+        append_varint_field(&mut formula, 1, job.end_at);
+        append_message_field(&mut formula, 2, &typed_project_payload(&job.project));
+        if completed {
+            append_varint_field(&mut formula, 3, job.template_id);
+        }
+        let group = if completed {
+            &mut groups[0]
+        } else if job.end_at > 0 {
+            &mut groups[1]
+        } else {
+            &mut groups[2]
+        };
+        group.push((job.sequence, formula));
+    }
+    let mut output = Vec::new();
+    for (index, field) in [(0usize, 1_u8), (1, 2), (2, 3)] {
+        groups[index].sort_by_key(|(sequence, _)| *sequence);
+        for (_, formula) in groups[index].drain(..) {
+            append_message_field(&mut output, field, &formula);
+        }
+    }
+    if let Some(project) = &account.buildings.last_project {
+        let mut last = Vec::new();
+        append_varint_field(&mut last, 1, 0);
+        append_message_field(&mut last, 2, &typed_project_payload(project));
+        append_message_field(&mut output, 4, &last);
+    }
+    output
+}
+
+fn typed_inventory_count(account: &blueoath_domain::AccountState, template_id: u64) -> u64 {
+    blueoath_domain::TemplateId::new(template_id)
+        .ok()
+        .and_then(|id| account.inventory.items.get(&id).copied())
+        .unwrap_or_default()
+}
+
+fn consume_typed_inventory(
+    account: &mut blueoath_domain::AccountState,
+    template_id: u64,
+    amount: u64,
+) -> bool {
+    let Some(template_id) = blueoath_domain::TemplateId::new(template_id).ok() else {
+        return false;
+    };
+    let Some(value) = account.inventory.items.get_mut(&template_id) else {
+        return false;
+    };
+    if *value < amount {
+        return false;
+    }
+    *value -= amount;
+    true
+}
+
+fn start_typed_construction(
+    account: &mut blueoath_domain::AccountState,
+    request: &BuildFormulaRequest,
+    now: u32,
+) -> bool {
+    if account.buildings.construction_jobs.len() + request.projects.len() > 10 {
+        return false;
+    }
+    let total_gold = request
+        .projects
+        .iter()
+        .map(|project| u64::try_from(project.gold).unwrap_or_default())
+        .sum::<u64>();
+    let total_steel = request
+        .projects
+        .iter()
+        .map(|project| u64::try_from(project.steel).unwrap_or_default())
+        .sum::<u64>();
+    let total_aluminium = request
+        .projects
+        .iter()
+        .map(|project| u64::try_from(project.aluminium).unwrap_or_default())
+        .sum::<u64>();
+    if account
+        .resources
+        .amount(blueoath_domain::CurrencyKind::Gold)
+        .get()
+        < total_gold
+        || typed_inventory_count(account, 10029) < total_steel
+        || typed_inventory_count(account, 10030) < total_aluminium
+    {
+        return false;
+    }
+    let active = account
+        .buildings
+        .construction_jobs
+        .iter()
+        .filter(|job| !job.completed && job.end_at > u64::from(now))
+        .count();
+    let mut sequence = account
+        .buildings
+        .construction_jobs
+        .iter()
+        .map(|job| job.sequence)
+        .max()
+        .unwrap_or_default()
+        .saturating_add(1);
+    let mut jobs = Vec::with_capacity(request.projects.len());
+    for (offset, project) in request.projects.iter().enumerate() {
+        let template_id = select_construction_template(
+            i64::from(project.gold),
+            i64::from(project.steel),
+            i64::from(project.aluminium),
+        );
+        let duration_seconds = construction_duration_seconds(template_id);
+        let end_at = if active + offset < 2 {
+            u64::from(now).saturating_add(u64::try_from(duration_seconds).unwrap_or_default())
+        } else {
+            0
+        };
+        jobs.push(blueoath_domain::ConstructionJobState {
+            sequence,
+            template_id: u64::try_from(template_id).unwrap_or_default(),
+            duration_seconds: u32::try_from(duration_seconds).unwrap_or_default(),
+            end_at,
+            completed: false,
+            project: blueoath_domain::ConstructionProjectState {
+                gold: u32::try_from(project.gold).unwrap_or_default(),
+                steel: u32::try_from(project.steel).unwrap_or_default(),
+                aluminium: u32::try_from(project.aluminium).unwrap_or_default(),
+            },
+        });
+        sequence = sequence.saturating_add(1);
+    }
+    if account
+        .resources
+        .debit(blueoath_domain::CurrencyKind::Gold, total_gold)
+        .is_err()
+        || !consume_typed_inventory(account, 10029, total_steel)
+        || !consume_typed_inventory(account, 10030, total_aluminium)
+    {
+        return false;
+    }
+    account.buildings.last_project = jobs.last().map(|job| job.project.clone());
+    account.buildings.construction_jobs.extend(jobs);
+    true
+}
+
+fn finish_typed_construction(
+    account: &mut blueoath_domain::AccountState,
+    request: &ConstructionIndexesRequest,
+    now: u32,
+) -> bool {
+    let mut indexes = request.indexes.clone();
+    indexes.sort_unstable();
+    indexes.dedup();
+    if typed_inventory_count(account, 10031) < indexes.len() as u64 {
+        return false;
+    }
+    let active = account
+        .buildings
+        .construction_jobs
+        .iter()
+        .filter(|job| !job.completed && job.end_at > u64::from(now))
+        .collect::<Vec<_>>();
+    let selected = indexes
+        .iter()
+        .filter_map(|index| usize::try_from(index.saturating_sub(1)).ok())
+        .filter_map(|index| active.get(index).map(|job| job.sequence))
+        .collect::<Vec<_>>();
+    if selected.len() != indexes.len() {
+        return false;
+    }
+    if !consume_typed_inventory(account, 10031, indexes.len() as u64) {
+        return false;
+    }
+    for job in &mut account.buildings.construction_jobs {
+        if selected.contains(&job.sequence) {
+            job.completed = true;
+            job.end_at = u64::from(now);
+        }
+    }
+    true
+}
+
+fn receive_typed_construction(
+    account: &mut blueoath_domain::AccountState,
+    request: &ConstructionReceiveRequest,
+    now: u32,
+) -> Option<Vec<ShopReward>> {
+    let completed = account
+        .buildings
+        .construction_jobs
+        .iter()
+        .filter(|job| job.completed || job.end_at > 0 && job.end_at <= u64::from(now))
+        .cloned()
+        .collect::<Vec<_>>();
+    if completed.is_empty() {
+        return None;
+    }
+    let mut indexes = if request.indexes.is_empty() {
+        vec![1]
+    } else {
+        request.indexes.clone()
+    };
+    indexes.sort_unstable();
+    indexes.dedup();
+    if account.dock.heroes.len().saturating_add(indexes.len()) > 200 {
+        return None;
+    }
+    let selected = indexes
+        .iter()
+        .filter_map(|index| usize::try_from(index.saturating_sub(1)).ok())
+        .filter_map(|index| completed.get(index))
+        .cloned()
+        .collect::<Vec<_>>();
+    if selected.len() != indexes.len() {
+        return None;
+    }
+    let selected_sequences = selected
+        .iter()
+        .map(|job| job.sequence)
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut next_hero_id = account
+        .dock
+        .heroes
+        .keys()
+        .map(|id| id.get())
+        .max()
+        .unwrap_or_default()
+        .saturating_add(1);
+    let mut rewards = Vec::with_capacity(selected.len());
+    for job in &selected {
+        let hero_id = blueoath_domain::HeroId::new(next_hero_id).ok()?;
+        let template_id = blueoath_domain::TemplateId::new(job.template_id).ok()?;
+        account.dock.heroes.insert(
+            hero_id,
+            blueoath_domain::HeroState {
+                id: hero_id,
+                template_id,
+                name: String::new(),
+                change_name_time: 0,
+                level: 1,
+                exp: 0,
+                mood: 100,
+                affection: 500_000,
+                hp: 10_000_000_000,
+                locked: false,
+                equip_slots: vec![None; 6],
+            },
+        );
+        rewards.push(ShopReward {
+            goods_type: 3,
+            item_id: i32::try_from(job.template_id).ok()?,
+            num: 1,
+            instance_id: i32::try_from(next_hero_id).ok()?,
+        });
+        next_hero_id = next_hero_id.saturating_add(1);
+    }
+    account
+        .buildings
+        .construction_jobs
+        .retain(|job| !selected_sequences.contains(&job.sequence));
+    Some(rewards)
 }
 
 fn change_typed_building_level(

@@ -275,6 +275,10 @@ pub struct BuildingState {
     pub hero_assignments: BTreeMap<u64, Vec<HeroId>>,
     #[serde(default)]
     pub productions: BTreeMap<u64, BuildingProductionState>,
+    #[serde(default)]
+    pub construction_jobs: Vec<ConstructionJobState>,
+    #[serde(default)]
+    pub last_project: Option<ConstructionProjectState>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -287,6 +291,23 @@ pub struct BuildingProductionState {
     pub recipe_time: u32,
     pub productivity: u32,
     pub produce_speed: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConstructionProjectState {
+    pub gold: u32,
+    pub steel: u32,
+    pub aluminium: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConstructionJobState {
+    pub sequence: u64,
+    pub template_id: u64,
+    pub duration_seconds: u32,
+    pub end_at: u64,
+    pub completed: bool,
+    pub project: ConstructionProjectState,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -449,6 +470,15 @@ impl AccountState {
             return Err(DomainError::InvalidState(
                 "building production references missing building",
             ));
+        }
+        let mut construction_sequences = BTreeSet::new();
+        for job in &self.buildings.construction_jobs {
+            if job.sequence == 0
+                || job.template_id == 0
+                || !construction_sequences.insert(job.sequence)
+            {
+                return Err(DomainError::InvalidState("construction job is invalid"));
+            }
         }
         Ok(())
     }

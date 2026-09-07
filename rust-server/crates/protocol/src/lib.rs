@@ -256,6 +256,179 @@ impl Decode for BuildingProduceRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstructionProjectRequest {
+    pub gold: i32,
+    pub steel: i32,
+    pub aluminium: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildFormulaRequest {
+    pub projects: Vec<ConstructionProjectRequest>,
+}
+
+impl Decode for BuildFormulaRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let mut reader = PbReader::new(payload);
+        let mut projects = Vec::new();
+        while let Some((field, wire)) = reader.next_field()? {
+            if field != 1 || wire != 2 {
+                reader.skip(wire)?;
+                continue;
+            }
+            if projects.len() >= 10 {
+                return Err(ProtocolError::Invalid(
+                    "construction request has too many projects",
+                ));
+            }
+            let project = decode_construction_project(reader.read_bytes()?)?;
+            projects.push(project);
+        }
+        if projects.is_empty() {
+            return Err(ProtocolError::Invalid(
+                "construction request has no projects",
+            ));
+        }
+        Ok(Self { projects })
+    }
+}
+
+fn decode_construction_project(
+    payload: &[u8],
+) -> Result<ConstructionProjectRequest, ProtocolError> {
+    let mut reader = PbReader::new(payload);
+    let mut gold = None;
+    let mut materials = Vec::new();
+    while let Some((field, wire)) = reader.next_field()? {
+        match (field, wire) {
+            (1, 2) => {
+                if materials.len() >= 2 {
+                    return Err(ProtocolError::Invalid(
+                        "construction project has duplicate material",
+                    ));
+                }
+                let fields = decode_varint_fields(reader.read_bytes()?)?;
+                materials.push((
+                    required_field(&fields, 1, "construction material is missing id")?,
+                    required_field(&fields, 2, "construction material is missing count")?,
+                ));
+            }
+            (2, 0) => {
+                if gold.is_some() {
+                    return Err(ProtocolError::Invalid(
+                        "construction project has duplicate gold",
+                    ));
+                }
+                gold = Some(to_i32(
+                    reader.read_varint()?,
+                    "construction gold is out of range",
+                )?);
+            }
+            (_, wire) => reader.skip(wire)?,
+        }
+    }
+    let gold = gold.ok_or(ProtocolError::Invalid(
+        "construction project is missing gold",
+    ))?;
+    let mut steel = None;
+    let mut aluminium = None;
+    for (resource_id, count) in materials {
+        if !(30..=999).contains(&count) {
+            return Err(ProtocolError::Invalid(
+                "construction material count is invalid",
+            ));
+        }
+        match resource_id {
+            10029 if steel.is_none() => steel = Some(count),
+            10030 if aluminium.is_none() => aluminium = Some(count),
+            _ => {
+                return Err(ProtocolError::Invalid(
+                    "construction material id is invalid",
+                ))
+            }
+        }
+    }
+    if !(30..=999).contains(&gold) || steel.is_none() || aluminium.is_none() {
+        return Err(ProtocolError::Invalid("construction project is invalid"));
+    }
+    Ok(ConstructionProjectRequest {
+        gold,
+        steel: steel.unwrap_or_default(),
+        aluminium: aluminium.unwrap_or_default(),
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstructionIndexesRequest {
+    pub indexes: Vec<i32>,
+}
+
+impl Decode for ConstructionIndexesRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let mut reader = PbReader::new(payload);
+        let mut indexes = Vec::new();
+        while let Some((field, wire)) = reader.next_field()? {
+            match (field, wire) {
+                (1, 0) => indexes.push(to_i32(
+                    reader.read_varint()?,
+                    "construction index is out of range",
+                )?),
+                (1, 2) => {
+                    let mut packed = PbReader::new(reader.read_bytes()?);
+                    while packed.offset < packed.data.len() {
+                        let value = packed.read_varint()?;
+                        indexes.push(to_i32(value, "construction index is out of range")?);
+                    }
+                }
+                (_, wire) => reader.skip(wire)?,
+            }
+        }
+        if indexes.is_empty() || indexes.len() > 99 || indexes.iter().any(|index| *index <= 0) {
+            return Err(ProtocolError::Invalid(
+                "construction indexes request is invalid",
+            ));
+        }
+        Ok(Self { indexes })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstructionReceiveRequest {
+    pub indexes: Vec<i32>,
+}
+
+impl Decode for ConstructionReceiveRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let mut reader = PbReader::new(payload);
+        let mut indexes = Vec::new();
+        while let Some((field, wire)) = reader.next_field()? {
+            match (field, wire) {
+                (1, 0) => indexes.push(to_i32(
+                    reader.read_varint()?,
+                    "construction index is out of range",
+                )?),
+                (1, 2) => {
+                    let mut packed = PbReader::new(reader.read_bytes()?);
+                    while packed.offset < packed.data.len() {
+                        indexes.push(to_i32(
+                            packed.read_varint()?,
+                            "construction index is out of range",
+                        )?);
+                    }
+                }
+                (_, wire) => reader.skip(wire)?,
+            }
+        }
+        if indexes.len() > 99 || indexes.iter().any(|index| *index <= 0) {
+            return Err(ProtocolError::Invalid(
+                "construction receive request is invalid",
+            ));
+        }
+        Ok(Self { indexes })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeroLockRequest {
     pub hero_id: u64,
     pub locked: bool,

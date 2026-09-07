@@ -479,6 +479,86 @@ fn typed_building_production_persists_and_collects_typed_reward() {
 }
 
 #[test]
+fn typed_construction_queue_starts_and_quick_finishes() {
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("typed-construction").unwrap(), "Base");
+    account
+        .resources
+        .credit(blueoath_domain::CurrencyKind::Gold, 2_000)
+        .unwrap();
+    for template_id in [10029, 10030, 10031] {
+        account
+            .inventory
+            .items
+            .insert(TemplateId::new(template_id).unwrap(), 100);
+    }
+    let mut project = Vec::new();
+    let mut steel = Vec::new();
+    append_varint_field(&mut steel, 1, 10029);
+    append_varint_field(&mut steel, 2, 30);
+    append_message_field(&mut project, 1, &steel);
+    let mut aluminium = Vec::new();
+    append_varint_field(&mut aluminium, 1, 10030);
+    append_varint_field(&mut aluminium, 2, 30);
+    append_message_field(&mut project, 1, &aluminium);
+    append_varint_field(&mut project, 2, 30);
+    let mut args = Vec::new();
+    append_message_field(&mut args, 1, &project);
+    let mut pushes = Vec::new();
+    let result = super::handle_typed_building(
+        &mut account,
+        "build.BuildingByFormula",
+        &args,
+        100,
+        &mut pushes,
+        None,
+    );
+    assert!(matches!(
+        result,
+        super::common::response::HandlerResult::PushOnly
+    ));
+    assert_eq!(account.buildings.construction_jobs.len(), 1);
+    assert_eq!(
+        account.inventory.items[&TemplateId::new(10029).unwrap()],
+        70
+    );
+
+    let mut finish_args = Vec::new();
+    append_varint_field(&mut finish_args, 1, 1);
+    let result = super::handle_typed_building(
+        &mut account,
+        "build.BuildQuicklyFinish",
+        &finish_args,
+        101,
+        &mut pushes,
+        None,
+    );
+    assert!(matches!(
+        result,
+        super::common::response::HandlerResult::PushOnly
+    ));
+    assert!(account.buildings.construction_jobs[0].completed);
+    assert_eq!(
+        account.inventory.items[&TemplateId::new(10031).unwrap()],
+        99
+    );
+    let result = super::handle_typed_building(
+        &mut account,
+        "build.BuildReceive",
+        &[],
+        102,
+        &mut pushes,
+        None,
+    );
+    assert!(matches!(
+        result,
+        super::common::response::HandlerResult::Reply(_)
+    ));
+    assert!(account.buildings.construction_jobs.is_empty());
+    assert_eq!(account.dock.heroes.len(), 2);
+}
+
+#[test]
 fn typed_daily_copy_projection_resets_stale_challenge_counts() {
     let mut account = NewAccountFactory::create(ProfileId::new("typed-daily").unwrap(), "Daily");
     account.daily_copy.reset_day = 0;

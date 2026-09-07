@@ -1,7 +1,8 @@
 use blueoath_domain::{
     AccountRepository, AccountState, ChapterId, CharacterState, ChatBarrageState, ChatMessageState,
-    CopyId, CurrencyKind, EquipId, EquipmentState, FleetId, FleetRecord, HeroId, HeroState,
-    NewAccountFactory, PresetFleetState, ProfileId, ProfileState, RepositoryError, TemplateId,
+    ConstructionJobState, ConstructionProjectState, CopyId, CurrencyKind, EquipId, EquipmentState,
+    FleetId, FleetRecord, HeroId, HeroState, NewAccountFactory, PresetFleetState, ProfileId,
+    ProfileState, RepositoryError, TemplateId,
 };
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -702,6 +703,61 @@ impl ProfileStore {
             }
             members[position] = hero_id;
         }
+        let mut statement = connection.prepare(
+            "SELECT job_id, building_id, started_at, finish_at, state,
+                    duration_seconds, project_gold, project_steel, project_aluminium, completed
+             FROM construction_jobs WHERE profile_id = ?1 ORDER BY job_id",
+        )?;
+        let jobs = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, i64>(9)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (
+            sequence,
+            template_id,
+            _started_at,
+            finish_at,
+            state,
+            duration_seconds,
+            project_gold,
+            project_steel,
+            project_aluminium,
+            completed,
+        ) in jobs
+        {
+            account
+                .buildings
+                .construction_jobs
+                .push(ConstructionJobState {
+                    sequence: positive_u64(sequence, "construction sequence")?,
+                    template_id: positive_u64(template_id, "construction template id")?,
+                    duration_seconds: non_negative_u32(duration_seconds, "construction duration")?,
+                    end_at: non_negative_u64(finish_at, "construction finish time")?,
+                    completed: completed != 0 || state == "completed",
+                    project: ConstructionProjectState {
+                        gold: non_negative_u32(project_gold, "construction gold")?,
+                        steel: non_negative_u32(project_steel, "construction steel")?,
+                        aluminium: non_negative_u32(project_aluminium, "construction aluminium")?,
+                    },
+                });
+        }
+        account.buildings.last_project = account
+            .buildings
+            .construction_jobs
+            .last()
+            .map(|job| job.project.clone());
 
         if let Some((chapter_value, copy_value, current_fleet, started_at, expires_at, revision)) =
             connection
@@ -1278,6 +1334,33 @@ impl ProfileStore {
                     ],
                 )?;
             }
+        }
+        for job in &account.buildings.construction_jobs {
+            transaction.execute(
+                "INSERT INTO construction_jobs(
+                    profile_id, job_id, building_id, started_at, finish_at, state,
+                    duration_seconds, project_gold, project_steel, project_aluminium, completed
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(job.sequence, "construction sequence")?,
+                    typed_i64(job.template_id, "construction template id")?,
+                    0_i64,
+                    typed_i64(job.end_at, "construction finish time")?,
+                    if job.completed {
+                        "completed"
+                    } else if job.end_at == 0 {
+                        "waiting"
+                    } else {
+                        "active"
+                    },
+                    typed_i64(job.duration_seconds, "construction duration")?,
+                    typed_i64(job.project.gold, "construction gold")?,
+                    typed_i64(job.project.steel, "construction steel")?,
+                    typed_i64(job.project.aluminium, "construction aluminium")?,
+                    i64::from(job.completed),
+                ],
+            )?;
         }
         if let Some(session) = &account.battle.active {
             transaction.execute(
@@ -2117,6 +2200,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0012_building_hero_assignments.sql"),
     include_str!("../../../migrations/0013_hero_names.sql"),
     include_str!("../../../migrations/0014_building_production.sql"),
+    include_str!("../../../migrations/0015_construction_typed_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {
