@@ -7,12 +7,30 @@ use serde_json::{json, Value};
 
 use super::battle_state::{battle_copy_passed, record_battle_pass};
 use super::catalog::GameLoginCatalogs;
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 const HP_COEFFICIENT: i64 = 10_000_000_000;
 const OATH_RING_TEMPLATE: i32 = 10_180;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
+    context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    let payload = handle_legacy(context, method, request_args);
+    if *context.response_err != 0 {
+        HandlerResult::Error(GameError::Internal(context.response_err_msg.clone()))
+    } else {
+        match payload {
+            Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
+            None => HandlerResult::Empty,
+        }
+    }
+}
+
+fn handle_legacy<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],

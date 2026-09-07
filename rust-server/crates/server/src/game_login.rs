@@ -222,7 +222,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            compat_feature::handle(&mut context, request.method.as_str(), request_args)
+            let result =
+                compat_feature::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::Hero) => {
             let mut context = GameLoginRequestContext {
