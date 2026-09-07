@@ -13,6 +13,7 @@
 - [server/game_login.rs](../rust-server/crates/server/src/game_login.rs) 负责大量路由、上下文构造和响应拼装。
 - 业务 Handler 普遍接收 `&[u8]`，直接读取数字字段，再返回 `Option<Vec<u8>>`。
 - 账号状态大量使用 `serde_json::Value`，字段名、数组结构、默认值分散在各 Handler。
+- [storage/lib.rs](../rust-server/crates/storage/src/lib.rs) 当前使用 SQLite `profiles`、`accounts` 两张 JSON 大表，并保留 C# 存档兼容语义。
 - `legacy_handler.rs` 仍承载大量跨领域接口，需在迁移完成后删除。
 
 ## 目标架构
@@ -186,11 +187,135 @@ pub struct AccountState {
 
 允许删除旧存档兼容代码：
 
-- 新数据库 schema 直接对应 `AccountState`。
-- storage 提供 `load_account`、`save_account`、`update_account`。
-- 服务层以命令方式修改状态，不允许 Handler 任意写 JSON 字段。
-- 保存采用单次事务，避免部分模块更新成功、部分失败。
+- 删除 `profiles`/`accounts` JSON 大字段表和 C# 兼容读写路径。
+- 新数据库 schema 直接对应 `AccountState`，不保留 `account_json` catch-all。
+- storage 提供 `load_account`、`save_account`、`transact_account`。
+- 服务层以命令方式修改状态，不允许 Handler 任意写数据库字段。
+- 保存采用单次 SQLite 事务，避免部分模块更新成功、部分失败。
 - 每次保存前执行领域不变量校验。
+
+### 新 SQLite 数据库
+
+数据库改造与领域模型同一阶段完成。当前数据库可直接删除重建，不执行旧数据转换。
+
+基础表：
+
+```text
+schema_meta
+  version, applied_at
+
+profiles
+  profile_id PK, name, created_at, updated_at, revision
+
+characters
+  profile_id PK/FK, uid, level, exp, secretary_id, head, head_frame,
+  gold, diamond, supply, pve_pt, all currency/stat fields
+
+heroes
+  profile_id FK, hero_id, template_id, level, exp, mood, affection,
+  hp, fashioning, lock_state, advance, remould_level, created_at,
+  PRIMARY KEY(profile_id, hero_id)
+
+equipments
+  profile_id FK, equip_id, template_id, enhance_level, star, enhance_exp,
+  hero_id, PRIMARY KEY(profile_id, equip_id)
+
+hero_equip_slots
+  profile_id, hero_id, slot_index, equip_id,
+  PRIMARY KEY(profile_id, hero_id, slot_index)
+
+fleets / fleet_tactics / fleet_members
+  编队、战术、阵型、成员关系分表
+
+inventory
+  profile_id, template_id, amount, PRIMARY KEY(profile_id, template_id)
+
+sea_progress / copy_progress / copy_records
+  海域、普通副本、节点通关、星级、奖励状态
+
+daily_copy_progress
+  profile_id, reset_day, chapter_id, group_id, challenge_times,
+  success_times, select_ex, extra_group
+
+tasks / task_claims
+  任务状态、每日/每周重置、领取记录
+
+buildings / building_lands / construction_jobs
+  建筑、土地、生产和建造队列
+
+tower_progress / sweep_jobs / study_progress
+  塔、扫荡、学习进度
+
+battle_sessions
+  profile_id PK, chapter_id, copy_id, current_fleet, state,
+  started_at, expires_at, revision
+
+friend_relations / friend_requests
+  好友、黑名单、申请、申请记录
+
+chat_messages
+  聊天消息；按时间和容量清理，不无限增长
+
+activity_progress
+  profile_id, activity_id, progress_kind, value, updated_at
+  仅作为活动公共索引；复杂活动使用独立 typed 表
+```
+
+数据库约束：
+
+- 所有业务表带 `profile_id` 外键和级联删除。
+- 资源、数量、等级使用 `CHECK >= 0` 和上限检查。
+- 账号内 ID 使用复合主键，避免不同账号串数据。
+- 领取、好友关系、装备槽、战斗会话添加唯一约束，天然支持幂等。
+- `battle_sessions`、`construction_jobs`、`daily_copy_progress`、`tasks` 建组合索引。
+- SQLite 启用 `foreign_keys=ON`、WAL、busy timeout。
+- 所有写操作使用参数绑定，禁止拼接 SQL。
+- 单账号更新使用 `BEGIN IMMEDIATE` 或 revision 乐观锁，防止并发覆盖。
+
+Storage API：
+
+```rust
+pub trait AccountRepository {
+    fn load(&self, profile_id: ProfileId) -> Result<Option<AccountState>, StorageError>;
+    fn create(&self, account: &AccountState) -> Result<(), StorageError>;
+    fn transact<F, T>(&self, id: ProfileId, f: F) -> Result<T, StorageError>
+    where
+        F: FnOnce(&mut AccountState) -> Result<T, GameError>;
+}
+```
+
+事务流程：
+
+```text
+load typed rows
+  → domain command
+  → validate invariants
+  → write changed aggregates
+  → write audit/claim rows
+  → commit
+  → encode response/push
+```
+
+禁止在 Handler 内部执行多次独立 `save`；禁止先发奖励推送再提交数据库。
+
+### 数据库迁移
+
+```text
+rust-server/migrations/
+  0001_schema_meta.sql
+  0002_profiles_characters.sql
+  0003_dock_fleet_inventory.sql
+  0004_progress_tasks.sql
+  0005_building_battle_social.sql
+  0006_constraints_indexes.sql
+```
+
+- 每次 schema 变化独立迁移，已执行迁移不可编辑。
+- DDL 与数据回填分开；本项目首次新库不做旧数据回填。
+- 启动时执行迁移并记录版本；版本不一致直接拒绝服务启动。
+- 开发环境提供明确 `reset-db` 命令，删除指定数据库后从零建库。
+- 测试每个迁移在空库、重复执行、约束失败、事务回滚场景通过。
+- 发布前备份旧数据库；切换后旧库仅作为人工回溯文件，不再由服务读取。
 
 ## 文件与模块分类
 
@@ -355,6 +480,7 @@ property/fuzz tests  protobuf 解码、边界值、随机战斗结果
 - 保留当前已推送前源码快照。
 - 记录全量测试、Clippy、格式化结果。
 - 建立协议方法清单、字段编号清单、账号字段清单。
+- 建立当前 JSON 字段到新表/列的设计清单；不设计旧存档兼容读取。
 - 禁止新代码继续增加 `legacy_handler` 和裸 `Value` 写入。
 
 ### Phase 1：基础公共层
@@ -374,7 +500,7 @@ property/fuzz tests  protobuf 解码、边界值、随机战斗结果
 - 先迁移 `character`、`dock`、`equip`、`fleet`。
 - 再迁移 `seaProgress`、`dailyCopy`、`tasks`、`tower`。
 - 最后迁移建筑、社交、活动状态。
-- 删除旧存档兼容分支，重建数据库。
+- 删除旧存档兼容分支；按 `migrations/` 建立新数据库。
 
 ### Phase 4：核心服务
 
@@ -396,8 +522,9 @@ property/fuzz tests  protobuf 解码、边界值、随机战斗结果
 
 ### Phase 7：存储与并发
 
-- 新 `AccountRepository` 和事务接口。
-- 账号状态原子更新。
+- 新 SQLite schema、迁移执行器、`AccountRepository` 和事务接口。
+- 账号状态原子更新，资源/奖励/领取记录同事务提交。
+- 加入外键、唯一键、非负约束、索引和 revision 并发控制。
 - 保存失败回滚，增加崩溃恢复测试。
 
 ### Phase 8：活动与社交
