@@ -103,6 +103,7 @@ pub struct CopyStartRequest {
     pub ex_buffs: Vec<i32>,
     pub match_type: i32,
     pub is_pve_pt_mode: bool,
+    pub hero_groups: Vec<Vec<i32>>,
 }
 
 impl Decode for CopyStartRequest {
@@ -144,6 +145,100 @@ impl Decode for CopyStartRequest {
             match_type: optional_i32(&fields, 15, "copy start request has duplicate match type")?,
             is_pve_pt_mode: optional_i32(&fields, 17, "copy start request has duplicate pve mode")?
                 != 0,
+            hero_groups: decode_repeated_message_fields(payload, 13)?
+                .into_iter()
+                .map(|nested| {
+                    decode_varint_fields(&nested).map(|fields| {
+                        fields
+                            .get(&1)
+                            .into_iter()
+                            .flatten()
+                            .map(|value| *value as i32)
+                            .collect()
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MopUpRequest {
+    pub fleet_id: u64,
+    pub copy_id: u64,
+    pub sweep_count: u64,
+}
+
+impl Decode for MopUpRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let mut nested_payload = None;
+        let mut reader = PbReader::new(payload);
+        while let Some((field, wire)) = reader.next_field()? {
+            if field == 1 && wire == 2 {
+                nested_payload = Some(reader.read_bytes()?.to_vec());
+            } else {
+                reader.skip(wire)?;
+            }
+        }
+        let fields = decode_varint_fields(nested_payload.as_deref().unwrap_or(payload))?;
+        Ok(Self {
+            fleet_id: optional_u64(&fields, 1, "sweep request has duplicate fleet id")?,
+            copy_id: optional_u64(&fields, 2, "sweep request has duplicate copy id")?,
+            sweep_count: optional_u64(&fields, 3, "sweep request has duplicate count")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildingSetHeroListRequest {
+    pub building_ids: Vec<i32>,
+    pub hero_ids: Vec<i32>,
+}
+
+impl Decode for BuildingSetHeroListRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            building_ids: fields
+                .get(&1)
+                .into_iter()
+                .flatten()
+                .map(|value| *value as i32)
+                .collect(),
+            hero_ids: fields
+                .get(&2)
+                .into_iter()
+                .flatten()
+                .map(|value| *value as i32)
+                .collect(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TalentIdRequest {
+    pub talent_id: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MailIdRequest {
+    pub mail_id: u64,
+}
+
+impl Decode for MailIdRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            mail_id: optional_u64(&fields, 1, "mail request has duplicate id")?,
+        })
+    }
+}
+
+impl Decode for TalentIdRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            talent_id: optional_i32(&fields, 1, "talent request has duplicate id")?,
         })
     }
 }

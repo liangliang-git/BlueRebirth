@@ -391,55 +391,6 @@ pub(super) fn decode_repeated_varint_field(payload: &[u8], wanted_field: u8) -> 
     values
 }
 
-pub(super) fn decode_repeated_i32_field(payload: &[u8], wanted_field: u8) -> Vec<i32> {
-    let mut values = Vec::new();
-    let mut index = 0;
-    while index < payload.len() {
-        let Ok((key, next)) = read_varint(payload, index) else {
-            break;
-        };
-        index = next;
-        let field = (key >> 3) as u8;
-        let wire = key & 7;
-        match wire {
-            0 => {
-                let Ok((value, next)) = read_varint(payload, index) else {
-                    break;
-                };
-                index = next;
-                if field == wanted_field {
-                    values.push(value as i32);
-                }
-            }
-            1 => index = index.saturating_add(8),
-            2 => {
-                let Ok((len, next)) = read_varint(payload, index) else {
-                    break;
-                };
-                let start = next;
-                let end = start.saturating_add(len as usize);
-                if end > payload.len() {
-                    break;
-                }
-                if field == wanted_field {
-                    let mut packed = start;
-                    while packed < end {
-                        let Ok((value, next)) = read_varint(payload, packed) else {
-                            break;
-                        };
-                        values.push(value as i32);
-                        packed = next;
-                    }
-                }
-                index = end;
-            }
-            5 => index = index.saturating_add(4),
-            _ => break,
-        }
-    }
-    values
-}
-
 pub(super) fn decode_repeated_message_field(payload: &[u8], wanted_field: u8) -> Vec<Vec<u8>> {
     let mut values = Vec::new();
     let mut index = 0;

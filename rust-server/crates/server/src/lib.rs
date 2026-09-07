@@ -10,9 +10,10 @@ use std::time::Instant;
 #[cfg(test)]
 pub(crate) use blueoath_protocol::EquipNum;
 use blueoath_protocol::{
-    BagInfoCodec, ClientGameWireCodec, EquipListCodec, FashionInfo, FashionList, FashionListCodec,
-    HeroBag, HeroBagCodec, HeroGrid, MedalAcquiredTime, TMessageCodec, TResponse, TRetLogin,
-    UserInfo, UserInfoCodec,
+    BagInfoCodec, BuildingSetHeroListRequest, ClientGameWireCodec, CopyStartRequest, Decode,
+    EquipListCodec, FashionInfo, FashionList, FashionListCodec, HeroBag, HeroBagCodec, HeroGrid,
+    MailIdRequest, MedalAcquiredTime, MopUpRequest, TMessageCodec, TResponse, TRetLogin,
+    TalentIdRequest, UserInfo, UserInfoCodec,
 };
 use blueoath_storage::StorageError;
 use blueoath_transport::{

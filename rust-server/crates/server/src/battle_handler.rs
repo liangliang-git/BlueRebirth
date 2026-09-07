@@ -152,7 +152,8 @@ pub(super) fn handle_typed_with_catalog(
             };
             let fleet_id = *fleet_id;
             let fleet_members = fleet.members.clone();
-            let hero_ids = decode_start_hero_groups(request_args)
+            let hero_ids = request
+                .hero_groups
                 .first()
                 .cloned()
                 .filter(|ids| !ids.is_empty())
@@ -219,7 +220,7 @@ pub(super) fn handle_typed_with_catalog(
                 battle_start_payload_from_typed_account(
                     account,
                     request.copy_id,
-                    &decode_start_hero_groups(request_args),
+                    &request.hero_groups,
                     battle_catalog,
                     SHIP_STAT_CATALOG.get(),
                     ship_stat_multiplier,
@@ -615,7 +616,11 @@ pub(super) fn handle_typed_mop_up(
             HandlerResult::Reply(Response::raw(method, vec![0x08, (active == 0) as u8]))
         }
         "mopUp.StopSweep" => {
-            let (fleet_id, copy_id, _) = decode_mop_up_arg(request_args);
+            let Ok(request) = MopUpRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest("sweep request is invalid"));
+            };
+            let fleet_id = request.fleet_id;
+            let copy_id = request.copy_id;
             account.sweep.entries.retain(|entry| {
                 (fleet_id != 0 && entry.fleet_id != fleet_id)
                     || (copy_id != 0 && entry.copy_id != copy_id)
@@ -625,7 +630,12 @@ pub(super) fn handle_typed_mop_up(
             HandlerResult::Reply(Response::raw(method, payload))
         }
         "mopUp.StartSweep" => {
-            let (fleet_id, copy_id, sweep_count) = decode_mop_up_arg(request_args);
+            let Ok(request) = MopUpRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest("sweep request is invalid"));
+            };
+            let fleet_id = request.fleet_id;
+            let copy_id = request.copy_id;
+            let sweep_count = request.sweep_count;
             if fleet_id == 0
                 || copy_id == 0
                 || !(1..=99).contains(&sweep_count)

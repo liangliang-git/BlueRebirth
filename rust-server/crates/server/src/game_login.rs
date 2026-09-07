@@ -141,16 +141,13 @@ where
     let request_args = request.args.as_slice();
     if std::env::var_os("BLUEOATH_TRACE_METHODS").is_some() {
         eprintln!(
-            "game-login method={} args={} hex={} f1={} f2={} f3={}",
+            "game-login method={} args={} hex={}",
             request.method,
             request_args.len(),
             request_args
                 .iter()
                 .map(|b| format!("{b:02x}"))
-                .collect::<String>(),
-            decode_varint_u64_field(request_args, 1),
-            decode_varint_u64_field(request_args, 2),
-            decode_varint_u64_field(request_args, 3)
+                .collect::<String>()
         );
     }
     let method = GameMethod::parse(&request.method);
@@ -956,7 +953,9 @@ where
         )),
         "mail.FetchItem" | "mail.FetchAllItems" => {
             let fetch_one = request.method == "mail.FetchItem";
-            let mid = decode_varint_u64_field(request_args, 1);
+            let mid = MailIdRequest::decode(request_args)
+                .map(|request| request.mail_id)
+                .unwrap_or_default();
             let mut rewards = Vec::new();
             if let Some(account) = account.as_deref_mut() {
                 for mail in mail_catalog.unwrap_or_default() {

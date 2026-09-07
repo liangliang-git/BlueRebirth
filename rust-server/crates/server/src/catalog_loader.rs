@@ -864,10 +864,6 @@ pub(super) fn talent_change_payload(target: (i32, Vec<i32>, i32)) -> Vec<u8> {
     out
 }
 
-pub(super) fn decode_talent_id(payload: &[u8]) -> i32 {
-    decode_varint_field(payload, 1)
-}
-
 pub(super) fn load_shop_catalog(client_path: Option<&PathBuf>) -> ShopCatalog {
     let Some(client_path) = client_path else {
         return ShopCatalog::default();

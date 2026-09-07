@@ -252,7 +252,12 @@ pub(super) fn handle_typed_with_multipliers(
                 };
                 vec![(request.building_id, request.hero_ids)]
             } else {
-                decode_building_assignments(request_args)
+                let Ok(request) = BuildingSetHeroListRequest::decode(request_args) else {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "building assignment request is invalid",
+                    ));
+                };
+                decode_building_assignments(&request)
             };
             if !set_typed_building_assignments(account, &assignments, building_catalog) {
                 return HandlerResult::Error(GameError::InvalidRequest(

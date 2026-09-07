@@ -15,10 +15,21 @@ pub(super) fn handle_typed(
         }
         "talentTree.GetTalentData" => reply(
             method,
-            talent_data_payload_typed(account, &catalog, decode_talent_id(request_args)),
+            talent_data_payload_typed(
+                account,
+                &catalog,
+                TalentIdRequest::decode(request_args)
+                    .map(|request| request.talent_id)
+                    .unwrap_or_default(),
+            ),
         ),
         "talentTree.UnLockTalent" | "talentTree.UpgradeTalent" => {
-            let talent_id = decode_talent_id(request_args);
+            let Ok(request) = TalentIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "talent request is invalid",
+                ));
+            };
+            let talent_id = request.talent_id;
             match apply_talent_change_typed(account, &catalog, talent_id) {
                 Ok(target) => append_method_push(
                     pre_pushes,

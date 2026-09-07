@@ -149,9 +149,11 @@ pub(super) fn bathroom_end_payload(hero_id: u64, bath_time: i64) -> Vec<u8> {
     output
 }
 
-pub(super) fn decode_building_assignments(payload: &[u8]) -> Vec<(i32, Vec<i32>)> {
-    let building_ids = decode_repeated_i32_field(payload, 1);
-    let hero_ids = decode_repeated_i32_field(payload, 2);
+pub(super) fn decode_building_assignments(
+    request: &BuildingSetHeroListRequest,
+) -> Vec<(i32, Vec<i32>)> {
+    let building_ids = &request.building_ids;
+    let hero_ids = &request.hero_ids;
     let mut assignments = Vec::new();
     let mut cursor = 0;
     for building_id in building_ids {
@@ -164,7 +166,7 @@ pub(super) fn decode_building_assignments(payload: &[u8]) -> Vec<(i32, Vec<i32>)
             return Vec::new();
         }
         cursor += 1;
-        assignments.push((building_id, assigned));
+        assignments.push((*building_id, assigned));
     }
     if cursor != hero_ids.len() {
         return Vec::new();
