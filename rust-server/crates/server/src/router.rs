@@ -80,7 +80,9 @@ pub enum MethodFamily {
 /// belong in one registry so the dispatcher does not duplicate wire strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KnownMethod {
+    GetServerTime,
     PlayerLogin,
+    PlayerGetUserInfo,
     PlayerGetUserList,
     PlayerCreateUser,
     UserGetUserInfo,
@@ -90,6 +92,16 @@ pub enum KnownMethod {
     BagGetInfo,
     PresetFleetInfo,
     PresetFleetSet,
+    CacheData,
+    ArchiveCopyIsLoad,
+    CopyExtraAddCopyRewardCount,
+    CopyExtraUpdateCopyExtraInfo,
+    SavePrefs,
+    GetStatCount,
+    Sign,
+    StartMiniGame,
+    StartAlchemy,
+    RepairHero,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,12 +135,14 @@ impl<'a> GameMethod<'a> {
     }
 
     pub fn is_known(self) -> bool {
-        self.family != MethodFamily::Unknown || KNOWN_EXACT_METHODS.contains(&self.name)
+        self.family != MethodFamily::Unknown || self.known().is_some()
     }
 
     pub fn known(self) -> Option<KnownMethod> {
         Some(match self.name {
+            "GetSvrTime" => KnownMethod::GetServerTime,
             "player.Login" => KnownMethod::PlayerLogin,
+            "player.GetUserInfo" => KnownMethod::PlayerGetUserInfo,
             "player.GetUserList" => KnownMethod::PlayerGetUserList,
             "player.CreateUser" => KnownMethod::PlayerCreateUser,
             "user.GetUserInfo" => KnownMethod::UserGetUserInfo,
@@ -138,6 +152,16 @@ impl<'a> GameMethod<'a> {
             "bag.GetBagInfo" => KnownMethod::BagGetInfo,
             "presetfleet.PresetFleetsInfo" => KnownMethod::PresetFleetInfo,
             "presetfleet.SetPresetFleets" => KnownMethod::PresetFleetSet,
+            "cachedata.CacheData" => KnownMethod::CacheData,
+            "archiveCopy.IsLoad" => KnownMethod::ArchiveCopyIsLoad,
+            "copyextra.AddCopyRewardCount" => KnownMethod::CopyExtraAddCopyRewardCount,
+            "copyextra.UpdateCopyExtraInfo" => KnownMethod::CopyExtraUpdateCopyExtraInfo,
+            "prefs.SavePrefs" => KnownMethod::SavePrefs,
+            "statcount.GetStatCount" => KnownMethod::GetStatCount,
+            "sign.Sign" => KnownMethod::Sign,
+            "miniGame.StartMiniGame" => KnownMethod::StartMiniGame,
+            "alchemy.StartAlchemy" => KnownMethod::StartAlchemy,
+            "repair.RepairHero" => KnownMethod::RepairHero,
             _ => return None,
         })
     }
@@ -234,24 +258,6 @@ fn family_for(name: &str) -> MethodFamily {
         .unwrap_or(MethodFamily::Unknown)
 }
 
-const KNOWN_EXACT_METHODS: &[&str] = &[
-    "GetSvrTime",
-    "player.Login",
-    "player.GetUserInfo",
-    "player.GetUserList",
-    "player.CreateUser",
-    "cachedata.CacheData",
-    "archiveCopy.IsLoad",
-    "copyextra.AddCopyRewardCount",
-    "copyextra.UpdateCopyExtraInfo",
-    "prefs.SavePrefs",
-    "statcount.GetStatCount",
-    "sign.Sign",
-    "miniGame.StartMiniGame",
-    "alchemy.StartAlchemy",
-    "repair.RepairHero",
-];
-
 #[cfg(test)]
 mod tests {
     use super::{family_for, GameMethod, KnownMethod, MethodFamily};
@@ -291,14 +297,17 @@ mod tests {
 
     #[test]
     fn exact_core_routes_use_one_registry() {
-        assert_eq!(
-            GameMethod::parse("user.GetUserInfo").known(),
-            Some(KnownMethod::UserGetUserInfo)
-        );
-        assert_eq!(
-            GameMethod::parse("presetfleet.SetPresetFleets").known(),
-            Some(KnownMethod::PresetFleetSet)
-        );
+        for (name, expected) in [
+            ("GetSvrTime", KnownMethod::GetServerTime),
+            ("player.GetUserInfo", KnownMethod::PlayerGetUserInfo),
+            ("user.GetUserInfo", KnownMethod::UserGetUserInfo),
+            ("presetfleet.SetPresetFleets", KnownMethod::PresetFleetSet),
+            ("cachedata.CacheData", KnownMethod::CacheData),
+            ("repair.RepairHero", KnownMethod::RepairHero),
+        ] {
+            assert_eq!(GameMethod::parse(name).known(), Some(expected));
+            assert!(GameMethod::parse(name).is_known());
+        }
         assert_eq!(GameMethod::parse("user.NotARealMethod").known(), None);
     }
 }
