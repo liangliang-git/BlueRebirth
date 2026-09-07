@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use blueoath_storage::{ProfileStore, StoredProfileState, StoredShip};
+use blueoath_storage::{LocalProfileState, LocalShip, ProfileStore};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
@@ -212,15 +212,15 @@ impl ServerState {
         })
     }
 
-    pub(crate) fn stored_profile_state(&self) -> StoredProfileState {
-        StoredProfileState {
+    pub(crate) fn local_profile_state(&self) -> LocalProfileState {
+        LocalProfileState {
             level: self.level,
             fuel: self.fuel,
             coins: self.coins,
             ships: self
                 .ships
                 .iter()
-                .map(|ship| StoredShip {
+                .map(|ship| LocalShip {
                     id: ship.id,
                     name: ship.name.clone(),
                     level: ship.level,

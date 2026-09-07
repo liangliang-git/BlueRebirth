@@ -4,7 +4,7 @@ use blueoath_domain::{
     GuildState, HeroId, HeroState, NewAccountFactory, PresetFleetState, ProfileId, ProfileState,
     TemplateId,
 };
-use blueoath_storage::{ProfileStore, StorageError, StoredProfileState, StoredShip};
+use blueoath_storage::{LocalProfileState, LocalShip, ProfileStore, StorageError};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
@@ -18,27 +18,29 @@ fn store() -> (ProfileStore, std::path::PathBuf) {
     (ProfileStore::open(&root).unwrap(), root)
 }
 
-fn profile_state(coins: i64) -> StoredProfileState {
-    StoredProfileState {
+fn profile_state(coins: i64) -> LocalProfileState {
+    LocalProfileState {
         level: 1,
         fuel: 100,
         coins,
-        ..StoredProfileState::default()
+        ..LocalProfileState::default()
     }
 }
 
 #[test]
 fn profiles_are_upserted_and_isolated() {
     let (store, root) = store();
-    store.save("one", "One", &profile_state(10)).unwrap();
-    store.save("two", "Two", &profile_state(20)).unwrap();
+    store.save_local("one", "One", &profile_state(10)).unwrap();
+    store.save_local("two", "Two", &profile_state(20)).unwrap();
 
-    assert_eq!(store.load("one").unwrap().unwrap().state.coins, 10);
-    assert_eq!(store.load("two").unwrap().unwrap().state.coins, 20);
+    assert_eq!(store.load_local("one").unwrap().unwrap().state.coins, 10);
+    assert_eq!(store.load_local("two").unwrap().unwrap().state.coins, 20);
     assert_eq!(store.list().unwrap(), vec!["one", "two"]);
 
-    store.save("one", "Renamed", &profile_state(11)).unwrap();
-    let renamed = store.load("one").unwrap().unwrap();
+    store
+        .save_local("one", "Renamed", &profile_state(11))
+        .unwrap();
+    let renamed = store.load_local("one").unwrap().unwrap();
     assert_eq!(renamed.name, "Renamed");
     assert_eq!(renamed.state.coins, 11);
     let _ = std::fs::remove_dir_all(root);
@@ -48,15 +50,15 @@ fn profiles_are_upserted_and_isolated() {
 fn reset_removes_only_selected_profile() {
     let (store, root) = store();
     store
-        .save("one", "One", &StoredProfileState::default())
+        .save_local("one", "One", &LocalProfileState::default())
         .unwrap();
     store
-        .save("two", "Two", &StoredProfileState::default())
+        .save_local("two", "Two", &LocalProfileState::default())
         .unwrap();
     store.reset("one").unwrap();
 
-    assert!(store.load("one").unwrap().is_none());
-    assert!(store.load("two").unwrap().is_some());
+    assert!(store.load_local("one").unwrap().is_none());
+    assert!(store.load_local("two").unwrap().is_some());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -64,7 +66,7 @@ fn reset_removes_only_selected_profile() {
 fn invalid_profile_id_is_rejected_before_database_write() {
     let (store, root) = store();
     let error = store
-        .save("bad/id", "Bad", &StoredProfileState::default())
+        .save_local("bad/id", "Bad", &LocalProfileState::default())
         .unwrap_err();
 
     assert!(matches!(error, StorageError::InvalidProfileId));
@@ -76,9 +78,9 @@ fn invalid_profile_id_is_rejected_before_database_write() {
 fn dot_profile_id_is_accepted_like_csharp_server() {
     let (store, root) = store();
     store
-        .save("jp.v1", "JP", &StoredProfileState::default())
+        .save_local("jp.v1", "JP", &LocalProfileState::default())
         .unwrap();
-    assert!(store.load("jp.v1").unwrap().is_some());
+    assert!(store.load_local("jp.v1").unwrap().is_some());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -86,7 +88,7 @@ fn dot_profile_id_is_accepted_like_csharp_server() {
 fn updated_timestamp_uses_iso8601_utc_format() {
     let (store, root) = store();
     store
-        .save("one", "One", &StoredProfileState::default())
+        .save_local("one", "One", &LocalProfileState::default())
         .unwrap();
 
     let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
@@ -102,13 +104,13 @@ fn updated_timestamp_uses_iso8601_utc_format() {
 }
 
 #[test]
-fn normalized_profile_runtime_round_trips_without_json_state_column() {
+fn local_profile_runtime_round_trips_without_json_state_column() {
     let (store, root) = store();
-    let state = StoredProfileState {
+    let state = LocalProfileState {
         level: 4,
         fuel: 80,
         coins: 125,
-        ships: vec![StoredShip {
+        ships: vec![LocalShip {
             id: 1001,
             name: "Starter".to_owned(),
             level: 3,
@@ -117,9 +119,11 @@ fn normalized_profile_runtime_round_trips_without_json_state_column() {
         formation_ship_ids: vec![1001],
         completed_stages: 7,
     };
-    store.save("typed-profile", "Captain", &state).unwrap();
+    store
+        .save_local("typed-profile", "Captain", &state)
+        .unwrap();
 
-    let loaded = store.load("typed-profile").unwrap().unwrap();
+    let loaded = store.load_local("typed-profile").unwrap().unwrap();
     assert_eq!(loaded.state, state);
 
     let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
@@ -213,7 +217,7 @@ fn typed_tower_state_round_trips_through_normalized_storage() {
 }
 
 #[test]
-fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
+fn migration_from_schema_v6_normalizes_local_runtime_and_character_fields() {
     let suffix = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
     let root = std::env::temp_dir().join(format!(
         "blueoath-rust-migration-test-{}-{suffix}",
@@ -255,7 +259,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 30);
+    assert_eq!(version, 31);
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
@@ -264,6 +268,16 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
         )
         .unwrap();
     assert_eq!(accounts_table, 0);
+    for table in ["local_runtime", "local_ships", "local_formation"] {
+        let table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_count, 1, "missing {table}");
+    }
     assert_eq!(state_json_columns, 0);
     for column in ["class_id", "create_time", "message"] {
         let count: i64 = connection
@@ -775,7 +789,7 @@ fn typed_repository_transaction_rolls_back_partial_storage_failure() {
 #[test]
 fn typed_loader_does_not_treat_profile_row_as_complete_account() {
     let (store, root) = store();
-    let state = StoredProfileState {
+    let state = LocalProfileState {
         level: 1,
         fuel: 0,
         coins: 0,
@@ -783,7 +797,7 @@ fn typed_loader_does_not_treat_profile_row_as_complete_account() {
         ships: Vec::new(),
         formation_ship_ids: Vec::new(),
     };
-    store.save("profile-only", "Profile", &state).unwrap();
+    store.save_local("profile-only", "Profile", &state).unwrap();
     assert!(store
         .load_typed_account(&ProfileId::new("profile-only").unwrap())
         .unwrap()

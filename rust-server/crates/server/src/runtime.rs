@@ -819,9 +819,9 @@ async fn handle_connection(
             let store_task = store.clone();
             let profile_id = candidate.profile_id.clone();
             let profile_name = candidate.name.clone();
-            let stored_state = candidate.stored_profile_state();
+            let local_state = candidate.local_profile_state();
             let save_result = tokio::task::spawn_blocking(move || {
-                store_task.save(&profile_id, &profile_name, &stored_state)
+                store_task.save_local(&profile_id, &profile_name, &local_state)
             })
             .await
             .map_err(|error| ServerError::StorageTask(error.to_string()))?

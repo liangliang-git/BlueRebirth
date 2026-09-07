@@ -29,24 +29,24 @@ pub enum StorageError {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct StoredProfile {
+pub struct LocalProfile {
     pub id: String,
     pub name: String,
-    pub state: StoredProfileState,
+    pub state: LocalProfileState,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct StoredProfileState {
+pub struct LocalProfileState {
     pub level: i32,
     pub fuel: i64,
     pub coins: i64,
-    pub ships: Vec<StoredShip>,
+    pub ships: Vec<LocalShip>,
     pub formation_ship_ids: Vec<i32>,
     pub completed_stages: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StoredShip {
+pub struct LocalShip {
     pub id: i32,
     pub name: String,
     pub level: i32,
@@ -70,7 +70,7 @@ impl ProfileStore {
         Ok(store)
     }
 
-    pub fn load(&self, profile_id: &str) -> Result<Option<StoredProfile>, StorageError> {
+    pub fn load_local(&self, profile_id: &str) -> Result<Option<LocalProfile>, StorageError> {
         let connection = self.connection()?;
         let row = connection
             .query_row(
@@ -85,15 +85,15 @@ impl ProfileStore {
         let state = connection
             .query_row(
                 "SELECT level, fuel, coins, completed_stages
-                 FROM profile_runtime WHERE profile_id = ?1",
+                 FROM local_runtime WHERE profile_id = ?1",
                 params![profile_id],
                 |row| {
-                    Ok(StoredProfileState {
+                    Ok(LocalProfileState {
                         level: row.get(0)?,
                         fuel: row.get(1)?,
                         coins: row.get(2)?,
                         completed_stages: row.get(3)?,
-                        ..StoredProfileState::default()
+                        ..LocalProfileState::default()
                     })
                 },
             )
@@ -102,11 +102,11 @@ impl ProfileStore {
         let mut state = state;
         let mut statement = connection.prepare(
             "SELECT ship_id, name, level, power
-             FROM profile_ships WHERE profile_id = ?1 ORDER BY ship_id",
+             FROM local_ships WHERE profile_id = ?1 ORDER BY ship_id",
         )?;
         state.ships = statement
             .query_map(params![profile_id], |row| {
-                Ok(StoredShip {
+                Ok(LocalShip {
                     id: row.get(0)?,
                     name: row.get(1)?,
                     level: row.get(2)?,
@@ -115,13 +115,13 @@ impl ProfileStore {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         let mut statement = connection.prepare(
-            "SELECT ship_id FROM profile_formation
+            "SELECT ship_id FROM local_formation
              WHERE profile_id = ?1 ORDER BY position",
         )?;
         state.formation_ship_ids = statement
             .query_map(params![profile_id], |row| row.get::<_, i32>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Some(StoredProfile { id, name, state }))
+        Ok(Some(LocalProfile { id, name, state }))
     }
 
     pub fn load_typed_account(
@@ -2121,11 +2121,11 @@ impl ProfileStore {
         Ok(())
     }
 
-    pub fn save(
+    pub fn save_local(
         &self,
         profile_id: &str,
         name: &str,
-        state: &StoredProfileState,
+        state: &LocalProfileState,
     ) -> Result<(), StorageError> {
         if !is_valid_profile_id(profile_id) {
             return Err(StorageError::InvalidProfileId);
@@ -2141,19 +2141,19 @@ impl ProfileStore {
             params![profile_id, name, timestamp()],
         )?;
         transaction.execute(
-            "DELETE FROM profile_formation WHERE profile_id = ?1",
+            "DELETE FROM local_formation WHERE profile_id = ?1",
             params![profile_id],
         )?;
         transaction.execute(
-            "DELETE FROM profile_ships WHERE profile_id = ?1",
+            "DELETE FROM local_ships WHERE profile_id = ?1",
             params![profile_id],
         )?;
         transaction.execute(
-            "DELETE FROM profile_runtime WHERE profile_id = ?1",
+            "DELETE FROM local_runtime WHERE profile_id = ?1",
             params![profile_id],
         )?;
         transaction.execute(
-            "INSERT INTO profile_runtime(profile_id, level, fuel, coins, completed_stages)
+            "INSERT INTO local_runtime(profile_id, level, fuel, coins, completed_stages)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 profile_id,
@@ -2168,7 +2168,7 @@ impl ProfileStore {
                 continue;
             }
             transaction.execute(
-                "INSERT INTO profile_ships(profile_id, ship_id, name, level, power)
+                "INSERT INTO local_ships(profile_id, ship_id, name, level, power)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![profile_id, ship.id, ship.name, ship.level, ship.power,],
             )?;
@@ -2178,7 +2178,7 @@ impl ProfileStore {
                 continue;
             }
             transaction.execute(
-                "INSERT INTO profile_formation(profile_id, position, ship_id)
+                "INSERT INTO local_formation(profile_id, position, ship_id)
                      VALUES (?1, ?2, ?3)",
                 params![profile_id, position as i64, ship_id],
             )?;
@@ -3833,6 +3833,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0028_support_typed_state.sql"),
     include_str!("../../../migrations/0029_battle_session_constraints.sql"),
     include_str!("../../../migrations/0030_daily_copy_ex_star.sql"),
+    include_str!("../../../migrations/0031_local_profile_storage.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {
