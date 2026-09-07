@@ -454,6 +454,12 @@ pub struct ActivityState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuideState {
+    pub settings: BTreeMap<String, String>,
+    pub plot_rewards: BTreeSet<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdventureRoleState {
     pub role_id: u64,
     pub level: u64,
@@ -766,6 +772,8 @@ pub struct AccountState {
     pub chat: ChatState,
     #[serde(default)]
     pub activities: ActivityState,
+    #[serde(default)]
+    pub guide: GuideState,
     #[serde(default)]
     pub adventure: AdventureState,
     #[serde(default)]

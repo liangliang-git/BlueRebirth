@@ -252,7 +252,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 25);
+    assert_eq!(version, 26);
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
@@ -405,6 +405,11 @@ fn typed_repository_transaction_commits_domain_mutation() {
         .activities
         .progress
         .insert("spring\u{1f}merits".to_owned(), 33);
+    account
+        .guide
+        .settings
+        .insert("tutorial".to_owned(), "closed".to_owned());
+    account.guide.plot_rewards.insert(42);
     account.invite_score.have_got_ssr = 1;
     account.invite_score.have_got_fashion = 1;
     account.invite_score.have_first_battle_win = 1;
@@ -636,6 +641,11 @@ fn typed_repository_transaction_commits_domain_mutation() {
         loaded.activities.progress.get("spring\u{1f}merits"),
         Some(&33)
     );
+    assert_eq!(
+        loaded.guide.settings.get("tutorial"),
+        Some(&"closed".to_owned())
+    );
+    assert!(loaded.guide.plot_rewards.contains(&42));
     assert_eq!(loaded.invite_score.have_got_ssr, 1);
     assert_eq!(loaded.invite_score.have_got_fashion, 1);
     assert_eq!(loaded.invite_score.have_first_battle_win, 1);

@@ -349,12 +349,25 @@ pub(super) fn handle_typed(
             if plot_id <= 0 {
                 return HandlerResult::Error(GameError::InvalidRequest("guide plot id is invalid"));
             }
-            account
-                .activities
-                .progress
-                .insert(format!("compat:guide:plot:{plot_id}"), 1);
+            account.guide.plot_rewards.insert(plot_id as u64);
             let mut payload = Vec::new();
             append_varint_field(&mut payload, 1, plot_id as u64);
+            HandlerResult::Reply(Response::raw(method, payload))
+        }
+        "guide.Setting" => {
+            let mut payload = Vec::new();
+            for nested in decode_repeated_message_field(request_args, 1) {
+                let Some(key) = decode_string_field(&nested, 1).filter(|key| !key.is_empty())
+                else {
+                    continue;
+                };
+                let value = decode_string_field(&nested, 2).unwrap_or_default();
+                account.guide.settings.insert(key.clone(), value.clone());
+                let mut setting = Vec::new();
+                append_bytes_field(&mut setting, 1, key.as_bytes());
+                append_bytes_field(&mut setting, 2, value.as_bytes());
+                append_message_field(&mut payload, 3, &setting);
+            }
             HandlerResult::Reply(Response::raw(method, payload))
         }
         "user.SetMiniGameScore" => {
@@ -2061,9 +2074,26 @@ mod tests {
             handle_typed(&mut account, &state, "guide.PlotReward", &plot, &mut pushes,),
             HandlerResult::Reply(_)
         ));
+        assert!(account.guide.plot_rewards.contains(&42));
+
+        let mut guide_setting = Vec::new();
+        let mut guide_setting_item = Vec::new();
+        append_bytes_field(&mut guide_setting_item, 1, b"tutorial");
+        append_bytes_field(&mut guide_setting_item, 2, b"closed");
+        append_message_field(&mut guide_setting, 1, &guide_setting_item);
+        assert!(matches!(
+            handle_typed(
+                &mut account,
+                &state,
+                "guide.Setting",
+                &guide_setting,
+                &mut pushes,
+            ),
+            HandlerResult::Reply(_)
+        ));
         assert_eq!(
-            account.activities.progress.get("compat:guide:plot:42"),
-            Some(&1)
+            account.guide.settings.get("tutorial"),
+            Some(&"closed".to_owned())
         );
 
         let mut score_entry = Vec::new();

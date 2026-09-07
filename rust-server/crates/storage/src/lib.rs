@@ -1709,6 +1709,27 @@ impl ProfileStore {
             }
         }
 
+        let mut statement = connection.prepare(
+            "SELECT setting_key, setting_value
+             FROM guide_settings WHERE profile_id = ?1 ORDER BY setting_key",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })? {
+            let (key, value) = row?;
+            account.guide.settings.insert(key, value);
+        }
+        let mut statement = connection.prepare(
+            "SELECT plot_id
+             FROM guide_plot_rewards WHERE profile_id = ?1 ORDER BY plot_id",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| row.get::<_, i64>(0))? {
+            account
+                .guide
+                .plot_rewards
+                .insert(positive_u64(row?, "guide plot reward id")?);
+        }
+
         if let Some(values) = connection
             .query_row(
                 "SELECT chapter_id, area_index, copy_index, topic_index, daily_count,
@@ -2874,6 +2895,23 @@ impl ProfileStore {
         {
             insert_activity_tower_id("save_stage_copy", position, copy_id.get())?;
         }
+        for (key, value) in &account.guide.settings {
+            transaction.execute(
+                "INSERT INTO guide_settings(profile_id, setting_key, setting_value)
+                 VALUES (?1, ?2, ?3)",
+                params![profile.id.as_str(), key, value],
+            )?;
+        }
+        for plot_id in &account.guide.plot_rewards {
+            transaction.execute(
+                "INSERT INTO guide_plot_rewards(profile_id, plot_id)
+                 VALUES (?1, ?2)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(*plot_id, "guide plot reward id")?
+                ],
+            )?;
+        }
         for (key, value) in &account.activities.progress {
             let (activity_id, progress_kind) = key.split_once('\u{1f}').unwrap_or((key, "value"));
             transaction.execute(
@@ -3468,6 +3506,8 @@ fn clear_normalized_account(
         "tower_ids",
         "tower_sf_counts",
         "tower_progress",
+        "guide_plot_rewards",
+        "guide_settings",
         "fleet_members",
         "fleets",
         "hero_equip_slots",
@@ -3589,6 +3629,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0023_sea_difficulty_typed_state.sql"),
     include_str!("../../../migrations/0024_copy_star_rewards_typed_state.sql"),
     include_str!("../../../migrations/0025_fashion_typed_state.sql"),
+    include_str!("../../../migrations/0026_guide_typed_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {
