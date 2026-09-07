@@ -1765,6 +1765,38 @@ impl Decode for TeachingUserRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InviteStateTypeRequest {
+    pub state_type: i32,
+}
+
+impl Decode for InviteStateTypeRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let state_type = required_field(&fields, 1, "invite state is missing type")?;
+        if !(1..=3).contains(&state_type) {
+            return Err(ProtocolError::Invalid("invite state type is invalid"));
+        }
+        Ok(Self { state_type })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InviteRecordVersionRequest {
+    pub version: u64,
+}
+
+impl Decode for InviteRecordVersionRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let version = required_field(&fields, 1, "invite state is missing version")?;
+        Ok(Self {
+            version: u64::try_from(version)
+                .map_err(|_| ProtocolError::Invalid("invite state version is invalid"))?,
+        })
+    }
+}
+
 impl Decode for SeaDifficultyRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

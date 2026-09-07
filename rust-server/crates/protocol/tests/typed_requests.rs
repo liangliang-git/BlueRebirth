@@ -2,11 +2,11 @@ use blueoath_protocol::{
     BuildShipRequest, BuildShipRewardRequest, ChangeNameRequest, ChangeWorldChannelRequest,
     CopyAttackRequest, CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
     DailyCopySelectExRequest, Decode, FriendSearchRequest, FriendTargetRequest,
-    GetBarrageByIdRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, OutpostBuildingRequest,
-    OutpostSetHeroRequest, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
-    SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
-    SetSecretaryRequest, SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest,
-    TeachingUserRequest,
+    GetBarrageByIdRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, InviteRecordVersionRequest,
+    InviteStateTypeRequest, OutpostBuildingRequest, OutpostSetHeroRequest, ProtocolError,
+    SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest,
+    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, SportsMeetPointsRequest,
+    TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
 };
 
 #[test]
@@ -271,6 +271,14 @@ fn decodes_typed_chat_requests_with_length_limits() {
         TeachingUserRequest::decode(&[0x08, 42]).unwrap(),
         TeachingUserRequest { uid: 42 }
     );
+    assert_eq!(
+        InviteStateTypeRequest::decode(&[0x08, 2]).unwrap(),
+        InviteStateTypeRequest { state_type: 2 }
+    );
+    assert_eq!(
+        InviteRecordVersionRequest::decode(&[0x08, 7]).unwrap(),
+        InviteRecordVersionRequest { version: 7 }
+    );
 }
 
 #[test]
@@ -306,5 +314,9 @@ fn rejects_invalid_typed_chat_requests() {
     assert!(matches!(
         TeachingUserRequest::decode(&[0x08, 0]),
         Err(ProtocolError::Invalid("teaching uid is invalid"))
+    ));
+    assert!(matches!(
+        InviteStateTypeRequest::decode(&[0x08, 4]),
+        Err(ProtocolError::Invalid("invite state type is invalid"))
     ));
 }

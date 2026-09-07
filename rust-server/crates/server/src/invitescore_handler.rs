@@ -9,7 +9,15 @@ pub(super) fn handle_typed(
 ) -> HandlerResult {
     match method {
         "invitescore.SetInviteStateByType" => {
-            match decode_varint_field(request_args, 1) {
+            let request = match InviteStateTypeRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "invite state type is invalid",
+                    ));
+                }
+            };
+            match request.state_type {
                 1 => account.invite_score.have_got_ssr = 1,
                 2 => account.invite_score.have_got_fashion = 1,
                 3 => account.invite_score.have_first_battle_win = 1,
@@ -23,8 +31,15 @@ pub(super) fn handle_typed(
             HandlerResult::PushOnly
         }
         "invitescore.CheckAndResetInviteState" => {
-            account.invite_score.record_version =
-                decode_varint_field(request_args, 1).max(0) as u64;
+            let request = match InviteRecordVersionRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "invite state version is invalid",
+                    ));
+                }
+            };
+            account.invite_score.record_version = request.version;
             append_method_push(
                 post_pushes,
                 "invitescore.RefreshInviteScore",
