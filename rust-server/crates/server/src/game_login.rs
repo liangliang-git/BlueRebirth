@@ -171,6 +171,14 @@ where
     let mut handler_error: Option<GameError> = None;
     let mut typed_daily_copy_handled = false;
     let mut ret = match request.method.as_str() {
+        _ if typed_account.is_some()
+            && matches!(request.method.as_str(), "copy.DotBase" | "copyinfo.DotBase") =>
+        {
+            if decode_varint_field(request_args, 1) <= 0 {
+                handler_error = Some(GameError::InvalidRequest("copy id is invalid"));
+            }
+            Some(Vec::new())
+        }
         _ if typed_account.is_some() && legacy_only_method(request.method.as_str()) => {
             handler_error = Some(GameError::InvalidRequest(
                 "request family has no typed handler",
@@ -2569,6 +2577,9 @@ fn legacy_only_method(method: &str) -> bool {
     if method == "copy.PassMiniGame" {
         return false;
     }
+    if matches!(method, "copy.DotBase" | "copyinfo.DotBase") {
+        return false;
+    }
     if matches!(
         method,
         "copy.AttackBase"
@@ -2786,5 +2797,7 @@ mod route_guard_tests {
         assert!(!legacy_only_method("matchsvr.CreateRoom"));
         assert!(!legacy_only_method("matchsvr_7.Ready"));
         assert!(!legacy_only_method("room.StartMatch"));
+        assert!(!legacy_only_method("copy.DotBase"));
+        assert!(!legacy_only_method("copyinfo.DotBase"));
     }
 }
