@@ -30,6 +30,8 @@ mod buildship_handler;
 mod chat_handler;
 #[path = "commerce_handler.rs"]
 mod commerce_handler;
+#[path = "compat_feature.rs"]
+mod compat_feature;
 #[path = "coop_handler.rs"]
 pub(super) mod coop_handler;
 #[path = "equip_handler.rs"]
@@ -50,8 +52,6 @@ mod guildtask_handler;
 mod hero_handler;
 #[path = "invitescore_handler.rs"]
 mod invitescore_handler;
-#[path = "compat_feature.rs"]
-mod compat_feature;
 #[path = "misc_extended_handler.rs"]
 mod misc_extended_handler;
 #[path = "misc_handler.rs"]

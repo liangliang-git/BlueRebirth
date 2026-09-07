@@ -59,6 +59,7 @@ mod wire;
 use account_defaults::{default_account_snapshot, user_info_from_account};
 use account_state::*;
 use battle_state::*;
+pub use blueoath_game::{BattleService, ProgressService, ResourceService, RewardService};
 #[cfg(test)]
 pub(crate) use bootstrap::bootstrap_response;
 use bootstrap::{
@@ -74,7 +75,6 @@ use config::{normalize_multiplier, normalize_profile_id, scale_reward, DEFAULT_P
 pub use config::{
     BattleOutcome, Formation, ServerConfig, ServerConfigError, ServerState, Ship, Stage,
 };
-pub use blueoath_game::{BattleService, ProgressService, ResourceService, RewardService};
 use construction_state::*;
 use equip_state::*;
 pub use frame_service::process_frame;
