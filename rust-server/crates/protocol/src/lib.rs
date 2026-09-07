@@ -1569,6 +1569,26 @@ pub struct SendBarrageRequest {
     pub content: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GetBarrageByIdRequest {
+    pub id: i32,
+    pub begin: i32,
+    pub len: i32,
+}
+
+impl Decode for GetBarrageByIdRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let id = optional_i32(&fields, 1, "barrage query has duplicate id")?;
+        let begin = optional_i32(&fields, 2, "barrage query has duplicate begin")?;
+        let len = optional_i32(&fields, 3, "barrage query has duplicate len")?;
+        if id < 0 || begin < 0 || !(0..=100).contains(&len) {
+            return Err(ProtocolError::Invalid("barrage query is invalid"));
+        }
+        Ok(Self { id, begin, len })
+    }
+}
+
 impl Decode for SendBarrageRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

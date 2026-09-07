@@ -71,15 +71,21 @@ pub(super) fn handle_typed(
                 });
             reply(method, Vec::new())
         }
-        "chat.GetBarrageById" => reply(
-            method,
-            barrage_payload_typed(
-                account,
-                decode_varint_field(request_args, 1).max(0) as u32,
-                decode_varint_field(request_args, 2).max(0) as usize,
-                decode_varint_field(request_args, 3).clamp(0, 100) as usize,
-            ),
-        ),
+        "chat.GetBarrageById" => {
+            let request = match GetBarrageByIdRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => return HandlerResult::Error(GameError::InvalidRequest("barrage query")),
+            };
+            reply(
+                method,
+                barrage_payload_typed(
+                    account,
+                    u32::try_from(request.id).unwrap_or_default(),
+                    usize::try_from(request.begin).unwrap_or_default(),
+                    usize::try_from(request.len).unwrap_or_default(),
+                ),
+            )
+        }
         _ => HandlerResult::Empty,
     }
 }

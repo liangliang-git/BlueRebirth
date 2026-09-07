@@ -1,9 +1,10 @@
 use blueoath_protocol::{
     ChangeNameRequest, ChangeWorldChannelRequest, CopyAttackRequest, CopyPassRequest,
     CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode,
-    FriendSearchRequest, FriendTargetRequest, ProtocolError, SeaDifficultyRequest,
-    SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
-    SetSecretaryRequest, TaskAllRewardRequest, TaskRewardRequest,
+    FriendSearchRequest, FriendTargetRequest, GetBarrageByIdRequest, ProtocolError,
+    SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest,
+    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, TaskAllRewardRequest,
+    TaskRewardRequest,
 };
 
 #[test]
@@ -223,6 +224,14 @@ fn decodes_typed_chat_requests_with_length_limits() {
             .id,
         9
     );
+    assert_eq!(
+        GetBarrageByIdRequest::decode(&[0x08, 9, 0x10, 2, 0x18, 10]).unwrap(),
+        GetBarrageByIdRequest {
+            id: 9,
+            begin: 2,
+            len: 10,
+        }
+    );
 }
 
 #[test]
@@ -234,5 +243,9 @@ fn rejects_invalid_typed_chat_requests() {
     assert!(matches!(
         SendBarrageRequest::decode(&[0x1a, 0]),
         Err(ProtocolError::Invalid("barrage request is invalid"))
+    ));
+    assert!(matches!(
+        GetBarrageByIdRequest::decode(&[0x18, 101]),
+        Err(ProtocolError::Invalid("barrage query is invalid"))
     ));
 }
