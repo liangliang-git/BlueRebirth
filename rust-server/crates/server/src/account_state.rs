@@ -104,6 +104,7 @@ pub(super) fn consume_resource(account: &mut Value, goods_type: i32, item_id: i3
     }
 }
 
+#[cfg(test)]
 pub(super) fn currency_character_key(currency_type: i32) -> Option<&'static str> {
     Some(match currency_type {
         1 => "gold",
