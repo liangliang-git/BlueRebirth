@@ -171,6 +171,12 @@ where
     let mut handler_error: Option<GameError> = None;
     let mut typed_daily_copy_handled = false;
     let mut ret = match request.method.as_str() {
+        _ if typed_account.is_some() && legacy_only_method(request.method.as_str()) => {
+            handler_error = Some(GameError::InvalidRequest(
+                "request family has no typed handler",
+            ));
+            Some(Vec::new())
+        }
         "player.Login" => Some(GameLoginCodec::encode_response(&TRetLogin {
             ret: "ok".to_owned(),
             feign_role_id: state.profile_id.clone(),
@@ -2377,6 +2383,36 @@ where
         NetSocketFrameCodec::write(stream, 0, &push).await?;
     }
     Ok(true)
+}
+
+fn legacy_only_method(method: &str) -> bool {
+    if activity_handler::handles(method) {
+        return true;
+    }
+    matches!(
+        GameMethod::parse(method).family(),
+        MethodFamily::ActivityBattlePass
+            | MethodFamily::Adventure
+            | MethodFamily::BuildShip
+            | MethodFamily::Guild
+            | MethodFamily::GuildBox
+            | MethodFamily::InviteScore
+            | MethodFamily::MatchServer
+            | MethodFamily::Outpost
+            | MethodFamily::Room
+            | MethodFamily::ShipTask
+            | MethodFamily::SportsMeet
+            | MethodFamily::SportsMeetRank
+            | MethodFamily::TalentTree
+            | MethodFamily::Tower
+            | MethodFamily::ActivityTower
+            | MethodFamily::BattlePass
+            | MethodFamily::Exchange
+            | MethodFamily::FoodCompose
+            | MethodFamily::Magazine
+            | MethodFamily::InteractionItem
+            | MethodFamily::WorldEvent
+    )
 }
 
 #[cfg(test)]
