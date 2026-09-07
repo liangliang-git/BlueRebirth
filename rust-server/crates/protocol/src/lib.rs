@@ -461,6 +461,34 @@ pub struct BuildingProduceRequest {
     pub count: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildingSetHeroRequest {
+    pub building_id: i32,
+    pub hero_ids: Vec<i32>,
+}
+
+impl Decode for BuildingSetHeroRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let building_id = required_field(&fields, 1, "building assignment is missing building id")?;
+        let hero_ids = fields
+            .get(&2)
+            .into_iter()
+            .flatten()
+            .map(|value| to_i32(*value, "building hero id is out of range"))
+            .collect::<Result<Vec<_>, _>>()?;
+        if building_id <= 0 || hero_ids.len() > 99 || hero_ids.iter().any(|hero_id| *hero_id <= 0) {
+            return Err(ProtocolError::Invalid(
+                "building assignment request is invalid",
+            ));
+        }
+        Ok(Self {
+            building_id,
+            hero_ids,
+        })
+    }
+}
+
 impl Decode for BuildingProduceRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

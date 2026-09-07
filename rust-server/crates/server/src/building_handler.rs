@@ -245,10 +245,12 @@ pub(super) fn handle_typed_with_multipliers(
         }
         "building.SetHero" | "building.SetBuildingListHero" => {
             let assignments = if method == "building.SetHero" {
-                vec![(
-                    decode_varint_field(request_args, 1),
-                    decode_repeated_i32_field(request_args, 2),
-                )]
+                let Ok(request) = BuildingSetHeroRequest::decode(request_args) else {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "building assignment request is invalid",
+                    ));
+                };
+                vec![(request.building_id, request.hero_ids)]
             } else {
                 decode_building_assignments(request_args)
             };
