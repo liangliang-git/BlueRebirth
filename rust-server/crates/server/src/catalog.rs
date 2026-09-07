@@ -1384,6 +1384,25 @@ pub(super) struct SelectedTreasure {
 pub(super) type BuildDropEntry = (i32, i32, i32, i32, i32);
 pub(super) type BuildFormulaRow = (Vec<i64>, Vec<i64>, Vec<i64>, Vec<i32>);
 
+impl BuildFormulaCatalogRuntime {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        for (index, (res1, res2, res3, ships)) in self.0.iter().enumerate() {
+            for (name, values) in [("res1", res1), ("res2", res2), ("res3", res3)] {
+                if values.len() != 2 || values.iter().any(|value| *value < 0) {
+                    return Err(format!("build formula {index} has invalid {name} range"));
+                }
+                if values[1] < values[0] {
+                    return Err(format!("build formula {index} has reversed {name} range"));
+                }
+            }
+            if ships.is_empty() || ships.iter().any(|ship_id| *ship_id <= 0) {
+                return Err(format!("build formula {index} has invalid ship list"));
+            }
+        }
+        Ok(())
+    }
+}
+
 impl BuildShipCatalog {
     pub(super) fn validate(&self) -> Result<(), String> {
         for (&pool_id, entries) in &self.pools {

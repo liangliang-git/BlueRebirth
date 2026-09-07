@@ -78,6 +78,11 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
         .expect("build ship catalog initialized")
         .validate()
         .map_err(ServerError::Catalog)?;
+    BUILD_FORMULA_CATALOG
+        .get()
+        .expect("build formula catalog initialized")
+        .validate()
+        .map_err(ServerError::Catalog)?;
     GAMEPLAY_CATALOG
         .get()
         .expect("gameplay catalog initialized")
