@@ -1,7 +1,7 @@
 use blueoath_domain::{
-    AccountRepository, AccountState, ChapterId, CharacterState, CopyId, CurrencyKind, EquipId,
-    EquipmentState, FleetId, FleetRecord, HeroId, HeroState, NewAccountFactory, ProfileId,
-    ProfileState, RepositoryError, TemplateId,
+    AccountRepository, AccountState, ChapterId, CharacterState, ChatBarrageState, ChatMessageState,
+    CopyId, CurrencyKind, EquipId, EquipmentState, FleetId, FleetRecord, HeroId, HeroState,
+    NewAccountFactory, ProfileId, ProfileState, RepositoryError, TemplateId,
 };
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -173,8 +173,8 @@ impl ProfileStore {
 
         if let Some(row) = connection
             .query_row(
-                "SELECT uid, name, level, exp, secretary_id, head, head_frame,
-                        gold, diamond, supply, pve_pt
+                "SELECT uid, name, level, exp, class_id, create_time, message,
+                        secretary_id, head, head_frame, gold, diamond, supply, pve_pt
                  FROM characters WHERE profile_id = ?1",
                 params![profile_id.as_str()],
                 |row| {
@@ -185,11 +185,14 @@ impl ProfileStore {
                         row.get::<_, i64>(3)?,
                         row.get::<_, i64>(4)?,
                         row.get::<_, i64>(5)?,
-                        row.get::<_, i64>(6)?,
+                        row.get::<_, String>(6)?,
                         row.get::<_, i64>(7)?,
                         row.get::<_, i64>(8)?,
                         row.get::<_, i64>(9)?,
                         row.get::<_, i64>(10)?,
+                        row.get::<_, i64>(11)?,
+                        row.get::<_, i64>(12)?,
+                        row.get::<_, i64>(13)?,
                     ))
                 },
             )
@@ -200,21 +203,24 @@ impl ProfileStore {
                 name: row.1,
                 level: positive_u32(row.2, "character level")?,
                 exp: non_negative_u64(row.3, "character exp")?,
-                secretary_id: (row.4 > 0)
+                class_id: non_negative_u32(row.4, "character class")?,
+                create_time: non_negative_u64(row.5, "character create time")?,
+                message: row.6,
+                secretary_id: (row.7 > 0)
                     .then(|| {
-                        HeroId::new(row.4 as u64)
+                        HeroId::new(row.7 as u64)
                             .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))
                     })
                     .transpose()?,
-                head: non_negative_u32(row.5, "character head")?,
-                head_frame: non_negative_u32(row.6, "character head frame")?,
+                head: non_negative_u32(row.8, "character head")?,
+                head_frame: non_negative_u32(row.9, "character head frame")?,
                 resources: account.character.resources.clone(),
             };
             for (kind, amount) in [
-                (blueoath_domain::CurrencyKind::Gold, row.7),
-                (blueoath_domain::CurrencyKind::Diamond, row.8),
-                (blueoath_domain::CurrencyKind::Supply, row.9),
-                (blueoath_domain::CurrencyKind::PvePoint, row.10),
+                (blueoath_domain::CurrencyKind::Gold, row.10),
+                (blueoath_domain::CurrencyKind::Diamond, row.11),
+                (blueoath_domain::CurrencyKind::Supply, row.12),
+                (blueoath_domain::CurrencyKind::PvePoint, row.13),
             ] {
                 account
                     .resources
@@ -494,6 +500,52 @@ impl ProfileStore {
                 account.battle.passed_copies.insert(copy_id);
             }
         }
+
+        account.chat.channel = connection
+            .query_row(
+                "SELECT channel FROM chat_state WHERE profile_id = ?1",
+                params![profile_id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .map(|channel| non_negative_u32(channel, "chat channel"))
+            .transpose()?
+            .unwrap_or_default();
+        let mut statement = connection.prepare(
+            "SELECT message_id, channel, sender_uid, receive_uid, body,
+                    message_type, voice, sent_at
+             FROM chat_messages WHERE profile_id = ?1 ORDER BY sent_at, message_id",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok(ChatMessageState {
+                id: row.get::<_, i64>(0)? as u64,
+                channel: row.get::<_, i64>(1)? as u32,
+                uid: row.get::<_, i64>(2)? as u64,
+                receive_uid: row.get::<_, i64>(3)? as u64,
+                message: row.get(4)?,
+                message_type: row.get::<_, i64>(5)? as u32,
+                voice: row.get(6)?,
+                sent_at: row.get::<_, i64>(7)? as u64,
+            })
+        })? {
+            account.chat.messages.push(row?);
+        }
+        let mut statement = connection.prepare(
+            "SELECT barrage_id, offset_value, content, uid, sent_at
+             FROM chat_barrages WHERE profile_id = ?1
+             ORDER BY barrage_id, offset_value, sent_at",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok(ChatBarrageState {
+                id: row.get::<_, i64>(0)? as u32,
+                offset: row.get::<_, i64>(1)? as u32,
+                content: row.get(2)?,
+                uid: row.get::<_, i64>(3)? as u64,
+                sent_at: row.get::<_, i64>(4)? as u64,
+            })
+        })? {
+            account.chat.barrages.push(row?);
+        }
         account
             .validate()
             .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
@@ -627,15 +679,18 @@ impl ProfileStore {
         let character = &account.character;
         transaction.execute(
             "INSERT INTO characters(
-                profile_id, uid, name, level, exp, secretary_id, gold, diamond,
-                supply, pve_pt, head, head_frame
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                profile_id, uid, name, level, exp, class_id, create_time, message,
+                secretary_id, gold, diamond, supply, pve_pt, head, head_frame
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 profile.id.as_str(),
                 typed_i64(character.uid, "character uid")?,
                 character.name,
                 typed_i64(character.level, "character level")?,
                 typed_i64(character.exp, "character exp")?,
+                typed_i64(character.class_id, "character class")?,
+                typed_i64(character.create_time, "character create time")?,
+                character.message,
                 character
                     .secretary_id
                     .map(|id| typed_i64(id.get(), "secretary id"))
@@ -658,6 +713,50 @@ impl ProfileStore {
                 typed_i64(character.head_frame, "character head frame")?,
             ],
         )?;
+
+        transaction.execute(
+            "INSERT INTO chat_state(profile_id, channel)
+             VALUES (?1, ?2)
+             ON CONFLICT(profile_id) DO UPDATE SET channel = excluded.channel",
+            params![
+                profile.id.as_str(),
+                typed_i64(account.chat.channel, "chat channel")?
+            ],
+        )?;
+        for message in &account.chat.messages {
+            transaction.execute(
+                "INSERT INTO chat_messages(
+                    profile_id, message_id, channel, sender_uid, body, sent_at,
+                    receive_uid, message_type, voice
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(message.id, "chat message id")?,
+                    typed_i64(message.channel, "chat message channel")?,
+                    typed_i64(message.uid, "chat sender uid")?,
+                    message.message,
+                    typed_i64(message.sent_at, "chat message time")?,
+                    typed_i64(message.receive_uid, "chat receiver uid")?,
+                    typed_i64(message.message_type, "chat message type")?,
+                    message.voice,
+                ],
+            )?;
+        }
+        for barrage in &account.chat.barrages {
+            transaction.execute(
+                "INSERT INTO chat_barrages(
+                    profile_id, barrage_id, offset_value, content, uid, sent_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(barrage.id, "barrage id")?,
+                    typed_i64(barrage.offset, "barrage offset")?,
+                    barrage.content,
+                    typed_i64(barrage.uid, "barrage uid")?,
+                    typed_i64(barrage.sent_at, "barrage time")?,
+                ],
+            )?;
+        }
 
         for hero in account.dock.heroes.values() {
             transaction.execute(
@@ -1006,6 +1105,8 @@ fn clear_normalized_account(
         "tower_progress",
         "activity_progress",
         "tasks",
+        "chat_barrages",
+        "chat_state",
         "battle_sessions",
         "fleet_members",
         "fleets",
@@ -1141,15 +1242,21 @@ fn project_normalized_core(
 
     transaction.execute(
         "INSERT INTO characters(
-            profile_id, uid, name, level, exp, secretary_id, gold, diamond,
-            supply, pve_pt, head, head_frame
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            profile_id, uid, name, level, exp, class_id, create_time, message,
+            secretary_id, gold, diamond, supply, pve_pt, head, head_frame
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             profile_id,
             positive_field(&character, "uid", 1),
             profile_name,
             positive_field(&character, "level", 1),
             non_negative_field(&character, "exp"),
+            non_negative_field(&character, "class"),
+            non_negative_field(&character, "createTime"),
+            character
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
             non_negative_field(&character, "secretaryId"),
             non_negative_field(&character, "gold"),
             non_negative_field(&character, "diamond"),
@@ -1594,6 +1701,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0005_core_indexes.sql"),
     include_str!("../../../migrations/0006_progress_social_activity.sql"),
     include_str!("../../../migrations/0007_normalized_profile_runtime.sql"),
+    include_str!("../../../migrations/0008_character_profile_fields.sql"),
+    include_str!("../../../migrations/0009_chat_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

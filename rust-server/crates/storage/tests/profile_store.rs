@@ -1,6 +1,7 @@
 use blueoath_domain::{
-    AccountRepository, AccountState, BattleSession, ChapterId, CopyId, EquipId, EquipmentState,
-    FleetId, FleetRecord, HeroId, HeroState, ProfileId, ProfileState, TemplateId,
+    AccountRepository, AccountState, BattleSession, ChapterId, ChatBarrageState, ChatMessageState,
+    CopyId, EquipId, EquipmentState, FleetId, FleetRecord, HeroId, HeroState, ProfileId,
+    ProfileState, TemplateId,
 };
 use blueoath_storage::{ProfileStore, StorageError, StoredProfileState, StoredShip};
 use serde_json::json;
@@ -134,7 +135,7 @@ fn normalized_profile_runtime_round_trips_without_json_state_column() {
 }
 
 #[test]
-fn migration_from_schema_v6_normalizes_profile_runtime() {
+fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
     let suffix = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
     let root = std::env::temp_dir().join(format!(
         "blueoath-rust-migration-test-{}-{suffix}",
@@ -176,8 +177,18 @@ fn migration_from_schema_v6_normalizes_profile_runtime() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 9);
     assert_eq!(state_json_columns, 0);
+    for column in ["class_id", "create_time", "message"] {
+        let count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('characters') WHERE name = ?1",
+                [column],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "missing characters.{column}");
+    }
     assert!(store.list().unwrap().is_empty());
     let _ = std::fs::remove_dir_all(root);
 }
@@ -291,6 +302,27 @@ fn typed_repository_transaction_commits_domain_mutation() {
         resources: Default::default(),
         ..AccountState::default()
     };
+    account.character.class_id = 3;
+    account.character.create_time = 123;
+    account.character.message = "typed hello".to_owned();
+    account.chat.channel = 2;
+    account.chat.messages.push(ChatMessageState {
+        id: 1,
+        uid: 10,
+        channel: 2,
+        receive_uid: 20,
+        message: "hello".to_owned(),
+        message_type: 1,
+        voice: "voice".to_owned(),
+        sent_at: 99,
+    });
+    account.chat.barrages.push(ChatBarrageState {
+        id: 7,
+        offset: 1,
+        content: "wave".to_owned(),
+        uid: 10,
+        sent_at: 100,
+    });
     let hero_id = HeroId::new(10).unwrap();
     let equip_id = EquipId::new(20).unwrap();
     account.dock.heroes.insert(
@@ -365,6 +397,13 @@ fn typed_repository_transaction_commits_domain_mutation() {
         vec![Some(equip_id)]
     );
     assert_eq!(loaded.dock.equipments[&equip_id].hero_id, Some(hero_id));
+    assert_eq!(loaded.character.class_id, 3);
+    assert_eq!(loaded.character.create_time, 123);
+    assert_eq!(loaded.character.message, "typed hello");
+    assert_eq!(loaded.chat.channel, 2);
+    assert_eq!(loaded.chat.messages[0].message, "hello");
+    assert_eq!(loaded.chat.messages[0].voice, "voice");
+    assert_eq!(loaded.chat.barrages[0].content, "wave");
     assert_eq!(
         loaded.fleet.fleets[&FleetId::new(1).unwrap()].members,
         vec![hero_id]

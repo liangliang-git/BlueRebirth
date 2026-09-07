@@ -141,6 +141,9 @@ pub struct CharacterState {
     pub name: String,
     pub level: u32,
     pub exp: u64,
+    pub class_id: u32,
+    pub create_time: u64,
+    pub message: String,
     pub secretary_id: Option<HeroId>,
     pub head: u32,
     pub head_frame: u32,
@@ -154,6 +157,9 @@ impl Default for CharacterState {
             name: "Commander".to_owned(),
             level: 1,
             exp: 0,
+            class_id: 1,
+            create_time: 0,
+            message: String::new(),
             secretary_id: None,
             head: 0,
             head_frame: 0,
@@ -242,6 +248,34 @@ pub struct SocialState {
     pub friends: BTreeSet<ProfileId>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatMessageState {
+    pub id: u64,
+    pub uid: u64,
+    pub channel: u32,
+    pub receive_uid: u64,
+    pub message: String,
+    pub message_type: u32,
+    pub voice: String,
+    pub sent_at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatBarrageState {
+    pub id: u32,
+    pub offset: u32,
+    pub content: String,
+    pub uid: u64,
+    pub sent_at: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatState {
+    pub channel: u32,
+    pub messages: Vec<ChatMessageState>,
+    pub barrages: Vec<ChatBarrageState>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActivityState {
     pub progress: BTreeMap<String, u64>,
@@ -296,6 +330,8 @@ pub struct AccountState {
     pub buildings: BuildingState,
     #[serde(default)]
     pub social: SocialState,
+    #[serde(default)]
+    pub chat: ChatState,
     #[serde(default)]
     pub activities: ActivityState,
 }
@@ -356,6 +392,9 @@ impl NewAccountFactory {
             revision: 0,
         });
         account.character.name = name;
+        account.character.class_id = 1;
+        account.character.head = 1021051;
+        account.character.secretary_id = HeroId::new(1).ok();
         account
     }
 }

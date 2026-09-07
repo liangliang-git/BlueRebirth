@@ -1,0 +1,3 @@
+ALTER TABLE characters ADD COLUMN class_id INTEGER NOT NULL DEFAULT 1 CHECK (class_id >= 0);
+ALTER TABLE characters ADD COLUMN create_time INTEGER NOT NULL DEFAULT 0 CHECK (create_time >= 0);
+ALTER TABLE characters ADD COLUMN message TEXT NOT NULL DEFAULT '';

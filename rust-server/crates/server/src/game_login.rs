@@ -343,7 +343,9 @@ where
         "user.SetMessage" => {
             match SetMessageRequest::decode(request_args) {
                 Ok(typed) => {
-                    if let Some(account) = account.as_deref_mut() {
+                    if let Some(account) = typed_account.as_mut() {
+                        account.character.message = typed.message;
+                    } else if let Some(account) = account.as_deref_mut() {
                         set_character_string(account, "message", typed.message);
                     }
                 }
@@ -457,20 +459,29 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::Chat) => {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            let result = if let Some(account) = typed_account.as_mut() {
+                chat_handler::handle_typed(
+                    account,
+                    request.method.as_str(),
+                    request_args,
+                    &mut post_pushes,
+                )
+            } else {
+                let mut context = GameLoginRequestContext {
+                    state,
+                    account: &mut account,
+                    catalogs: *catalogs,
+                    pre_pushes: &mut pre_pushes,
+                    post_pushes: &mut post_pushes,
+                    handler_error: &mut handler_error,
+                    pass_details: &mut pass_details,
+                    pass_rewards: &mut pass_rewards,
+                    pass_hero_ids: &mut pass_hero_ids,
+                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                };
+                chat_handler::handle(&mut context, request.method.as_str(), request_args)
             };
-            let result = chat_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }

@@ -338,12 +338,16 @@ pub(super) fn user_info_from_typed_account(
             character.name.clone()
         },
         level: i32::try_from(character.level).unwrap_or(i32::MAX),
-        class_id: 1,
+        class_id: i32::try_from(character.class_id).unwrap_or(i32::MAX),
         secretary_id: character
             .secretary_id
             .map(|id| u32::try_from(id.get()).unwrap_or(u32::MAX))
             .unwrap_or(1),
-        create_time: current_unix_seconds() as i32,
+        create_time: if character.create_time == 0 {
+            current_unix_seconds() as i32
+        } else {
+            i32::try_from(character.create_time).unwrap_or(i32::MAX)
+        },
         gold: resource(blueoath_domain::CurrencyKind::Gold),
         diamond: resource(blueoath_domain::CurrencyKind::Diamond),
         supply: resource(blueoath_domain::CurrencyKind::Supply),
@@ -355,6 +359,7 @@ pub(super) fn user_info_from_typed_account(
         },
         head_frame: i32::try_from(character.head_frame).unwrap_or(i32::MAX),
         exp: i32::try_from(character.exp).unwrap_or(i32::MAX),
+        message: character.message.clone(),
         ..UserInfo::default()
     }
 }
