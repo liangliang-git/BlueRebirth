@@ -128,6 +128,68 @@ pub(super) fn handle_typed(
             append_varint_field(&mut payload, 1, plot_id as u64);
             HandlerResult::Reply(Response::raw(method, payload))
         }
+        "user.SetMiniGameScore" => {
+            let chapter_id = decode_varint_field(request_args, 1);
+            let entries = decode_repeated_message_field(request_args, 3);
+            if chapter_id <= 0 || entries.is_empty() {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "mini-game score request is invalid",
+                ));
+            }
+            let now = current_unix_seconds();
+            for entry in entries {
+                let copy_id = decode_varint_field(&entry, 1);
+                let score = decode_varint_field(&entry, 2).max(0) as u64;
+                if copy_id <= 0 {
+                    continue;
+                }
+                let key = format!("compat:minigame:{chapter_id}:{copy_id}");
+                let current = account
+                    .activities
+                    .progress
+                    .get(&key)
+                    .copied()
+                    .unwrap_or_default();
+                if score > current {
+                    account.activities.progress.insert(key, score);
+                }
+            }
+            HandlerResult::Reply(Response::raw(
+                method,
+                typed_mini_game_score_payload(account, chapter_id, now),
+            ))
+        }
+        "user.GetMiniGameScore" => {
+            let chapter_id = decode_varint_field(request_args, 1);
+            if chapter_id <= 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "mini-game chapter is invalid",
+                ));
+            }
+            HandlerResult::Reply(Response::raw(
+                method,
+                typed_mini_game_score_payload(account, chapter_id, current_unix_seconds()),
+            ))
+        }
+        "user.GetMiniGameScoreRank" => {
+            let chapter_id = decode_varint_field(request_args, 1);
+            if chapter_id <= 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "mini-game chapter is invalid",
+                ));
+            }
+            let score = typed_mini_game_chapter_score(account, chapter_id);
+            HandlerResult::Reply(Response::raw(
+                method,
+                typed_mini_game_rank_payload(
+                    account,
+                    score,
+                    if score > 0 { 1 } else { 0 },
+                    decode_varint_field(request_args, 2),
+                    decode_varint_field(request_args, 3),
+                ),
+            ))
+        }
         "user.Logoff" => {
             account.activities.progress.insert(
                 "compat:user:lastLogoffTime".to_owned(),
@@ -1096,6 +1158,69 @@ fn typed_strategy_info_payload(account: &blueoath_domain::AccountState) -> Vec<u
     output
 }
 
+fn typed_mini_game_chapter_score(account: &blueoath_domain::AccountState, chapter_id: i32) -> u64 {
+    account
+        .activities
+        .progress
+        .iter()
+        .filter_map(|(key, score)| {
+            let rest = key.strip_prefix("compat:minigame:")?;
+            let mut parts = rest.split(':');
+            (parts.next()?.parse::<i32>().ok() == Some(chapter_id)).then_some(*score)
+        })
+        .fold(0_u64, u64::saturating_add)
+}
+
+fn typed_mini_game_score_payload(
+    account: &blueoath_domain::AccountState,
+    chapter_id: i32,
+    now: u32,
+) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(
+        &mut output,
+        1,
+        typed_mini_game_chapter_score(account, chapter_id),
+    );
+    append_varint_field(&mut output, 2, u64::from(now));
+    output
+}
+
+fn typed_mini_game_rank_payload(
+    account: &blueoath_domain::AccountState,
+    score: u64,
+    rank: i32,
+    start: i32,
+    end: i32,
+) -> Vec<u8> {
+    let include = score > 0 && (start <= 0 || end <= 0 || (1 >= start && 1 <= end));
+    let mut user = Vec::new();
+    append_varint_field(&mut user, 1, account.character.uid);
+    append_varint_field(&mut user, 2, 1);
+    append_bytes_field(&mut user, 3, account.character.name.as_bytes());
+    append_varint_field(&mut user, 4, u64::from(account.character.level));
+
+    let mut row = Vec::new();
+    append_varint_field(&mut row, 1, account.character.uid);
+    append_varint_field(&mut row, 2, rank.max(0) as u64);
+    append_message_field(&mut row, 3, &user);
+    append_varint_field(&mut row, 4, score);
+    append_varint_field(
+        &mut row,
+        5,
+        u64::from(current_unix_seconds().min(i32::MAX as u32)),
+    );
+
+    let mut output = Vec::new();
+    if include {
+        append_message_field(&mut output, 1, &row);
+    }
+    if score > 0 {
+        append_message_field(&mut output, 2, &row);
+    }
+    output
+}
+
 fn typed_milestone_info_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
     let mut grouped = std::collections::BTreeMap::<u64, Vec<u64>>::new();
     for key in account.activities.progress.keys() {
@@ -1476,6 +1601,41 @@ mod tests {
             account.activities.progress.get("compat:guide:plot:42"),
             Some(&1)
         );
+
+        let mut score_entry = Vec::new();
+        append_varint_field(&mut score_entry, 1, 101);
+        append_varint_field(&mut score_entry, 2, 80);
+        let mut score_request = Vec::new();
+        append_varint_field(&mut score_request, 1, 7);
+        append_message_field(&mut score_request, 3, &score_entry);
+        let result = handle_typed(
+            &mut account,
+            &state,
+            "user.SetMiniGameScore",
+            &score_request,
+            &mut pushes,
+        );
+        let HandlerResult::Reply(response) = result else {
+            panic!("expected mini-game score response");
+        };
+        assert_eq!(decode_varint_field(&response.payload, 1), 80);
+        let mut lower_score_entry = Vec::new();
+        append_varint_field(&mut lower_score_entry, 1, 101);
+        append_varint_field(&mut lower_score_entry, 2, 20);
+        let mut lower_score_request = Vec::new();
+        append_varint_field(&mut lower_score_request, 1, 7);
+        append_message_field(&mut lower_score_request, 3, &lower_score_entry);
+        let result = handle_typed(
+            &mut account,
+            &state,
+            "user.SetMiniGameScore",
+            &lower_score_request,
+            &mut pushes,
+        );
+        let HandlerResult::Reply(response) = result else {
+            panic!("expected lower mini-game score response");
+        };
+        assert_eq!(decode_varint_field(&response.payload, 1), 80);
     }
 
     #[test]
