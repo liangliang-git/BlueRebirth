@@ -1100,6 +1100,7 @@ pub(super) fn consume_hero_skill_upgrade_materials(
     true
 }
 
+#[cfg(test)]
 pub(super) fn retire_heroes_state(
     account: &mut Value,
     hero_ids: &[u64],

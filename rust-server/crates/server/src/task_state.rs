@@ -347,6 +347,7 @@ pub(super) fn task_is_visible(
 }
 
 /// Advance task counters from trusted server-side actions. Client TaskTrigger is rejected.
+#[cfg(test)]
 pub(super) fn advance_task_event(
     account: &mut Value,
     catalog: Option<&TaskCatalog>,
@@ -358,6 +359,7 @@ pub(super) fn advance_task_event(
 }
 
 /// Advance trusted event counters, optionally restricted to goal[1].
+#[cfg(test)]
 pub(super) fn advance_task_event_with_param(
     account: &mut Value,
     catalog: Option<&TaskCatalog>,
@@ -481,6 +483,7 @@ pub(super) fn task_rewards(
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn grant_reward(
     account: &mut Value,
     reward: ShopReward,

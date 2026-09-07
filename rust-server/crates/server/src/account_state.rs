@@ -1,7 +1,10 @@
 #![allow(dead_code)]
 
-use serde_json::{json, Value};
+#[cfg(test)]
+use serde_json::json;
+use serde_json::Value;
 
+#[cfg(test)]
 use super::*;
 
 #[cfg(test)]
@@ -18,6 +21,7 @@ pub(super) fn set_character_string(account: &mut Value, key: &str, value: String
     }
 }
 
+#[cfg(test)]
 pub(super) fn find_hero_mut(
     account: &mut Value,
     hero_id: u64,
@@ -31,6 +35,7 @@ pub(super) fn find_hero_mut(
         .and_then(Value::as_object_mut)
 }
 
+#[cfg(test)]
 pub(super) fn hero_is_in_use(account: &Value, hero_id: u64) -> bool {
     if hero_id == 0 {
         return false;
@@ -69,6 +74,7 @@ pub(super) fn hero_is_in_use(account: &Value, hero_id: u64) -> bool {
     secretary_used || fleet_used || building_used || bath_used
 }
 
+#[cfg(test)]
 pub(super) fn resource_available(
     account: &Value,
     goods_type: i32,
@@ -87,6 +93,7 @@ pub(super) fn resource_available(
         }
 }
 
+#[cfg(test)]
 pub(super) fn consume_resource(account: &mut Value, goods_type: i32, item_id: i32, amount: i32) {
     if goods_type == 5 {
         if let Some(key) = currency_character_key(item_id) {
@@ -127,10 +134,12 @@ pub(super) fn currency_character_key(currency_type: i32) -> Option<&'static str>
     })
 }
 
+#[cfg(test)]
 pub(super) fn add_character_i64(account: &mut Value, key: &str, amount: i32) {
     adjust_character_i64(account, key, i64::from(amount));
 }
 
+#[cfg(test)]
 pub(super) fn character_i64(account: &Value, key: &str) -> i64 {
     account
         .get("character")
@@ -139,6 +148,7 @@ pub(super) fn character_i64(account: &Value, key: &str) -> i64 {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 pub(super) fn adjust_character_i64(account: &mut Value, key: &str, amount: i64) {
     if let Some(character) = account.get_mut("character").and_then(Value::as_object_mut) {
         let current = character
@@ -151,6 +161,7 @@ pub(super) fn adjust_character_i64(account: &mut Value, key: &str, amount: i64) 
     }
 }
 
+#[cfg(test)]
 pub(super) fn add_bag_item(account: &mut Value, template_id: i32, amount: i32) {
     let Some(root) = account.as_object_mut() else {
         return;
@@ -205,6 +216,7 @@ pub(super) fn add_bag_item(account: &mut Value, template_id: i32, amount: i32) {
     }
 }
 
+#[cfg(test)]
 pub(super) fn add_medal(account: &mut Value, medal_id: i32, time: u32) {
     if medal_id <= 0 || time == 0 {
         return;
@@ -404,6 +416,7 @@ pub(super) fn restore_hero_mood(account: &mut Value, hero_id: u64) -> bool {
     changed
 }
 
+#[cfg(test)]
 pub(super) fn recover_hero_mood_from_bath(
     account: &mut Value,
     hero_id: u64,
@@ -456,6 +469,7 @@ pub(super) fn recover_hero_mood_from_bath(
     changed
 }
 
+#[cfg(test)]
 pub(super) fn consume_bag_item(account: &mut Value, template_id: i32, requested: i32) -> i32 {
     if requested <= 0 {
         return 0;
@@ -492,6 +506,7 @@ pub(super) fn consume_bag_item(account: &mut Value, template_id: i32, requested:
     consumed
 }
 
+#[cfg(test)]
 pub(super) fn bag_item_count(account: &Value, template_id: i32) -> i64 {
     account
         .get("bag")
@@ -507,6 +522,7 @@ pub(super) fn bag_item_count(account: &Value, template_id: i32) -> i64 {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 pub(super) fn add_fashion_item(
     account: &mut Value,
     fashion_tid: i32,
@@ -551,6 +567,7 @@ pub(super) fn add_fashion_item(
     }
 }
 
+#[cfg(test)]
 pub(super) fn next_account_instance_id(account: &Value, path: &str, key: &str) -> i32 {
     account
         .get(path)
@@ -564,6 +581,7 @@ pub(super) fn next_account_instance_id(account: &Value, path: &str, key: &str) -
         .saturating_add(1)
 }
 
+#[cfg(test)]
 pub(super) fn add_equip_item(account: &mut Value, template_id: i32) -> i32 {
     let equip_id = next_account_instance_id(account, "equip", "items");
     let Some(root) = account.as_object_mut() else {
@@ -585,6 +603,7 @@ pub(super) fn add_equip_item(account: &mut Value, template_id: i32) -> i32 {
     equip_id
 }
 
+#[cfg(test)]
 pub(super) fn add_ship_items(account: &mut Value, template_id: i32, amount: i32, now: u32) -> i32 {
     let mut last_id = 0;
     let Some(root) = account.as_object_mut() else {
@@ -629,6 +648,7 @@ pub(super) fn add_ship_items(account: &mut Value, template_id: i32, amount: i32,
     last_id
 }
 
+#[cfg(test)]
 pub(super) fn apply_ship_defaults(
     account: &mut Value,
     catalog: &BuildShipCatalog,
@@ -865,6 +885,7 @@ pub(super) struct SupportSettlement {
     pub(super) random_rewards: Vec<(i32, i32, i32)>,
 }
 
+#[cfg(test)]
 pub(super) fn settle_support_state(
     account: &mut Value,
     id: i32,
