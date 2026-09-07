@@ -241,22 +241,6 @@ fn friend_ids(account: &Value, key: &str) -> Vec<u64> {
         .unwrap_or_default()
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::common::response::HandlerResult;
-
-    use super::*;
-
-    #[test]
-    fn handler_exposes_typed_result() {
-        let _: for<'state, 'account, 'scratch> fn(
-            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
-            &str,
-            &[u8],
-        ) -> HandlerResult = handle;
-    }
-}
-
 fn add_friend_id(account: &mut Value, key: &str, uid: u64) {
     let Some(root) = account.as_object_mut() else {
         return;

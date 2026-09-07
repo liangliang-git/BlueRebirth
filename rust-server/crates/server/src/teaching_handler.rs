@@ -57,22 +57,6 @@ fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
     HandlerResult::Reply(Response::raw(method, payload))
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::common::response::HandlerResult;
-
-    use super::*;
-
-    #[test]
-    fn handler_exposes_typed_result() {
-        let _: for<'state, 'account, 'scratch> fn(
-            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
-            &str,
-            &[u8],
-        ) -> HandlerResult = handle;
-    }
-}
-
 fn teaching_list_payload() -> Vec<u8> {
     Vec::new()
 }

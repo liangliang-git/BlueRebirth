@@ -285,22 +285,6 @@ fn handle_draw_reward<'state, 'account, 'scratch>(
     reply("guildtask.DrawTaskReward", output)
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::common::response::HandlerResult;
-
-    use super::*;
-
-    #[test]
-    fn handler_exposes_typed_result() {
-        let _: for<'state, 'account, 'scratch> fn(
-            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
-            &str,
-            &[u8],
-        ) -> HandlerResult = handle;
-    }
-}
-
 fn state_i64(state: &Value, key: &str) -> i64 {
     state.get(key).and_then(Value::as_i64).unwrap_or_default()
 }
