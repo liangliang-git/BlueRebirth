@@ -1301,40 +1301,7 @@ fn encode_support_settlement(settlement: &SupportSettlement) -> Vec<u8> {
     output
 }
 
-pub(super) fn milestone_info_payload(account: &Value) -> Vec<u8> {
-    let mut output = Vec::new();
-    let Some(claimed) = account
-        .get("milestone")
-        .and_then(|value| value.get("claimed"))
-        .and_then(Value::as_array)
-    else {
-        return output;
-    };
-    let mut by_activity = std::collections::BTreeMap::<i32, Vec<i32>>::new();
-    for value in claimed.iter().filter_map(Value::as_str) {
-        let mut split = value.split(':');
-        let Some(activity_id) = split.next().and_then(|part| part.parse::<i32>().ok()) else {
-            continue;
-        };
-        let Some(index) = split.next().and_then(|part| part.parse::<i32>().ok()) else {
-            continue;
-        };
-        by_activity.entry(activity_id).or_default().push(index);
-    }
-    for (activity_id, indexes) in by_activity {
-        let mut sub = Vec::new();
-        append_varint_field(&mut sub, 1, activity_id.max(0) as u64);
-        for index in indexes {
-            let mut reward = Vec::new();
-            append_varint_field(&mut reward, 1, index.max(0) as u64);
-            append_varint_field(&mut reward, 2, 1);
-            append_message_field(&mut sub, 2, &reward);
-        }
-        append_message_field(&mut output, 1, &sub);
-    }
-    output
-}
-
+#[cfg(test)]
 pub(super) fn other_user_payload(
     state: &ServerState,
     account: &Value,
