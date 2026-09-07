@@ -943,6 +943,7 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::GuildBox) => {
+            let mut guildbox_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
                 guildbox_handler::handle_typed(
@@ -951,13 +952,19 @@ where
                     request.method.as_str(),
                     request_args,
                     catalog,
-                    &mut pre_pushes,
+                    &mut guildbox_effects,
                 )
             } else {
                 HandlerResult::Error(GameError::InvalidRequest(
                     "guild box requires typed account",
                 ))
             };
+            apply_response_effects(
+                guildbox_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -1206,12 +1213,19 @@ where
             || method.is_family(MethodFamily::InteractionItem))
             && typed_account.is_some() =>
         {
+            let mut misc_effects = ResponseEffects::default();
             let result = misc_extended_handler::handle_typed(
                 state,
                 typed_account.as_mut().expect("typed misc account"),
                 request.method.as_str(),
                 request_args,
+                &mut misc_effects,
+            );
+            apply_response_effects(
+                misc_effects,
                 &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
             );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -1221,11 +1235,18 @@ where
         _ if typed_account.is_some()
             && guildtask_handler::handles_typed(request.method.as_str()) =>
         {
+            let mut guildtask_effects = ResponseEffects::default();
             let result = guildtask_handler::handle_typed(
                 typed_account.as_mut().expect("typed guild task account"),
                 request.method.as_str(),
                 request_args,
+                &mut guildtask_effects,
+            );
+            apply_response_effects(
+                guildtask_effects,
                 &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
             );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());

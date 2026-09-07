@@ -1,5 +1,5 @@
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 pub(super) fn handle_typed(
@@ -7,11 +7,11 @@ pub(super) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     if GameMethod::parse(method).is_family(MethodFamily::Magazine) {
-        return handle_typed_magazine(state, account, catalog, method, request_args, pre_pushes);
+        return handle_typed_magazine(state, account, catalog, method, request_args, effects);
     }
     handle_typed_interaction(account, catalog, method, request_args)
 }
@@ -22,7 +22,7 @@ fn handle_typed_magazine(
     catalog: &GameplayCatalog,
     method: &str,
     args: &[u8],
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     if method == "magazine.FetchMagazineReward" {
         let Ok(request) = MagazineItemRequest::decode(args) else {
@@ -50,16 +50,14 @@ fn handle_typed_magazine(
         }
         account.magazine.claimed_rewards.insert(reward_key);
         if !rewards.is_empty() {
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "user.UpdateUserInfo",
                 UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
+            ));
             return reply(method, encode_rewards_list(&rewards));
         }
         return reply(method, typed_magazine_payload(account));
@@ -290,13 +288,13 @@ mod tests {
     fn typed_magazine_and_interaction_state_update_without_json() {
         let state = ServerState::new("misc", "Captain", "test");
         let mut account = AccountState::default();
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
         let result = handle_typed(
             &state,
             &mut account,
             "magazine.AddHero",
             &[0x08, 10],
-            &mut pushes,
+            &mut effects,
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert_eq!(account.magazine.heroes, vec![10]);
@@ -305,7 +303,7 @@ mod tests {
             &mut account,
             "interactionitem.SetBagItemVisible",
             &[0x08, 11, 0x10, 1],
-            &mut pushes,
+            &mut effects,
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert_eq!(account.interaction_items.visible.get(&11), Some(&true));

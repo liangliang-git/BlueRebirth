@@ -1,5 +1,5 @@
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
@@ -14,7 +14,7 @@ pub(super) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     match method {
         "guildtask.UpdateGuildTaskData" => reply(method, guild_task_data_payload_typed(account)),
@@ -60,7 +60,7 @@ pub(super) fn handle_typed(
             let Ok(request) = GuildTaskDonateRequest::decode(request_args) else {
                 return invalid("guild task donation is invalid");
             };
-            handle_typed_donate(account, request, pre_pushes)
+            handle_typed_donate(account, request, effects)
         }
         "guildtask.DrawTaskReward" | "guildtask.ConstantRewardPoolGetReward" => {
             HandlerResult::Error(GameError::InvalidRequest(
@@ -76,7 +76,7 @@ pub(super) fn handle_typed(
 fn handle_typed_donate(
     account: &mut blueoath_domain::AccountState,
     request: GuildTaskDonateRequest,
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     if request
         .items
@@ -98,7 +98,10 @@ fn handle_typed_donate(
         .activities
         .progress
         .insert("guildTask:lastTaskId".to_owned(), request.task_id as u64);
-    pre_pushes.push(BagInfoCodec::encode(&bag_info_from_typed_account(account)));
+    effects.push_pre(Response::raw(
+        "bag.UpdateBagData",
+        BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+    ));
     HandlerResult::PushOnly
 }
 
@@ -256,11 +259,11 @@ mod tests {
         );
         let item = blueoath_domain::TemplateId::new(100).unwrap();
         account.inventory.items.insert(item, 5);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
         let mut accept = Vec::new();
         append_varint_field(&mut accept, 1, 7);
         assert!(matches!(
-            handle_typed(&mut account, "guildtask.AcceptTask", &accept, &mut pushes),
+            handle_typed(&mut account, "guildtask.AcceptTask", &accept, &mut effects),
             HandlerResult::PushOnly
         ));
         assert!(account
@@ -277,7 +280,7 @@ mod tests {
         append_message_field(&mut donate, 3, &donate_item);
         append_varint_field(&mut donate, 4, 3);
         assert!(matches!(
-            handle_typed(&mut account, "guildtask.Donate", &donate, &mut pushes),
+            handle_typed(&mut account, "guildtask.Donate", &donate, &mut effects),
             HandlerResult::PushOnly
         ));
         assert_eq!(account.inventory.items.get(&item), Some(&3));

@@ -1,5 +1,5 @@
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 use blueoath_domain::{AccountState, GuildBoxItemState};
 
@@ -9,7 +9,7 @@ pub(super) fn handle_typed(
     method: &str,
     request_args: &[u8],
     catalog: &GameplayCatalog,
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     match method {
         "guildbox.SetAnonymous" => {
@@ -54,16 +54,14 @@ pub(super) fn handle_typed(
                 let _ = grant_typed_task_reward(account, reward);
             }
             account.guild_box.points_box_count -= 1;
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "user.UpdateUserInfo",
                 UserInfoCodec::encode(&user_info_from_typed_account(server_state, account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
+            ));
             reply(method, typed_reward_list_payload(0, &rewards))
         }
         "guildbox.PickAllTaskBox" => {
