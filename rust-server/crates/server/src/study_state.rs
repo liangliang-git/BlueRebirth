@@ -40,14 +40,6 @@ pub(super) fn study_skill_state(account: &mut Value, hero_id: u64, skill_id: i32
     true
 }
 
-pub(super) fn decode_study_start(payload: &[u8]) -> (u64, i32, i32) {
-    (
-        decode_varint_u64_field(payload, 1),
-        decode_varint_field(payload, 2),
-        decode_varint_field(payload, 3),
-    )
-}
-
 /// TStopStudyPSkillArg contains only HeroId. Resolve the active study row so
 /// CancelStudyPSkill and EndStudyPSkill operate on the client protocol shape.
 pub(super) fn resolve_study_skill_id(
@@ -70,20 +62,6 @@ pub(super) fn resolve_study_skill_id(
         })
         .and_then(|row| json_i32(row, "pSkillId"))
         .filter(|skill_id| *skill_id > 0)
-}
-
-pub(super) fn decode_study_speedup(payload: &[u8]) -> (u64, i32, Vec<(i32, i32)>) {
-    let hero_id = decode_varint_u64_field(payload, 1);
-    let skill_id = decode_varint_field(payload, 2);
-    let items = decode_repeated_message_field(payload, 3)
-        .into_iter()
-        .filter_map(|item| {
-            let id = decode_varint_field(&item, 1);
-            let num = decode_varint_field(&item, 2);
-            (id > 0 && num > 0).then_some((id, num))
-        })
-        .collect();
-    (hero_id, skill_id, items)
 }
 
 pub(super) fn study_info_payload(account: &Value, now: u32) -> Vec<u8> {

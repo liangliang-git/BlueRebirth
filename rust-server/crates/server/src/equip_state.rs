@@ -4,19 +4,6 @@ use serde_json::{json, Value};
 
 use super::*;
 
-pub(super) fn decode_equip_enhance_request(payload: &[u8]) -> (u64, Vec<(i32, i32)>) {
-    let equip_id = decode_varint_u64_field(payload, 1);
-    let materials = decode_repeated_message_field(payload, 2)
-        .into_iter()
-        .filter_map(|item| {
-            let template_id = decode_varint_field(&item, 1);
-            let count = decode_varint_field(&item, 2);
-            (template_id > 0 && count > 0).then_some((template_id, count))
-        })
-        .collect();
-    (equip_id, materials)
-}
-
 pub(super) fn auto_select_enhancement_materials(
     account: &Value,
     catalog: Option<&EquipCatalog>,

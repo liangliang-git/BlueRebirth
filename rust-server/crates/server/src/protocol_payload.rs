@@ -4,6 +4,7 @@ use blueoath_protocol::Decode;
 
 use super::*;
 
+#[cfg(test)]
 pub(super) fn decode_hero_exp_item(payload: &[u8]) -> Option<(i32, i32)> {
     let mut item_id = 0;
     let mut num = 0;
@@ -79,99 +80,6 @@ pub(super) fn decode_varint_field(payload: &[u8], wanted_field: u8) -> i32 {
         }
     }
     0
-}
-
-pub(super) fn decode_hero_intensify_request(payload: &[u8]) -> (u64, Vec<u64>, bool) {
-    let mut hero_id = 0;
-    let mut consumed = Vec::new();
-    let mut super_intensify = false;
-    let mut index = 0;
-    while index < payload.len() {
-        let Ok((key, next)) = read_varint(payload, index) else {
-            break;
-        };
-        index = next;
-        let field = u8::try_from(key >> 3).unwrap_or_default();
-        let wire = key & 7;
-        match (field, wire) {
-            (1, 0) => {
-                if let Ok((value, next)) = read_varint(payload, index) {
-                    hero_id = value;
-                    index = next;
-                } else {
-                    break;
-                }
-            }
-            (2, 0) | (3, 0) => {
-                if let Ok((value, next)) = read_varint(payload, index) {
-                    if field == 2 {
-                        consumed.push(value);
-                    } else {
-                        super_intensify = value != 0;
-                    }
-                    index = next;
-                } else {
-                    break;
-                }
-            }
-            (2, 2) => {
-                let Ok((length, next)) = read_varint(payload, index) else {
-                    break;
-                };
-                let Ok(length) = usize::try_from(length) else {
-                    break;
-                };
-                let Some(end) = next.checked_add(length) else {
-                    break;
-                };
-                let Some(packed) = payload.get(next..end) else {
-                    break;
-                };
-                let mut packed_index = 0;
-                while packed_index < packed.len() {
-                    let Ok((value, next)) = read_varint(packed, packed_index) else {
-                        break;
-                    };
-                    consumed.push(value);
-                    packed_index = next;
-                }
-                index = end;
-            }
-            (_, 0) => {
-                if let Ok((_, next)) = read_varint(payload, index) {
-                    index = next;
-                } else {
-                    break;
-                }
-            }
-            (_, 1) => index = index.saturating_add(8),
-            (_, 2) => {
-                let Ok((length, next)) = read_varint(payload, index) else {
-                    break;
-                };
-                let Ok(length) = usize::try_from(length) else {
-                    break;
-                };
-                index = next.saturating_add(length);
-            }
-            (_, 5) => index = index.saturating_add(4),
-            _ => break,
-        }
-    }
-    (hero_id, consumed, super_intensify)
-}
-
-pub(super) fn decode_hero_advance_mub_request(payload: &[u8]) -> (u64, Vec<(i32, i32)>) {
-    let hero_id = decode_varint_u64_field(payload, 1);
-    let items = decode_repeated_message_field(payload, 2)
-        .into_iter()
-        .filter_map(|item| {
-            let item_id = decode_varint_field(&item, 1);
-            let amount = decode_varint_field(&item, 2);
-            (item_id > 0 && amount > 0).then_some((item_id, amount))
-        })
-        .collect();
-    (hero_id, items)
 }
 
 pub(super) fn decode_varint_u64_field(payload: &[u8], wanted_field: u8) -> u64 {
@@ -254,6 +162,7 @@ pub(super) fn battle_pass_result_from_request(
 
 /// Decode TMopUpArg. Client wraps argument message as field 1 of request args;
 /// retain direct-field fallback for older clients/tests.
+#[cfg(test)]
 pub(super) fn decode_mop_up_arg(payload: &[u8]) -> (u64, u64, u64) {
     let mut nested: Option<&[u8]> = None;
     let mut index = 0;
@@ -319,6 +228,7 @@ pub(super) fn decode_string_field(payload: &[u8], wanted_field: u8) -> Option<St
     }
     None
 }
+#[cfg(test)]
 pub(super) fn decode_hero_add_exp_request(payload: &[u8]) -> (u64, Vec<(i32, i32)>) {
     let mut hero_id = 0;
     let mut items = Vec::new();
@@ -436,48 +346,6 @@ pub(super) fn decode_repeated_message_field(payload: &[u8], wanted_field: u8) ->
     values
 }
 
-pub(super) fn decode_auto_equip_units(payload: &[u8]) -> Vec<(u64, Vec<(u64, u64)>)> {
-    decode_repeated_message_field(payload, 1)
-        .into_iter()
-        .filter_map(|unit| {
-            let hero_id = decode_varint_u64_field(&unit, 1);
-            let equips = decode_repeated_message_field(&unit, 2)
-                .into_iter()
-                .map(|equip| {
-                    (
-                        decode_varint_u64_field(&equip, 1),
-                        decode_varint_u64_field(&equip, 2),
-                    )
-                })
-                .filter(|(slot, _)| (1..=6).contains(slot))
-                .collect::<Vec<_>>();
-            (hero_id > 0 && !equips.is_empty()).then_some((hero_id, equips))
-        })
-        .collect()
-}
-
-pub(super) fn decode_equip_effect_request(payload: &[u8]) -> (u64, Vec<(i32, Vec<i32>)>) {
-    let hero_id = decode_varint_u64_field(payload, 1);
-    let effects = decode_repeated_message_field(payload, 2)
-        .into_iter()
-        .map(|effect| {
-            (
-                decode_varint_field(&effect, 1),
-                decode_repeated_varint_field(&effect, 2),
-            )
-        })
-        .collect();
-    (hero_id, effects)
-}
-
-pub(super) fn decode_equip_binding_request(payload: &[u8]) -> (u64, u64, u64) {
-    (
-        decode_varint_u64_field(payload, 1),
-        decode_varint_u64_field(payload, 2),
-        decode_varint_u64_field(payload, 3),
-    )
-}
-
 pub(super) fn json_i64(value: &Value, key: &str) -> Option<i64> {
     value.get(key).and_then(Value::as_i64)
 }
@@ -486,6 +354,7 @@ pub(super) fn json_bool(value: &Value, key: &str) -> bool {
     value.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
+#[cfg(test)]
 pub(super) fn decode_start_hero_groups(payload: &[u8]) -> Vec<Vec<i32>> {
     let mut groups = Vec::new();
     let mut index = 0;

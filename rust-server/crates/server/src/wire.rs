@@ -34,6 +34,7 @@ pub(crate) fn read_varint(payload: &[u8], mut index: usize) -> Result<(u64, usiz
     Err(())
 }
 
+#[cfg(test)]
 pub(crate) fn read_string_slice(payload: &[u8], index: usize) -> Option<(&[u8], usize)> {
     let (length, next) = read_varint(payload, index).ok()?;
     let length = usize::try_from(length).ok()?;
@@ -41,6 +42,7 @@ pub(crate) fn read_string_slice(payload: &[u8], index: usize) -> Option<(&[u8], 
     Some((payload.get(next..end)?, end))
 }
 
+#[cfg(test)]
 pub(crate) fn skip_wire(payload: &[u8], index: usize, wire: u64) -> Option<usize> {
     match wire {
         0 => read_varint(payload, index).ok().map(|(_, next)| next),

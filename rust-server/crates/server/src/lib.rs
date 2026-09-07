@@ -100,9 +100,10 @@ use protocol_payload::*;
 use shop_state::*;
 use study_state::*;
 use task_state::*;
+#[cfg(test)]
+use wire::skip_wire;
 use wire::{
     append_bytes_field, append_message_field, append_varint, append_varint_field, read_varint,
-    skip_wire,
 };
 
 pub use runtime::run;
