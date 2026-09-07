@@ -8,6 +8,21 @@ pub struct Response {
     pub payload: Vec<u8>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResponsePayload {
+    User(Vec<u8>),
+    Battle(Vec<u8>),
+    Raw(Vec<u8>),
+}
+
+impl ResponsePayload {
+    pub fn into_bytes(self) -> Vec<u8> {
+        match self {
+            Self::User(payload) | Self::Battle(payload) | Self::Raw(payload) => payload,
+        }
+    }
+}
+
 impl Response {
     pub fn new(method: impl Into<String>, payload: Vec<u8>) -> Self {
         Self {
@@ -26,6 +41,14 @@ impl Response {
             is_response: 1,
             ..TResponse::default()
         })
+    }
+
+    pub fn raw(method: impl Into<String>, payload: impl Into<Vec<u8>>) -> Self {
+        Self::new(method, payload.into())
+    }
+
+    pub fn from_payload(method: impl Into<String>, payload: ResponsePayload) -> Self {
+        Self::new(method, payload.into_bytes())
     }
 }
 
@@ -56,11 +79,44 @@ impl ResponseEffects {
         self.error = Some(error);
     }
 
+    pub fn fail_invalid(&mut self, message: &'static str) {
+        self.fail(GameError::InvalidRequest(message));
+    }
+
+    pub fn client_error(&self) -> Option<(i32, String)> {
+        self.error
+            .as_ref()
+            .map(|error| (error.client_code(), error.to_string()))
+    }
+
     pub fn error(&self) -> Option<&GameError> {
         self.error.as_ref()
     }
 
     pub fn into_parts(self) -> (Vec<Response>, Vec<Response>, Option<GameError>) {
         (self.pre, self.post, self.error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Response, ResponseEffects};
+
+    #[test]
+    fn response_effects_map_domain_failure_to_client_fields() {
+        let mut effects = ResponseEffects::default();
+        effects.fail_invalid("copy id");
+        assert_eq!(
+            effects.client_error(),
+            Some((1, "invalid request: copy id".to_owned()))
+        );
+    }
+
+    #[test]
+    fn raw_response_preserves_method_and_payload() {
+        assert_eq!(
+            Response::raw("user.GetInfo", [1, 2, 3].to_vec()),
+            Response::new("user.GetInfo", vec![1, 2, 3])
+        );
     }
 }

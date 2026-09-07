@@ -270,6 +270,20 @@ fn project_normalized_core(
         "DELETE FROM task_claims WHERE profile_id = ?1",
         params![profile_id],
     )?;
+    for table in [
+        "construction_jobs",
+        "buildings",
+        "daily_copy_progress",
+        "copy_progress",
+        "sea_progress",
+        "tower_progress",
+        "activity_progress",
+    ] {
+        transaction.execute(
+            &format!("DELETE FROM {table} WHERE profile_id = ?1"),
+            params![profile_id],
+        )?;
+    }
     transaction.execute(
         "DELETE FROM tasks WHERE profile_id = ?1",
         params![profile_id],
@@ -546,6 +560,148 @@ fn project_normalized_core(
             )?;
         }
     }
+
+    for (table, key) in [
+        ("sea_progress", "seaProgress"),
+        ("copy_progress", "copyProgress"),
+    ] {
+        if let Some(records) = account
+            .get(key)
+            .and_then(|state| state.get("records"))
+            .and_then(Value::as_array)
+        {
+            for record in records {
+                let Some(record) = record.as_object() else {
+                    continue;
+                };
+                let copy_id = positive_field(record, "copyId", 0);
+                if copy_id == 0 {
+                    continue;
+                }
+                if table == "sea_progress" {
+                    transaction.execute(
+                        "INSERT INTO sea_progress(
+                            profile_id, copy_id, star_level, pass_count
+                         ) VALUES (?1, ?2, ?3, ?4)
+                         ON CONFLICT(profile_id, copy_id) DO UPDATE SET
+                           star_level = excluded.star_level,
+                           pass_count = excluded.pass_count",
+                        params![
+                            profile_id,
+                            copy_id,
+                            non_negative_field(record, "starLevel"),
+                            non_negative_field(record, "passCount"),
+                        ],
+                    )?;
+                } else {
+                    transaction.execute(
+                        "INSERT INTO copy_progress(
+                            profile_id, copy_id, star_level, first_passed
+                         ) VALUES (?1, ?2, ?3, ?4)
+                         ON CONFLICT(profile_id, copy_id) DO UPDATE SET
+                           star_level = excluded.star_level,
+                           first_passed = excluded.first_passed",
+                        params![
+                            profile_id,
+                            copy_id,
+                            non_negative_field(record, "starLevel"),
+                            bool_field(record, "firstPass") | bool_field(record, "firstPassed"),
+                        ],
+                    )?;
+                }
+            }
+        }
+    }
+
+    let daily_reset_day = account
+        .get("dailyCopy")
+        .and_then(Value::as_object)
+        .map(|daily| non_negative_field(daily, "resetDay"))
+        .unwrap_or_default();
+    if let Some(chapters) = account
+        .get("dailyCopy")
+        .and_then(|state| state.get("chapters"))
+        .and_then(Value::as_array)
+    {
+        for chapter in chapters {
+            let Some(chapter) = chapter.as_object() else {
+                continue;
+            };
+            let chapter_id = positive_field(chapter, "chapterId", 0);
+            if chapter_id == 0 {
+                continue;
+            }
+            transaction.execute(
+                "INSERT INTO daily_copy_progress(
+                    profile_id, reset_day, chapter_id, group_id, challenge_times,
+                    success_times, select_ex, extra_group
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(profile_id, chapter_id) DO UPDATE SET
+                   reset_day = excluded.reset_day,
+                   group_id = excluded.group_id,
+                   challenge_times = excluded.challenge_times,
+                   success_times = excluded.success_times,
+                   select_ex = excluded.select_ex,
+                   extra_group = excluded.extra_group",
+                params![
+                    profile_id,
+                    daily_reset_day,
+                    chapter_id,
+                    positive_field(chapter, "groupId", 1),
+                    non_negative_field(chapter, "challengeTimes"),
+                    non_negative_field(chapter, "successTimes"),
+                    bool_field(chapter, "selectEx"),
+                    non_negative_field(chapter, "extraGroup"),
+                ],
+            )?;
+        }
+    }
+
+    if let Some(buildings) = account
+        .get("building")
+        .and_then(|state| state.get("buildings"))
+        .and_then(Value::as_array)
+    {
+        for building in buildings {
+            let Some(building) = building.as_object() else {
+                continue;
+            };
+            let building_id = positive_field(building, "id", 0);
+            if building_id == 0 {
+                continue;
+            }
+            transaction.execute(
+                "INSERT INTO buildings(profile_id, building_id, level, land_index)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(profile_id, building_id) DO UPDATE SET
+                   level = excluded.level,
+                   land_index = excluded.land_index",
+                params![
+                    profile_id,
+                    building_id,
+                    non_negative_field(building, "level"),
+                    non_negative_field(building, "landIndex"),
+                ],
+            )?;
+        }
+    }
+
+    if let Some(tower) = account.get("tower").and_then(Value::as_object) {
+        transaction.execute(
+            "INSERT INTO tower_progress(profile_id, chapter_id, floor, reset_day)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(profile_id) DO UPDATE SET
+               chapter_id = excluded.chapter_id,
+               floor = excluded.floor,
+               reset_day = excluded.reset_day",
+            params![
+                profile_id,
+                non_negative_field(tower, "chapterId"),
+                non_negative_field(tower, "floor"),
+                non_negative_field(tower, "resetDay"),
+            ],
+        )?;
+    }
     Ok(())
 }
 
@@ -623,6 +779,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0003_account_revisions.sql"),
     include_str!("../../../migrations/0004_core_account.sql"),
     include_str!("../../../migrations/0005_core_indexes.sql"),
+    include_str!("../../../migrations/0006_progress_social_activity.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

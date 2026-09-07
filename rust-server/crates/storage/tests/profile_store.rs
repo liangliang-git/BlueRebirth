@@ -160,7 +160,7 @@ fn opening_store_is_idempotent_and_records_schema_version() {
             row.get(0)
         })
         .unwrap();
-    assert!(version >= 5);
+    assert!(version >= 6);
     assert!(reopened.list().unwrap().is_empty());
     let _ = std::fs::remove_dir_all(root);
 }
@@ -238,7 +238,12 @@ fn account_snapshot_write_projects_core_rows_into_normalized_tables() {
         "bag": {"items": [{"templateId": 60000, "num": 8}]},
         "fleet": {"tactics": [{"formationId": 2, "strategyId": 4}]},
         "battleSession": {"copyId": 1001, "startedAt": 10},
-        "tasks": {"records": [{"taskId": 9, "type": 1, "progress": 2, "completed": true}]}
+        "tasks": {"records": [{"taskId": 9, "type": 1, "progress": 2, "completed": true}]},
+        "seaProgress": {"records": [{"copyId": 1001, "starLevel": 7, "passCount": 2}]},
+        "copyProgress": {"records": [{"copyId": 2001, "starLevel": 3, "firstPassed": true}]},
+        "dailyCopy": {"resetDay": 42, "chapters": [{"chapterId": 8, "groupId": 2, "challengeTimes": 1}]},
+        "building": {"buildings": [{"id": 3, "level": 4, "landIndex": 1}]},
+        "tower": {"chapterId": 7, "floor": 5, "resetDay": 42}
     });
 
     store.save_account("normalized", &account).unwrap();
@@ -252,6 +257,11 @@ fn account_snapshot_write_projects_core_rows_into_normalized_tables() {
         ("fleets", 1),
         ("battle_sessions", 1),
         ("tasks", 1),
+        ("sea_progress", 1),
+        ("copy_progress", 1),
+        ("daily_copy_progress", 1),
+        ("buildings", 1),
+        ("tower_progress", 1),
     ] {
         let count: i64 = connection
             .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
