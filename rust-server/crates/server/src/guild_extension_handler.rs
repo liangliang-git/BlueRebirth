@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
@@ -13,7 +15,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     if GameMethod::parse(method).is_family(MethodFamily::GuildWar) {
         return handle_guildwar(context, method, request_args);
     }
@@ -41,20 +43,20 @@ fn handle_guild_offer<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     match method {
-        "guildOffer.GetGuildOffer" => Some(guild_offer_payload(
-            context.account.as_deref().unwrap_or(&Value::Null),
-        )),
-        "guildOfferUser.GetGuildOfferUser" => Some(guild_offer_user_payload(
-            context.account.as_deref().unwrap_or(&Value::Null),
-        )),
+        "guildOffer.GetGuildOffer" => reply(
+            method,
+            guild_offer_payload(context.account.as_deref().unwrap_or(&Value::Null)),
+        ),
+        "guildOfferUser.GetGuildOfferUser" => reply(
+            method,
+            guild_offer_user_payload(context.account.as_deref().unwrap_or(&Value::Null)),
+        ),
         "guildOffer.GuildOffer" | "guildOffer.GuildOfferUser" => {
             let task_id = decode_varint_field(request_args, 1);
             let Some(account) = context.account.as_deref_mut() else {
-                *context.response_err = 1;
-                *context.response_err_msg = "account is unavailable".to_owned();
-                return Some(Vec::new());
+                return HandlerResult::Error(GameError::AccountUnavailable);
             };
             let state = guild_offer_state_mut(account);
             if task_id > 0 {
@@ -67,15 +69,13 @@ fn handle_guild_offer<'state, 'account, 'scratch>(
                     offer["completed"] = json!(true);
                 }
             }
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "guildOffer.AddOffer" => {
             let task_id = decode_varint_field(request_args, 1);
             let task_index = decode_varint_field(request_args, 2);
             let Some(account) = context.account.as_deref_mut() else {
-                *context.response_err = 1;
-                *context.response_err_msg = "account is unavailable".to_owned();
-                return Some(Vec::new());
+                return HandlerResult::Error(GameError::AccountUnavailable);
             };
             let state = guild_offer_state_mut(account);
             let offers = state["offers"]
@@ -94,48 +94,49 @@ fn handle_guild_offer<'state, 'account, 'scratch>(
                     "completed": false
                 }));
             }
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "guildOffer.AbandonOffer" => {
             let task_id = decode_varint_field(request_args, 1);
-            if let Some(account) = context.account.as_deref_mut() {
-                let state = guild_offer_state_mut(account);
-                state["offers"]
-                    .as_array_mut()
-                    .expect("offers must be an array")
-                    .retain(|offer| {
-                        offer.get("taskId").and_then(Value::as_i64) != Some(i64::from(task_id))
-                    });
-            }
-            Some(Vec::new())
+            let Some(account) = context.account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            let state = guild_offer_state_mut(account);
+            state["offers"]
+                .as_array_mut()
+                .expect("offers must be an array")
+                .retain(|offer| {
+                    offer.get("taskId").and_then(Value::as_i64) != Some(i64::from(task_id))
+                });
+            HandlerResult::PushOnly
         }
         "guildOffer.ReceiveOfferRewardPerson" => handle_guild_offer_reward(context, true),
         "guildOffer.ReceiveOfferRewardGuild" | "guildOffer.ReceiveOfferRewardAll" => {
             handle_guild_offer_reward(context, false)
         }
         "guildOffer.BuyOfferCount" => {
-            if let Some(account) = context.account.as_deref_mut() {
-                let state = guild_offer_state_mut(account);
-                state["dailyBuyCount"] = json!(state_i64(state, "dailyBuyCount").saturating_add(1));
-            }
-            Some(Vec::new())
+            let Some(account) = context.account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            let state = guild_offer_state_mut(account);
+            state["dailyBuyCount"] = json!(state_i64(state, "dailyBuyCount").saturating_add(1));
+            HandlerResult::PushOnly
         }
-        "guildOffer.GetRankList" | "guildofferrank.GetGuildRankList" => Some(
+        "guildOffer.GetRankList" | "guildofferrank.GetGuildRankList" => reply(
+            method,
             guild_offer_rank_payload(context.account.as_deref().unwrap_or(&Value::Null)),
         ),
-        _ => None,
+        _ => HandlerResult::Empty,
     }
 }
 
 fn handle_guild_offer_reward<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     personal: bool,
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     let Some(account) = context.account.as_deref_mut() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "account is unavailable".to_owned();
-        return Some(Vec::new());
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
     let points_key = if personal {
         "personalPoints"
@@ -186,7 +187,14 @@ fn handle_guild_offer_reward<'state, 'account, 'scratch>(
             .expect("claimed rewards must be an array")
             .push(json!(id));
     }
-    Some(encode_rewards_list(&rewards))
+    reply(
+        if personal {
+            "guildOffer.ReceiveOfferRewardPerson"
+        } else {
+            "guildOffer.ReceiveOfferRewardGuild"
+        },
+        encode_rewards_list(&rewards),
+    )
 }
 
 fn guild_offer_payload(account: &Value) -> Vec<u8> {
@@ -278,29 +286,36 @@ fn handle_guildwar<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     match method {
-        "guildwar.GetGuildwarInfo" => Some(guildwar_info_payload(
-            context.account.as_deref().unwrap_or(&Value::Null),
-        )),
-        "guildwar.GetBaseInfo" => Some(guildwar_base_payload(
-            context.account.as_deref().unwrap_or(&Value::Null),
-        )),
-        "guildwar.GetHeroLockInfo" => Some(guildwar_hero_lock_payload(
-            context.account.as_deref().unwrap_or(&Value::Null),
-        )),
-        "guildwar.GetRankList" => Some(guildwar_rank_payload(
-            context.account.as_deref().unwrap_or(&Value::Null),
-        )),
-        "guildwar.GetRankUserList" => Some(guildwar_user_rank_payload(
-            context.account.as_deref().unwrap_or(&Value::Null),
-        )),
-        "guildwar.GetBattleReport" => Some(guildwar_battle_report_payload(
-            context.account.as_deref().unwrap_or(&Value::Null),
-        )),
-        "guildwar.BattleReport" => Some(guildwar_battle_report_info_payload(
-            context.account.as_deref().unwrap_or(&Value::Null),
-        )),
+        "guildwar.GetGuildwarInfo" => reply(
+            method,
+            guildwar_info_payload(context.account.as_deref().unwrap_or(&Value::Null)),
+        ),
+        "guildwar.GetBaseInfo" => reply(
+            method,
+            guildwar_base_payload(context.account.as_deref().unwrap_or(&Value::Null)),
+        ),
+        "guildwar.GetHeroLockInfo" => reply(
+            method,
+            guildwar_hero_lock_payload(context.account.as_deref().unwrap_or(&Value::Null)),
+        ),
+        "guildwar.GetRankList" => reply(
+            method,
+            guildwar_rank_payload(context.account.as_deref().unwrap_or(&Value::Null)),
+        ),
+        "guildwar.GetRankUserList" => reply(
+            method,
+            guildwar_user_rank_payload(context.account.as_deref().unwrap_or(&Value::Null)),
+        ),
+        "guildwar.GetBattleReport" => reply(
+            method,
+            guildwar_battle_report_payload(context.account.as_deref().unwrap_or(&Value::Null)),
+        ),
+        "guildwar.BattleReport" => reply(
+            method,
+            guildwar_battle_report_info_payload(context.account.as_deref().unwrap_or(&Value::Null)),
+        ),
         "guildwar.GetGuildReward" => handle_guildwar_reward(context),
         "guildwar.GetHaveScores" => {
             let score = context
@@ -316,7 +331,7 @@ fn handle_guildwar<'state, 'account, 'scratch>(
                 decode_varint_field(request_args, 1).max(0) as u64,
             );
             append_varint_field(&mut output, 2, u64::from(score > 0));
-            Some(output)
+            reply(method, output)
         }
         "guildwar.GetHaveGuildReward" => {
             let claimed = context
@@ -328,25 +343,24 @@ fn handle_guildwar<'state, 'account, 'scratch>(
                 .unwrap_or(false);
             let mut output = Vec::new();
             append_varint_field(&mut output, 1, u64::from(!claimed));
-            Some(output)
+            reply(method, output)
         }
         "guildwar.GetGuildGradeId" => {
             let mut output = Vec::new();
             append_varint_field(&mut output, 1, 1);
             append_varint_field(&mut output, 2, 0);
-            Some(output)
+            reply(method, output)
         }
         "guildwar.UpdateBaseInfo" => {
-            if let Some(account) = context.account.as_deref_mut() {
-                let state = guild_war_state_mut(account);
-                state["baseId"] = json!(decode_varint_field(request_args, 1));
-                state["stageId"] = json!(decode_varint_field(request_args, 2));
-            }
-            Some(guildwar_base_payload(
-                context.account.as_deref().unwrap_or(&Value::Null),
-            ))
+            let Some(account) = context.account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            let state = guild_war_state_mut(account);
+            state["baseId"] = json!(decode_varint_field(request_args, 1));
+            state["stageId"] = json!(decode_varint_field(request_args, 2));
+            reply(method, guildwar_base_payload(account))
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
 }
 
@@ -360,9 +374,32 @@ fn guild_war_state_mut(account: &mut Value) -> &mut Value {
 
 fn handle_guildwar_reward<'state, 'account, 'scratch>(
     _context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
-    Some(guildwar_reward_list_payload(catalog))
+    reply(
+        "guildwar.GetGuildReward",
+        guildwar_reward_list_payload(catalog),
+    )
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::response::HandlerResult;
+
+    use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
+    }
 }
 
 fn guildwar_reward_list_payload(catalog: &GameplayCatalog) -> Vec<u8> {
