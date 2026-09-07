@@ -1,13 +1,16 @@
 #![allow(dead_code)]
 
+#[cfg(test)]
 use serde_json::Value;
 
 use super::*;
 
+#[cfg(test)]
 pub(super) fn mop_up_payload(account: &Value, now: u32) -> Vec<u8> {
     mop_up_payload_with_pass_rets(account, now, &[])
 }
 
+#[cfg(test)]
 pub(super) fn mop_up_payload_with_pass_rets(
     account: &Value,
     now: u32,
@@ -62,6 +65,7 @@ pub(super) fn mop_up_payload_with_pass_rets(
     output
 }
 
+#[cfg(test)]
 pub(super) fn completed_sweep_copy_id(account: &Value, now: u32) -> i32 {
     account
         .get("sweep")
@@ -88,6 +92,7 @@ pub(super) fn mop_up_pass_rets(copy_id: i32, rewards: &[ShopReward]) -> Vec<Vec<
     )]
 }
 
+#[cfg(test)]
 pub(super) fn mop_up_active_count(account: &Value, now: u32) -> usize {
     account
         .get("sweep")
@@ -161,6 +166,7 @@ pub(super) fn draw_copy_drop_with_seed(
     None
 }
 
+#[cfg(test)]
 pub(super) fn fleet_hero_ids(account: &Value, fleet_id: u64) -> Vec<u64> {
     let Some(tactics) = account
         .get("fleet")
@@ -187,6 +193,7 @@ pub(super) fn fleet_hero_ids(account: &Value, fleet_id: u64) -> Vec<u64> {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 #[cfg(test)]
 pub(super) fn settle_mop_up(
     account: &mut Value,
@@ -235,6 +242,7 @@ pub(super) fn settle_mop_up_with_config(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(super) fn settle_mop_up_with_gameplay_config(
     account: &mut Value,
     catalog: Option<&BattleCatalog>,
@@ -311,6 +319,7 @@ pub(super) fn settle_mop_up_with_gameplay_config(
     rewards
 }
 
+#[cfg(test)]
 pub(super) fn update_mop_up_state(account: &mut Value, method: &str, args: &[u8], now: u32) {
     let (fleet_id, copy_id, sweep_counts) = decode_mop_up_arg(args);
     let Some(root) = account.as_object_mut() else {
