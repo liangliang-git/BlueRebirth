@@ -333,7 +333,10 @@ fn typed_project_payload(project: &blueoath_domain::ConstructionProjectState) ->
     output
 }
 
-fn typed_construction_info_payload(account: &blueoath_domain::AccountState, now: u32) -> Vec<u8> {
+pub(super) fn typed_construction_info_payload(
+    account: &blueoath_domain::AccountState,
+    now: u32,
+) -> Vec<u8> {
     let mut groups = [Vec::new(), Vec::new(), Vec::new()];
     for job in &account.buildings.construction_jobs {
         let completed = job.completed || job.end_at > 0 && job.end_at <= u64::from(now);

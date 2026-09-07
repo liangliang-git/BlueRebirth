@@ -365,7 +365,7 @@ fn finish_study_typed(
     Ok(output)
 }
 
-fn study_info_payload_from_typed(account: &AccountState, _now: u32) -> Vec<u8> {
+pub(super) fn study_info_payload_from_typed(account: &AccountState, _now: u32) -> Vec<u8> {
     let mut output = Vec::new();
     append_varint_field(&mut output, 1, 2);
     for progress in &account.study.progress {
@@ -423,7 +423,7 @@ fn recover_typed_hero_mood(
     let _ = now;
 }
 
-fn bathroom_info_payload_from_typed(account: &AccountState) -> Vec<u8> {
+pub(super) fn bathroom_info_payload_from_typed(account: &AccountState) -> Vec<u8> {
     let mut output = Vec::new();
     if account.bathroom.heroes.is_empty() {
         output.extend_from_slice(&[0x0A, 0x00]);

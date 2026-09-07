@@ -1866,9 +1866,24 @@ where
         NetSocketFrameCodec::write(stream, 0, &push).await?;
 
         for (method, ret) in [
-            ("build.BuildsInfo", construction_info_payload(account, now)),
-            ("bathroom.BathroomInfo", bathroom_info_payload(account)),
-            ("study.GetStudyInfo", study_info_payload(account, now)),
+            (
+                "build.BuildsInfo",
+                typed_account_view
+                    .map(|typed| building_handler::typed_construction_info_payload(typed, now))
+                    .unwrap_or_else(|| construction_info_payload(account, now)),
+            ),
+            (
+                "bathroom.BathroomInfo",
+                typed_account_view
+                    .map(progression_handler::bathroom_info_payload_from_typed)
+                    .unwrap_or_else(|| bathroom_info_payload(account)),
+            ),
+            (
+                "study.GetStudyInfo",
+                typed_account_view
+                    .map(|typed| progression_handler::study_info_payload_from_typed(typed, now))
+                    .unwrap_or_else(|| study_info_payload(account, now)),
+            ),
             // TaskInfo: explicit teaching-stage row + daily count. Repeated task groups
             // may be empty when this Rust profile has no task catalog; persisted teaching
             // reward ids are retained so the client does not re-offer claimed rewards.
