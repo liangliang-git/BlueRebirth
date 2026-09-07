@@ -1,6 +1,7 @@
 use blueoath_protocol::{
     ChangeNameRequest, ChangeWorldChannelRequest, CopyRecordRequest, CopyStartRequest,
-    DailyCopyEnterRequest, Decode, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
+    DailyCopyEnterRequest, DailyCopySelectExRequest, Decode, FriendSearchRequest,
+    FriendTargetRequest, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
     SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
     SetSecretaryRequest,
 };
@@ -117,6 +118,34 @@ fn rejects_invalid_typed_copy_requests() {
     assert!(matches!(
         SeaDifficultyRequest::decode(&[0x08, 9, 0x10, 8]),
         Err(ProtocolError::Invalid("sea request has invalid value"))
+    ));
+}
+
+#[test]
+fn decodes_typed_social_requests_and_daily_selection() {
+    let target = FriendTargetRequest::decode(&[0x08, 42]).unwrap();
+    assert_eq!(target.uid, 42);
+    let search = FriendSearchRequest::decode(&[0x08, 42]).unwrap();
+    assert_eq!((search.uid, search.name), (42, String::new()));
+    let select = DailyCopySelectExRequest::decode(&[0x08, 1, 0x10, 1]).unwrap();
+    assert_eq!((select.chapter_id, select.select_ex), (1, true));
+}
+
+#[test]
+fn rejects_invalid_typed_social_requests() {
+    assert!(matches!(
+        FriendTargetRequest::decode(&[]),
+        Err(ProtocolError::Invalid("friend request is missing target"))
+    ));
+    assert!(matches!(
+        FriendSearchRequest::decode(&[]),
+        Err(ProtocolError::Invalid("friend search requires uid or name"))
+    ));
+    assert!(matches!(
+        DailyCopySelectExRequest::decode(&[0x08, 0]),
+        Err(ProtocolError::Invalid(
+            "daily copy select chapter is invalid"
+        ))
     ));
 }
 
