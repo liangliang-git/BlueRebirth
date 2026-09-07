@@ -1,6 +1,9 @@
 use serde_json::{json, Value};
 
-use super::super::config::{SharedPush, SharedSocialState, TypedCoopRoom, TypedCoopUser};
+use super::super::config::{
+    SharedPush, SharedSocialState, TypedBattleRoom, TypedBattleSession, TypedCoopRoom,
+    TypedCoopUser, TypedMatchQueueEntry,
+};
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
@@ -14,6 +17,7 @@ pub(super) fn handles_typed(method: &str) -> bool {
     method.starts_with("matchsvr_")
         || method.starts_with("matchsvr.")
         || method.starts_with("room.")
+        || method.starts_with("battle.")
         || canonical_typed_method(method).is_some()
 }
 
@@ -170,7 +174,7 @@ pub(super) fn handle_typed(
             enqueue_typed_room_push(&mut shared, &users, uid, payload);
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
-        "matchsvr.UploadTactic" => {
+        "matchsvr.UploadTactic" | "matchsvr.Deliver" => {
             let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
             let Some(hero_ids) = typed_coop_hero_ids(account, request_args, false) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
@@ -197,6 +201,44 @@ pub(super) fn handle_typed(
             enqueue_typed_room_push(&mut shared, &users, uid, payload);
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
+        "matchsvr.SendSetPassWord" => {
+            let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
+            let mut shared = match state.shared_social.lock() {
+                Ok(shared) => shared,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "social state is unavailable",
+                    ))
+                }
+            };
+            let Some(room) = shared.typed_rooms.get_mut(&room_id) else {
+                return HandlerResult::Error(GameError::NotFound("co-op room"));
+            };
+            if !room.users.iter().any(|user| user.uid == uid) {
+                return HandlerResult::Error(GameError::InvalidState("user is not in co-op room"));
+            }
+            room.password = decode_varint_u64_field(request_args, 2);
+            HandlerResult::Reply(Response::raw(method, Vec::new()))
+        }
+        "matchsvr.GetChapterInfo" => {
+            let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
+            let shared = match state.shared_social.lock() {
+                Ok(shared) => shared,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "social state is unavailable",
+                    ))
+                }
+            };
+            let Some(room) = shared.typed_rooms.get(&room_id) else {
+                return HandlerResult::Error(GameError::NotFound("co-op room"));
+            };
+            HandlerResult::Reply(Response::raw(method, typed_coop_room_payload(room)))
+        }
+        "matchsvr.Remind"
+        | "matchsvr.Invite"
+        | "matchsvr.RefuseInvite"
+        | "matchsvr.AcceptInvite" => HandlerResult::Reply(Response::raw(method, Vec::new())),
         "matchsvr.GetRoomList" => {
             let shared = match state.shared_social.lock() {
                 Ok(shared) => shared,
@@ -270,6 +312,208 @@ pub(super) fn handle_typed(
         "matchsvr.CancelAutoReady" => {
             typed_coop_set_auto_ready(state, uid, request_args, false, method)
         }
+        "battle.CreateRoom" => {
+            let now = current_unix_seconds();
+            let mut shared = match state.shared_social.lock() {
+                Ok(shared) => shared,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "social state is unavailable",
+                    ))
+                }
+            };
+            let room_id = next_typed_battle_id(&shared, now, uid);
+            shared.typed_battle_rooms.insert(
+                room_id,
+                TypedBattleRoom {
+                    room_id,
+                    owner_id: uid,
+                    users: vec![uid],
+                },
+            );
+            HandlerResult::Reply(Response::raw(method, battle_room_ret(room_id)))
+        }
+        "battle.JoinRoom" => {
+            let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
+            let mut shared = match state.shared_social.lock() {
+                Ok(shared) => shared,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "social state is unavailable",
+                    ))
+                }
+            };
+            let Some(room) = shared.typed_battle_rooms.get_mut(&room_id) else {
+                return HandlerResult::Error(GameError::NotFound("battle room"));
+            };
+            if !room.users.contains(&uid) {
+                if room.users.len() >= 2 {
+                    return HandlerResult::Error(GameError::InvalidState("battle room is full"));
+                }
+                room.users.push(uid);
+            }
+            HandlerResult::Reply(Response::raw(method, Vec::new()))
+        }
+        "battle.LeaveRoom" => {
+            let mut shared = match state.shared_social.lock() {
+                Ok(shared) => shared,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "social state is unavailable",
+                    ))
+                }
+            };
+            let room_id = shared
+                .typed_battle_rooms
+                .iter()
+                .find(|(_, room)| room.users.contains(&uid))
+                .map(|(room_id, _)| *room_id);
+            if let Some(room_id) = room_id {
+                let remove = shared
+                    .typed_battle_rooms
+                    .get(&room_id)
+                    .is_some_and(|room| room.owner_id == uid);
+                if remove {
+                    shared.typed_battle_rooms.remove(&room_id);
+                } else if let Some(room) = shared.typed_battle_rooms.get_mut(&room_id) {
+                    room.users.retain(|user_uid| *user_uid != uid);
+                }
+            }
+            HandlerResult::Reply(Response::raw(method, Vec::new()))
+        }
+        "battle.MatchJoin" => {
+            let match_type = decode_varint_field(request_args, 1).max(0) as u32;
+            let mut shared = match state.shared_social.lock() {
+                Ok(shared) => shared,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "social state is unavailable",
+                    ))
+                }
+            };
+            shared
+                .typed_match_queue
+                .retain(|entry| entry.uid != uid || entry.match_type != match_type);
+            if let Some(index) = shared
+                .typed_match_queue
+                .iter()
+                .position(|entry| entry.match_type == match_type && entry.uid != uid)
+            {
+                let opponent = shared.typed_match_queue.remove(index);
+                let payload = battle_match_ret_payload(&[opponent.uid, uid]);
+                enqueue_shared_push(
+                    &mut shared,
+                    opponent.uid,
+                    "battle.MatchJoin",
+                    payload.clone(),
+                );
+                HandlerResult::Reply(Response::raw(method, payload))
+            } else {
+                shared
+                    .typed_match_queue
+                    .push(TypedMatchQueueEntry { uid, match_type });
+                HandlerResult::Reply(Response::raw(method, battle_match_ret_payload(&[uid])))
+            }
+        }
+        "battle.MatchLeave" => {
+            let match_type = decode_varint_field(request_args, 1).max(0) as u32;
+            if let Ok(mut shared) = state.shared_social.lock() {
+                shared
+                    .typed_match_queue
+                    .retain(|entry| entry.uid != uid || entry.match_type != match_type);
+            }
+            HandlerResult::Reply(Response::raw(method, Vec::new()))
+        }
+        "battle.SendAutoMsg" => {
+            let msg_id = decode_varint_field(request_args, 1).max(0);
+            let payload = battle_auto_msg_payload(uid, msg_id);
+            if let Ok(mut shared) = state.shared_social.lock() {
+                let recipients = shared
+                    .typed_battle_rooms
+                    .values()
+                    .find(|room| room.users.contains(&uid))
+                    .map(|room| room.users.clone())
+                    .unwrap_or_default();
+                for recipient_uid in recipients.into_iter().filter(|value| *value != uid) {
+                    enqueue_shared_push(
+                        &mut shared,
+                        recipient_uid,
+                        "battle.receiveAutoMsg",
+                        payload.clone(),
+                    );
+                }
+            }
+            append_method_push(post_pushes, "battle.receiveAutoMsg", payload);
+            let mut response = Vec::new();
+            append_varint_field(&mut response, 1, 0);
+            HandlerResult::Reply(Response::raw(method, response))
+        }
+        "battle.pvpMatchReady" | "battle.pvpMatchReadyTimeout" => {
+            let now = current_unix_seconds();
+            let room_id = state
+                .shared_social
+                .lock()
+                .ok()
+                .and_then(|shared| {
+                    shared
+                        .typed_battle_rooms
+                        .iter()
+                        .find(|(_, room)| room.users.contains(&uid))
+                        .map(|(room_id, _)| *room_id)
+                })
+                .unwrap_or_else(|| u64::from(now % 2_000_000_000).saturating_add(uid.min(999)));
+            HandlerResult::Reply(Response::raw(method, pvp_match_ready_payload(room_id)))
+        }
+        "battle.CreateMutiBattle" => {
+            let now = current_unix_seconds();
+            let mut shared = match state.shared_social.lock() {
+                Ok(shared) => shared,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "social state is unavailable",
+                    ))
+                }
+            };
+            let battle_id = next_typed_battle_id(&shared, now, uid);
+            shared.typed_battles.insert(
+                battle_id,
+                TypedBattleSession {
+                    battle_id,
+                    users: vec![uid],
+                },
+            );
+            HandlerResult::Reply(Response::raw(
+                method,
+                battle_create_multi_ret(state.battle_port, battle_id, request_args),
+            ))
+        }
+        "battle.createBattleInfo" => {
+            let shared = match state.shared_social.lock() {
+                Ok(shared) => shared,
+                Err(_) => {
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "social state is unavailable",
+                    ))
+                }
+            };
+            let battle_id = shared
+                .typed_battles
+                .values()
+                .find(|battle| battle.users.contains(&uid))
+                .map(|battle| battle.battle_id)
+                .or_else(|| {
+                    shared
+                        .typed_battle_rooms
+                        .values()
+                        .find(|room| room.users.contains(&uid))
+                        .map(|room| room.room_id)
+                })
+                .unwrap_or_default();
+            HandlerResult::Reply(Response::raw(
+                method,
+                typed_battle_push_payload(state.battle_port, battle_id, uid),
+            ))
+        }
         _ => HandlerResult::Error(GameError::InvalidRequest("co-op method is unsupported")),
     }
 }
@@ -288,6 +532,13 @@ fn canonical_typed_method(method: &str) -> Option<&str> {
             "Cancel" => Some("matchsvr.Cancel"),
             "Kick" => Some("matchsvr.Kick"),
             "Tactic" => Some("matchsvr.UploadTactic"),
+            "Deliver" => Some("matchsvr.Deliver"),
+            "SendSetPassWord" => Some("matchsvr.SendSetPassWord"),
+            "GetChapterInfo" => Some("matchsvr.GetChapterInfo"),
+            "Remind" => Some("matchsvr.Remind"),
+            "Invite" => Some("matchsvr.Invite"),
+            "RefuseInvite" => Some("matchsvr.RefuseInvite"),
+            "AcceptInvite" => Some("matchsvr.AcceptInvite"),
             "GetRoomList" => Some("matchsvr.GetRoomList"),
             "SwitchRoomPublicState" => Some("matchsvr.SwitchRoomPublicState"),
             "Start" => Some("matchsvr.Start"),
@@ -307,6 +558,13 @@ fn canonical_typed_method(method: &str) -> Option<&str> {
         | "matchsvr.Cancel"
         | "matchsvr.Kick"
         | "matchsvr.UploadTactic"
+        | "matchsvr.Deliver"
+        | "matchsvr.SendSetPassWord"
+        | "matchsvr.GetChapterInfo"
+        | "matchsvr.Remind"
+        | "matchsvr.Invite"
+        | "matchsvr.RefuseInvite"
+        | "matchsvr.AcceptInvite"
         | "matchsvr.GetRoomList"
         | "matchsvr.SwitchRoomPublicState"
         | "matchsvr.Start"
@@ -314,9 +572,24 @@ fn canonical_typed_method(method: &str) -> Option<&str> {
         | "matchsvr.CancelFocus"
         | "matchsvr.SetAutoReady"
         | "matchsvr.CancelAutoReady"
+        | "battle.CreateRoom"
+        | "battle.JoinRoom"
+        | "battle.LeaveRoom"
+        | "battle.MatchJoin"
+        | "battle.MatchLeave"
+        | "battle.SendAutoMsg"
+        | "battle.pvpMatchReady"
+        | "battle.pvpMatchReadyTimeout"
+        | "battle.CreateMutiBattle"
+        | "battle.createBattleInfo"
         | "room.StartMatch"
         | "room.StopMatch" => Some(method),
-        _ if method.starts_with("matchsvr.") || method.starts_with("room.") => Some(method),
+        _ if method.starts_with("matchsvr.")
+            || method.starts_with("room.")
+            || method.starts_with("battle.") =>
+        {
+            Some(method)
+        }
         _ => None,
     }
 }
@@ -499,6 +772,24 @@ fn typed_coop_set_auto_ready(
     };
     user.auto_ready = auto_ready;
     HandlerResult::Reply(Response::raw(method, Vec::new()))
+}
+
+fn next_typed_battle_id(shared: &SharedSocialState, now: u32, uid: u64) -> u64 {
+    let mut id = u64::from(now % 2_000_000_000).saturating_add(uid.min(999));
+    while shared.typed_battle_rooms.contains_key(&id) || shared.typed_battles.contains_key(&id) {
+        id = id.saturating_add(1);
+    }
+    id
+}
+
+fn typed_battle_push_payload(port: u16, battle_id: u64, uid: u64) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_bytes_field(&mut output, 1, b"127.0.0.1");
+    append_varint_field(&mut output, 2, u64::from(port));
+    append_varint_field(&mut output, 3, battle_id);
+    append_bytes_field(&mut output, 4, b"local-battle");
+    append_varint_field(&mut output, 6, uid);
+    output
 }
 
 pub(super) fn handle<'state, 'account, 'scratch>(
@@ -1655,5 +1946,45 @@ mod typed_tests {
             ),
             HandlerResult::Reply(_)
         ));
+    }
+
+    #[test]
+    fn typed_battle_control_plane_avoids_json_state() {
+        let state = ServerState::new("battle", "Captain", "test");
+        let mut first = NewAccountFactory::create(ProfileId::new("battle-1").unwrap(), "First");
+        let mut second = NewAccountFactory::create(ProfileId::new("battle-2").unwrap(), "Second");
+        second.character.uid = 2;
+        let mut pushes = Vec::new();
+
+        assert!(matches!(
+            handle_typed(&state, &mut first, "battle.CreateRoom", &[], &mut pushes),
+            HandlerResult::Reply(_)
+        ));
+        let room_id = state
+            .shared_social
+            .lock()
+            .unwrap()
+            .typed_battle_rooms
+            .keys()
+            .next()
+            .copied()
+            .unwrap();
+        let mut join = Vec::new();
+        append_varint_field(&mut join, ROOM_ID_FIELD, room_id);
+        assert!(matches!(
+            handle_typed(&state, &mut second, "battle.JoinRoom", &join, &mut pushes),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            state
+                .shared_social
+                .lock()
+                .unwrap()
+                .typed_battle_rooms
+                .get(&room_id)
+                .unwrap()
+                .users,
+            vec![1, 2]
+        );
     }
 }
