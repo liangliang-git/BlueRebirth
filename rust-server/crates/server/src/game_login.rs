@@ -1040,8 +1040,15 @@ where
             || method.is_family(MethodFamily::EquipNewTestCopy)
             || method.is_family(MethodFamily::EquipActivity) =>
         {
-            let result = if let Some(typed) = typed_account.as_ref() {
-                let result = equip_handler::handle_typed(typed, request.method.as_str());
+            let result = if let Some(typed) = typed_account.as_mut() {
+                let result = equip_handler::handle_typed(
+                    typed,
+                    request.method.as_str(),
+                    request_args,
+                    &mut pre_pushes,
+                    equip_catalog,
+                    task_catalog,
+                );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result
                 } else {

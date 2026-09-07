@@ -4,12 +4,152 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
-pub(super) fn handle_typed(account: &blueoath_domain::AccountState, method: &str) -> HandlerResult {
+pub(super) fn handle_typed(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    pre_pushes: &mut Vec<Vec<u8>>,
+    equip_catalog: Option<&EquipCatalog>,
+    task_catalog: Option<&TaskCatalog>,
+) -> HandlerResult {
     match method {
         "equip.UpdateEquipBagData" => HandlerResult::Reply(Response::raw(
             method,
             EquipListCodec::encode(&equip_list_from_typed_account(account)),
         )),
+        "equip.Enhance" => {
+            let Some(catalog) = equip_catalog else {
+                return HandlerResult::Empty;
+            };
+            let (equip_id, materials) = decode_equip_enhance_request(request_args);
+            if materials.is_empty() {
+                return HandlerResult::Empty;
+            }
+            let Some(equip_id) = blueoath_domain::EquipId::new(equip_id).ok() else {
+                return HandlerResult::Error(GameError::InvalidRequest("equipment id is invalid"));
+            };
+            let Some(target) = account.dock.equipments.get(&equip_id).cloned() else {
+                return HandlerResult::Error(GameError::InvalidRequest("equipment was not found"));
+            };
+            let template_id = i32::try_from(target.template_id.get()).unwrap_or_default();
+            let max_level = *catalog
+                .enhance_max_by_template
+                .get(&template_id)
+                .unwrap_or(&0);
+            let current_level = i32::try_from(target.enhance_level).unwrap_or(i32::MAX);
+            if max_level <= 0 || current_level >= max_level {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "equipment enhancement requirements are not met",
+                ));
+            }
+            let mut totals = std::collections::BTreeMap::new();
+            for (item_id, count) in materials {
+                if item_id <= 0 || count <= 0 {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "equipment enhancement materials are invalid",
+                    ));
+                }
+                let entry = totals.entry(item_id).or_insert(0i32);
+                *entry = entry.saturating_add(count);
+            }
+            let mut added_exp = 0i64;
+            for (item_id, count) in &totals {
+                let Some((exp, limits)) = catalog.enhance_materials.get(item_id) else {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "equipment enhancement material is not configured",
+                    ));
+                };
+                if limits.is_some_and(|(min, max)| current_level < min || current_level > max) {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "equipment enhancement material is not valid for level",
+                    ));
+                }
+                let Some(item) =
+                    blueoath_domain::TemplateId::new(u64::try_from(*item_id).unwrap_or_default())
+                        .ok()
+                else {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "material id is invalid",
+                    ));
+                };
+                if account
+                    .inventory
+                    .items
+                    .get(&item)
+                    .copied()
+                    .unwrap_or_default()
+                    < u64::try_from(*count).unwrap_or(u64::MAX)
+                {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "equipment enhancement materials are insufficient",
+                    ));
+                }
+                added_exp =
+                    added_exp.saturating_add(i64::from(*exp).saturating_mul(i64::from(*count)));
+            }
+            let completed_exp = |level: i32| {
+                (1..=level)
+                    .filter_map(|value| catalog.enhance_level_exp.get(&value))
+                    .map(|value| i64::from(*value))
+                    .sum::<i64>()
+            };
+            let mut level = current_level;
+            let mut exp = i64::try_from(target.enhance_exp).unwrap_or(i64::MAX);
+            let base_exp = completed_exp(level);
+            if exp < base_exp {
+                exp = base_exp.saturating_add(exp);
+            }
+            exp = exp.saturating_add(added_exp);
+            while level < max_level {
+                let next_exp = completed_exp(level.saturating_add(1));
+                if next_exp <= 0 || exp < next_exp {
+                    break;
+                }
+                level = level.saturating_add(1);
+            }
+            if level == current_level {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "equipment enhancement requirements are not met",
+                ));
+            }
+            for (item_id, count) in totals {
+                let item =
+                    blueoath_domain::TemplateId::new(u64::try_from(item_id).unwrap_or_default())
+                        .unwrap();
+                if let Some(available) = account.inventory.items.get_mut(&item) {
+                    *available = available.saturating_sub(u64::try_from(count).unwrap_or_default());
+                }
+            }
+            if let Some(target) = account.dock.equipments.get_mut(&equip_id) {
+                target.enhance_level = u32::try_from(level).unwrap_or(u32::MAX);
+                target.enhance_exp = u64::try_from(exp).unwrap_or(u64::MAX);
+            }
+            let progress = account.tasks.progress.entry(2726).or_default();
+            *progress = progress.saturating_add(1);
+            append_method_push(
+                pre_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "equip.UpdateEquipBagData",
+                EquipListCodec::encode(&equip_list_from_typed_account(account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "task.TaskInfo",
+                task_info_payload_from_typed_account(account, task_catalog),
+            );
+            HandlerResult::Reply(Response::raw(
+                method,
+                encode_equip_enhance_response(
+                    equip_id.get(),
+                    level,
+                    i32::try_from(exp).unwrap_or(i32::MAX),
+                ),
+            ))
+        }
         _ => HandlerResult::Empty,
     }
 }
@@ -812,10 +952,75 @@ mod tests {
                 hero_id: None,
             },
         );
-        let HandlerResult::Reply(response) = handle_typed(&account, "equip.UpdateEquipBagData")
-        else {
+        let HandlerResult::Reply(response) = handle_typed(
+            &mut account,
+            "equip.UpdateEquipBagData",
+            &[],
+            &mut Vec::new(),
+            None,
+            None,
+        ) else {
             panic!("typed equipment route must reply");
         };
         assert!(response.payload.len() > 2);
+    }
+
+    #[test]
+    fn typed_equip_enhance_consumes_material_and_updates_equipment() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("equip-enhance-typed").unwrap(),
+            "Captain",
+        );
+        let item_id = blueoath_domain::TemplateId::new(10_182).unwrap();
+        let before = account
+            .inventory
+            .items
+            .get(&item_id)
+            .copied()
+            .unwrap_or_default();
+        let mut catalog = EquipCatalog::default();
+        catalog.enhance_max_by_template.insert(30_091, 5);
+        catalog.enhance_materials.insert(10_182, (600, None));
+        for level in 1..=5 {
+            catalog.enhance_level_exp.insert(level, 500);
+        }
+        let mut material = Vec::new();
+        append_varint_field(&mut material, 1, 10_182);
+        append_varint_field(&mut material, 2, 1);
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, 1);
+        append_bytes_field(&mut args, 2, &material);
+        let mut pushes = Vec::new();
+
+        let result = handle_typed(
+            &mut account,
+            "equip.Enhance",
+            &args,
+            &mut pushes,
+            Some(&catalog),
+            None,
+        );
+
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert_eq!(account.inventory.items.get(&item_id), Some(&(before - 1)));
+        assert_eq!(
+            account
+                .dock
+                .equipments
+                .get(&blueoath_domain::EquipId::new(1).unwrap())
+                .unwrap()
+                .enhance_level,
+            1
+        );
+        assert_eq!(
+            account
+                .dock
+                .equipments
+                .get(&blueoath_domain::EquipId::new(1).unwrap())
+                .unwrap()
+                .enhance_exp,
+            600
+        );
+        assert_eq!(pushes.len(), 3);
     }
 }
