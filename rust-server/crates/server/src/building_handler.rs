@@ -634,7 +634,7 @@ fn set_typed_building_production(
     if !account.buildings.levels.contains_key(&building_id) {
         return false;
     }
-    let Some(recipe) = catalog.recipe_configs.get(&request.recipe_id) else {
+    let Some(recipe) = catalog.typed_recipe_configs.get(&request.recipe_id) else {
         return false;
     };
     let template_id = account
@@ -643,20 +643,15 @@ fn set_typed_building_production(
         .get(&building_id)
         .and_then(|value| i32::try_from(*value).ok())
         .unwrap_or_default();
-    let Some(building_config) = catalog.building_configs.get(&template_id) else {
+    let Some(building_config) = catalog.typed_building_configs.get(&template_id) else {
         return false;
     };
-    if json_i32(building_config, "type") != Some(7) {
+    if building_config.building_type != 7 {
         return false;
     }
-    let recipe_time = json_i32(recipe, "time").unwrap_or_default().max(1);
-    let productivity = json_i32(building_config, "productivity")
-        .unwrap_or_default()
-        .max(0);
-    let produce_speed = json_i32(building_config, "producespeed")
-        .or_else(|| json_i32(building_config, "produceSpeed"))
-        .unwrap_or_default()
-        .max(0);
+    let recipe_time = recipe.time_seconds.max(1);
+    let productivity = building_config.productivity.max(0);
+    let produce_speed = building_config.produce_speed.max(0);
     account.buildings.productions.insert(
         building_id,
         blueoath_domain::BuildingProductionState {
@@ -699,10 +694,10 @@ fn collect_typed_building_rewards(
             .get(&id)
             .and_then(|value| i32::try_from(*value).ok())
             .unwrap_or_default();
-        let Some(config) = catalog.building_configs.get(&template_id) else {
+        let Some(config) = catalog.typed_building_configs.get(&template_id) else {
             continue;
         };
-        let building_type = json_i32(config, "type").unwrap_or_default();
+        let building_type = config.building_type;
         let Some(production) = account.buildings.productions.get(&id).cloned() else {
             continue;
         };
@@ -753,8 +748,7 @@ fn collect_typed_building_rewards(
                     state.last_update_at = u64::from(now);
                 }
             } else {
-                let max = u32::try_from(json_i32(config, "productmax").unwrap_or_default().max(0))
-                    .unwrap_or_default();
+                let max = u32::try_from(config.product_max.max(0)).unwrap_or_default();
                 let settled = state.product_count.min(max);
                 state.product_count = 0;
                 state.status = if settled >= max { 1 } else { 3 };
@@ -768,18 +762,18 @@ fn collect_typed_building_rewards(
 
 fn typed_resource_reward(
     production: &blueoath_domain::BuildingProductionState,
-    config: &serde_json::Value,
+    config: &BuildingConfig,
     catalog: &BuildingCatalog,
     resource_id: Option<i32>,
     now: u32,
     oil_multiplier: f64,
     gold_multiplier: f64,
 ) -> Option<ShopReward> {
-    let product_id = json_i32_array(config, "productid").get(1).copied()?;
+    let product_id = config.product_id?;
     if !matches!(product_id, 1 | 5) || resource_id.is_some_and(|id| id != product_id) {
         return None;
     }
-    let max = json_i32(config, "productmax").unwrap_or_default().max(0);
+    let max = config.product_max.max(0);
     let mut count = i64::from(production.product_count.min(u32::try_from(max).ok()?));
     if production.status == 3 && production.productivity > 0 && count < i64::from(max) {
         let delta = i64::from(now)
@@ -818,17 +812,16 @@ fn typed_resource_reward(
 
 fn typed_item_reward(
     production: &blueoath_domain::BuildingProductionState,
-    config: &serde_json::Value,
+    config: &BuildingConfig,
     catalog: &BuildingCatalog,
     now: u32,
 ) -> Option<(ShopReward, u32)> {
     let recipe_id = i32::try_from(production.recipe_id).ok()?;
-    let recipe = catalog.recipe_configs.get(&recipe_id)?;
-    let recipe_time = i64::from(json_i32(recipe, "time")?.max(1));
-    let item = recipe.get("item")?.as_array()?;
-    let goods_type = i32::try_from(item.first()?.as_i64()?).ok()?;
-    let item_id = i32::try_from(item.get(1)?.as_i64()?).ok()?;
-    let item_num = i32::try_from(item.get(2)?.as_i64()?).ok()?.max(1);
+    let recipe = catalog.typed_recipe_configs.get(&recipe_id)?;
+    let recipe_time = i64::from(recipe.time_seconds.max(1));
+    let goods_type = recipe.goods_type;
+    let item_id = recipe.item_id;
+    let item_num = recipe.item_amount.max(1);
     let completed = if production.status == 3 {
         u32::try_from(
             i64::from(now)
@@ -841,8 +834,7 @@ fn typed_item_reward(
     } else {
         0
     };
-    let max = u32::try_from(json_i32(config, "productmax").unwrap_or_default().max(0))
-        .unwrap_or(u32::MAX);
+    let max = u32::try_from(config.product_max.max(0)).unwrap_or(u32::MAX);
     let total = production.product_count.saturating_add(completed).min(max);
     (total > 0).then_some((
         ShopReward {

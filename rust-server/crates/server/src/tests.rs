@@ -44,13 +44,13 @@ use super::{
     sync_typed_daily_copy_state, sync_typed_preset_fleet_state, task_completed, task_info_payload,
     task_info_payload_from_typed_account, update_bathroom_state, update_building_assignments,
     update_mop_up_state, validate_battle_attack, BattleCatalog, BattleCopy, BattleEnemy,
-    BattleFleetReward, BuildShipCatalog, BuildingCatalog, ChapterCatalog, CommanderLevelCatalog,
-    EquipCatalog, EquipLevelbreakRule, EquipNewTestCatalog, EquipNum, EquipRenovateRule,
-    HeroBreakdownCatalog, HeroLevelCatalog, HeroSkillUpgradeCatalog, MailTemplate, ServerConfig,
-    ServerState, ShipAdvanceCatalog, ShipBreakCatalog, ShipRemouldCatalog, ShipStat,
-    ShipStatCatalog, ShopCatalog, ShopCost, ShopGood, ShopReward, SupportCatalog, SupportFleetItem,
-    TalentCatalog, TalentNode, TaskCatalog, TaskDefinition, UserInfoCodec, DEFAULT_GUILD_ID,
-    GUILD_MEMBER,
+    BattleFleetReward, BuildShipCatalog, BuildingCatalog, BuildingConfig, ChapterCatalog,
+    CommanderLevelCatalog, EquipCatalog, EquipLevelbreakRule, EquipNewTestCatalog, EquipNum,
+    EquipRenovateRule, HeroBreakdownCatalog, HeroLevelCatalog, HeroSkillUpgradeCatalog,
+    MailTemplate, RecipeConfig, ServerConfig, ServerState, ShipAdvanceCatalog, ShipBreakCatalog,
+    ShipRemouldCatalog, ShipStat, ShipStatCatalog, ShopCatalog, ShopCost, ShopGood, ShopReward,
+    SupportCatalog, SupportFleetItem, TalentCatalog, TalentNode, TaskCatalog, TaskDefinition,
+    UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
 };
 use blueoath_domain::{FleetId, FleetRecord, HeroId, NewAccountFactory, ProfileId, TemplateId};
 use blueoath_protocol::{
@@ -439,9 +439,26 @@ fn typed_building_production_persists_and_collects_typed_reward() {
     catalog
         .building_configs
         .insert(41, json!({"type": 7, "productmax": 10, "productivity": 0}));
+    catalog.typed_building_configs.insert(
+        41,
+        BuildingConfig {
+            building_type: 7,
+            product_max: 10,
+            ..BuildingConfig::default()
+        },
+    );
     catalog
         .recipe_configs
         .insert(9, json!({"time": 60, "item": [1, 30001, 2]}));
+    catalog.typed_recipe_configs.insert(
+        9,
+        RecipeConfig {
+            time_seconds: 60,
+            goods_type: 1,
+            item_id: 30001,
+            item_amount: 2,
+        },
+    );
     let mut pushes = Vec::new();
     let mut produce_args = Vec::new();
     append_varint_field(&mut produce_args, 1, 2);
@@ -5893,6 +5910,8 @@ fn building_production_claim_settles_resource_and_is_idempotent() {
         .into_iter()
         .collect(),
         recipe_configs: std::collections::BTreeMap::new(),
+        typed_building_configs: std::collections::BTreeMap::new(),
+        typed_recipe_configs: std::collections::BTreeMap::new(),
         resource_time_seconds: [(1, 600)].into_iter().collect(),
     };
 
@@ -5937,6 +5956,8 @@ fn building_production_claim_settles_item_and_batch_list() {
         recipe_configs: [(1, serde_json::json!({"time": 30, "item": [1, 14001, 2]}))]
             .into_iter()
             .collect(),
+        typed_building_configs: std::collections::BTreeMap::new(),
+        typed_recipe_configs: std::collections::BTreeMap::new(),
         resource_time_seconds: [(1, 600)].into_iter().collect(),
     };
 
@@ -5973,6 +5994,8 @@ fn building_item_claim_preserves_unfinished_queue() {
         recipe_configs: [(1, serde_json::json!({"time": 30, "item": [1, 14001, 1]}))]
             .into_iter()
             .collect(),
+        typed_building_configs: std::collections::BTreeMap::new(),
+        typed_recipe_configs: std::collections::BTreeMap::new(),
         resource_time_seconds: std::collections::BTreeMap::new(),
     };
 

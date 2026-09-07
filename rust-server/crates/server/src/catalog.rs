@@ -60,7 +60,26 @@ pub(super) struct BuildingCatalog {
     pub(super) capacities: std::collections::BTreeMap<i32, usize>,
     pub(super) building_configs: std::collections::BTreeMap<i32, Value>,
     pub(super) recipe_configs: std::collections::BTreeMap<i32, Value>,
+    pub(super) typed_building_configs: std::collections::BTreeMap<i32, BuildingConfig>,
+    pub(super) typed_recipe_configs: std::collections::BTreeMap<i32, RecipeConfig>,
     pub(super) resource_time_seconds: std::collections::BTreeMap<i32, i32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct BuildingConfig {
+    pub(super) building_type: i32,
+    pub(super) product_max: i32,
+    pub(super) product_id: Option<i32>,
+    pub(super) productivity: i32,
+    pub(super) produce_speed: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct RecipeConfig {
+    pub(super) time_seconds: i32,
+    pub(super) goods_type: i32,
+    pub(super) item_id: i32,
+    pub(super) item_amount: i32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

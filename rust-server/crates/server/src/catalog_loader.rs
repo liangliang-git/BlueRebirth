@@ -1356,9 +1356,42 @@ pub(super) fn load_building_catalog(client_path: Option<&PathBuf>) -> BuildingCa
             (capacity >= 0).then_some((*template_id, capacity as usize))
         })
         .collect();
+    let typed_building_configs = building_configs
+        .iter()
+        .filter_map(|(template_id, value)| {
+            Some((
+                *template_id,
+                BuildingConfig {
+                    building_type: json_i32(value, "type")?,
+                    product_max: json_i32(value, "productmax").unwrap_or_default().max(0),
+                    product_id: json_i32_array(value, "productid").get(1).copied(),
+                    productivity: json_i32(value, "productivity").unwrap_or_default().max(0),
+                    produce_speed: json_i32(value, "producespeed")
+                        .or_else(|| json_i32(value, "produceSpeed"))
+                        .unwrap_or_default()
+                        .max(0),
+                },
+            ))
+        })
+        .collect();
     let recipe_configs = read_config_rows(&config_dir(client_path).join("config_recipe.db"))
         .into_iter()
         .filter(|(recipe_id, _)| *recipe_id > 0)
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let typed_recipe_configs = recipe_configs
+        .iter()
+        .filter_map(|(recipe_id, value)| {
+            let item = value.get("item")?.as_array()?;
+            Some((
+                *recipe_id,
+                RecipeConfig {
+                    time_seconds: json_i32(value, "time")?.max(1),
+                    goods_type: i32::try_from(item.first()?.as_i64()?).ok()?,
+                    item_id: i32::try_from(item.get(1)?.as_i64()?).ok()?,
+                    item_amount: i32::try_from(item.get(2)?.as_i64()?).ok()?.max(1),
+                },
+            ))
+        })
         .collect();
     let resource_time_seconds =
         read_config_rows(&config_dir(client_path).join("config_parameter.db"))
@@ -1372,6 +1405,8 @@ pub(super) fn load_building_catalog(client_path: Option<&PathBuf>) -> BuildingCa
         capacities,
         building_configs,
         recipe_configs,
+        typed_building_configs,
+        typed_recipe_configs,
         resource_time_seconds,
     }
 }
