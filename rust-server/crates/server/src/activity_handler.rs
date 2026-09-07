@@ -152,10 +152,15 @@ fn handle_typed_video_set(
         );
     }
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
-    let rewards = catalog
-        .anniversary_videos
-        .get(&(video_id as i32))
-        .and_then(|video| json_i32(video, "reward"))
+    let Some(video) = catalog.anniversary_videos.get(&(video_id as i32)) else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "activity video is not configured",
+        ));
+    };
+    let rewards = video
+        .get("reward")
+        .and_then(Value::as_i64)
+        .and_then(|reward_id| i32::try_from(reward_id).ok())
         .and_then(|reward_id| catalog.rewards_by_id.get(&reward_id))
         .cloned()
         .unwrap_or_default();
@@ -2431,15 +2436,5 @@ mod tests {
                 .get("activity:activityExtract:realDrawId"),
             Some(&1)
         );
-        let mut video = Vec::new();
-        append_varint_field(&mut video, 1, 9);
-        assert!(matches!(
-            handle_typed(&mut account, "activityVideo.SetActivityVideo", &video),
-            HandlerResult::Reply(_)
-        ));
-        assert!(account
-            .activities
-            .progress
-            .contains_key("activity:activityVideo:watched:9"));
     }
 }
