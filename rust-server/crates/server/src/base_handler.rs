@@ -366,10 +366,10 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "guide.PlotReward" => {
-            let plot_id = decode_varint_field(request_args, 1);
-            if plot_id <= 0 {
+            let Ok(request) = GuidePlotRewardRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest("guide plot id is invalid"));
-            }
+            };
+            let plot_id = request.plot_id;
             account.guide.plot_rewards.insert(plot_id as u64);
             let mut payload = Vec::new();
             append_varint_field(&mut payload, 1, plot_id as u64);
@@ -392,20 +392,16 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, payload))
         }
         "user.SetMiniGameScore" => {
-            let chapter_id = decode_varint_field(request_args, 1);
-            let entries = decode_repeated_message_field(request_args, 3);
-            if chapter_id <= 0 || entries.is_empty() {
+            let Ok(request) = UserMiniGameScoreRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "mini-game score request is invalid",
                 ));
-            }
+            };
+            let chapter_id = request.chapter_id;
             let now = current_unix_seconds();
-            for entry in entries {
-                let copy_id = decode_varint_field(&entry, 1);
-                let score = decode_varint_field(&entry, 2).max(0) as u64;
-                if copy_id <= 0 {
-                    continue;
-                }
+            for entry in request.entries {
+                let copy_id = entry.copy_id;
+                let score = entry.score;
                 let key = format!("compat:minigame:{chapter_id}:{copy_id}");
                 let current = account
                     .activities
@@ -423,24 +419,23 @@ pub(super) fn handle_typed(
             ))
         }
         "user.GetMiniGameScore" => {
-            let chapter_id = decode_varint_field(request_args, 1);
-            if chapter_id <= 0 {
+            let Ok(request) = MiniGameChapterRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "mini-game chapter is invalid",
                 ));
-            }
+            };
             HandlerResult::Reply(Response::raw(
                 method,
-                typed_mini_game_score_payload(account, chapter_id, current_unix_seconds()),
+                typed_mini_game_score_payload(account, request.chapter_id, current_unix_seconds()),
             ))
         }
         "user.GetMiniGameScoreRank" => {
-            let chapter_id = decode_varint_field(request_args, 1);
-            if chapter_id <= 0 {
+            let Ok(request) = MiniGameRankRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
-                    "mini-game chapter is invalid",
+                    "mini-game rank request is invalid",
                 ));
-            }
+            };
+            let chapter_id = request.chapter_id;
             let score = typed_mini_game_chapter_score(account, chapter_id);
             HandlerResult::Reply(Response::raw(
                 method,
@@ -448,8 +443,8 @@ pub(super) fn handle_typed(
                     account,
                     score,
                     if score > 0 { 1 } else { 0 },
-                    decode_varint_field(request_args, 2),
-                    decode_varint_field(request_args, 3),
+                    request.start,
+                    request.end,
                 ),
             ))
         }
@@ -461,11 +456,20 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "user.SetUserOrderRecord" => {
-            let fields = [(1, "type"), (2, "sort"), (3, "screen"), (4, "order")];
-            for (field, name) in fields {
+            let Ok(request) = UserOrderRecordRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "user order request is invalid",
+                ));
+            };
+            for (name, value) in [
+                ("type", request.record_type),
+                ("sort", request.sort),
+                ("screen", request.screen),
+                ("order", request.order),
+            ] {
                 account.activities.progress.insert(
                     format!("compat:user:order:{name}"),
-                    decode_varint_field(request_args, field).max(0) as u64,
+                    u64::try_from(value.max(0)).unwrap_or_default(),
                 );
             }
             account.activities.progress.insert(
@@ -475,13 +479,18 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "user.Refresh" => {
+            let Ok(request) = UserRefreshRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "user refresh request is invalid",
+                ));
+            };
             account.activities.progress.insert(
                 "compat:user:refresh:maxPowerIndex".to_owned(),
-                decode_varint_field(request_args, 2).max(0) as u64,
+                u64::try_from(request.max_power_index.max(0)).unwrap_or_default(),
             );
             account.activities.progress.insert(
                 "compat:user:refresh:minPowerIndex".to_owned(),
-                decode_varint_field(request_args, 3).max(0) as u64,
+                u64::try_from(request.min_power_index.max(0)).unwrap_or_default(),
             );
             account.activities.progress.insert(
                 "compat:user:refresh:time".to_owned(),

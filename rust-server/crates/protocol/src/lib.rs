@@ -559,6 +559,142 @@ pub struct MilestoneFetchRequest {
     pub index: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuidePlotRewardRequest {
+    pub plot_id: i32,
+}
+
+impl Decode for GuidePlotRewardRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let plot_id = required_field(&fields, 1, "guide plot is missing id")?;
+        if plot_id <= 0 {
+            return Err(ProtocolError::Invalid("guide plot request is invalid"));
+        }
+        Ok(Self { plot_id })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MiniGameScoreEntry {
+    pub copy_id: i32,
+    pub score: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserMiniGameScoreRequest {
+    pub chapter_id: i32,
+    pub entries: Vec<MiniGameScoreEntry>,
+}
+
+impl Decode for UserMiniGameScoreRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let chapter_fields = decode_varint_fields(payload)?;
+        let chapter_id = required_field(&chapter_fields, 1, "mini-game is missing chapter id")?;
+        let mut reader = PbReader::new(payload);
+        let mut entries = Vec::new();
+        while let Some((field, wire)) = reader.next_field()? {
+            if field != 3 || wire != 2 {
+                reader.skip(wire)?;
+                continue;
+            }
+            if entries.len() >= 99 {
+                return Err(ProtocolError::Invalid("mini-game has too many scores"));
+            }
+            let fields = decode_varint_fields(reader.read_bytes()?)?;
+            let copy_id = required_field(&fields, 1, "mini-game score is missing copy id")?;
+            let score = optional_u64(&fields, 2, "mini-game score has duplicate value")?;
+            if copy_id <= 0 {
+                return Err(ProtocolError::Invalid("mini-game score copy id is invalid"));
+            }
+            entries.push(MiniGameScoreEntry { copy_id, score });
+        }
+        if chapter_id <= 0 || entries.is_empty() {
+            return Err(ProtocolError::Invalid("mini-game score request is invalid"));
+        }
+        Ok(Self {
+            chapter_id,
+            entries,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MiniGameChapterRequest {
+    pub chapter_id: i32,
+}
+
+impl Decode for MiniGameChapterRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let chapter_id = required_field(&fields, 1, "mini-game is missing chapter id")?;
+        if chapter_id <= 0 {
+            return Err(ProtocolError::Invalid("mini-game chapter is invalid"));
+        }
+        Ok(Self { chapter_id })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MiniGameRankRequest {
+    pub chapter_id: i32,
+    pub start: i32,
+    pub end: i32,
+}
+
+impl Decode for MiniGameRankRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let chapter_id = required_field(&fields, 1, "mini-game rank is missing chapter id")?;
+        let start = optional_i32(&fields, 2, "mini-game rank has duplicate start")?;
+        let end = optional_i32(&fields, 3, "mini-game rank has duplicate end")?;
+        if chapter_id <= 0 || start < 0 || end < 0 {
+            return Err(ProtocolError::Invalid("mini-game rank request is invalid"));
+        }
+        Ok(Self {
+            chapter_id,
+            start,
+            end,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserOrderRecordRequest {
+    pub record_type: i32,
+    pub sort: i32,
+    pub screen: i32,
+    pub order: i32,
+}
+
+impl Decode for UserOrderRecordRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            record_type: optional_i32(&fields, 1, "user order has duplicate type")?,
+            sort: optional_i32(&fields, 2, "user order has duplicate sort")?,
+            screen: optional_i32(&fields, 3, "user order has duplicate screen")?,
+            order: optional_i32(&fields, 4, "user order has duplicate order")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserRefreshRequest {
+    pub max_power_index: i32,
+    pub min_power_index: i32,
+}
+
+impl Decode for UserRefreshRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            max_power_index: optional_i32(&fields, 2, "user refresh has duplicate max index")?,
+            min_power_index: optional_i32(&fields, 3, "user refresh has duplicate min index")?,
+        })
+    }
+}
+
 impl Decode for MilestoneFetchRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
