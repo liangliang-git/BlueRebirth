@@ -1,6 +1,8 @@
 use serde_json::{json, Value};
 
 use super::super::config::{SharedPush, SharedSocialState};
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 const ROOM_ID_FIELD: u8 = 1;
@@ -9,6 +11,22 @@ const KICKED_UID_FIELD: u8 = 3;
 const HERO_LIST_FIELD: u8 = 4;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
+    context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    let payload = handle_legacy(context, method, request_args);
+    if *context.response_err != 0 {
+        HandlerResult::Error(GameError::Internal(context.response_err_msg.clone()))
+    } else {
+        match payload {
+            Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
+            None => HandlerResult::Empty,
+        }
+    }
+}
+
+fn handle_legacy<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
@@ -42,7 +60,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             ".CancelAutoReady" => "matchsvr.CancelAutoReady",
             _ => return None,
         };
-        return handle(context, canonical, request_args);
+        return handle_legacy(context, canonical, request_args);
     }
 
     let account = context.account.as_deref_mut()?;

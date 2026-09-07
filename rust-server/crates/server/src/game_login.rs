@@ -239,7 +239,12 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            hero_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result = hero_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         "tactic.GetHerosTactic" => Some(FleetInfoCodec::encode(&fleet_info_from_account(
             account_view.unwrap_or(&Value::Null),
@@ -568,7 +573,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            activity_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result =
+                activity_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if activity_extra_handler::handles(request.method.as_str()) => {
             let mut context = GameLoginRequestContext {
@@ -966,7 +977,12 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            equip_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result = equip_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::Building)
             || method.is_family(MethodFamily::Build)
@@ -1010,7 +1026,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            buildship_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result =
+                buildship_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::Study)
             || method.is_family(MethodFamily::Task)
@@ -1030,7 +1052,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            progression_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result =
+                progression_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::MatchServer)
             || method.is_family(MethodFamily::Room)
@@ -1062,7 +1090,12 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            coop_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result = coop_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::Copy)
             && !matches!(

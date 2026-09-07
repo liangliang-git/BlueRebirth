@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
@@ -7,6 +9,22 @@ pub(super) fn handles(method: &str) -> bool {
 }
 
 pub(super) fn handle<'state, 'account, 'scratch>(
+    context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    let payload = handle_legacy(context, method, request_args);
+    if *context.response_err != 0 {
+        HandlerResult::Error(GameError::Internal(context.response_err_msg.clone()))
+    } else {
+        match payload {
+            Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
+            None => HandlerResult::Empty,
+        }
+    }
+}
+
+fn handle_legacy<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
