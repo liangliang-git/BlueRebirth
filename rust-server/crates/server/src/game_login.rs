@@ -67,6 +67,8 @@ mod outpost_handler;
 mod shiptask_handler;
 #[path = "sportsmeet_handler.rs"]
 mod sportsmeet_handler;
+#[path = "task_handler.rs"]
+mod task_handler;
 #[path = "teaching_handler.rs"]
 mod teaching_handler;
 #[cfg(test)]
@@ -1288,25 +1290,46 @@ where
             || method.is_family(MethodFamily::Task)
             || method.is_family(MethodFamily::Bathroom) =>
         {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-            };
-            let result =
-                progression_handler::handle(&mut context, request.method.as_str(), request_args);
-            if let HandlerResult::Error(error) = &result {
-                handler_error = Some(error.clone());
+            let typed_result = typed_account.as_mut().map(|typed| {
+                task_handler::handle_typed(
+                    typed,
+                    state,
+                    request.method.as_str(),
+                    request_args,
+                    task_catalog,
+                    &mut post_pushes,
+                )
+            });
+            if let Some(result @ (HandlerResult::Reply(_) | HandlerResult::Error(_))) = typed_result
+            {
+                if let HandlerResult::Error(error) = &result {
+                    handler_error = Some(error.clone());
+                }
+                result.into_payload()
+            } else {
+                let mut context = GameLoginRequestContext {
+                    state,
+                    account: &mut account,
+                    catalogs: *catalogs,
+                    pre_pushes: &mut pre_pushes,
+                    post_pushes: &mut post_pushes,
+                    handler_error: &mut handler_error,
+                    pass_details: &mut pass_details,
+                    pass_rewards: &mut pass_rewards,
+                    pass_hero_ids: &mut pass_hero_ids,
+                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                };
+                let result = progression_handler::handle(
+                    &mut context,
+                    request.method.as_str(),
+                    request_args,
+                );
+                if let HandlerResult::Error(error) = &result {
+                    handler_error = Some(error.clone());
+                }
+                result.into_payload()
             }
-            result.into_payload()
         }
         _ if method.is_family(MethodFamily::MatchServer)
             || method.is_family(MethodFamily::Room)

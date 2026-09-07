@@ -2,6 +2,135 @@ use serde_json::{json, Value};
 
 use super::*;
 
+fn typed_currency(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
+    Some(match item_id {
+        1 => blueoath_domain::CurrencyKind::Gold,
+        2 => blueoath_domain::CurrencyKind::Diamond,
+        5 => blueoath_domain::CurrencyKind::Supply,
+        30 => blueoath_domain::CurrencyKind::PvePoint,
+        _ => return None,
+    })
+}
+
+pub(super) fn grant_typed_task_reward(
+    account: &mut blueoath_domain::AccountState,
+    reward: &ShopReward,
+) -> bool {
+    let Ok(amount) = u64::try_from(reward.num) else {
+        return false;
+    };
+    if amount == 0 {
+        return false;
+    }
+    if reward.goods_type == 5 {
+        let Some(currency) = typed_currency(reward.item_id) else {
+            return false;
+        };
+        return account.resources.credit(currency, amount).is_ok();
+    }
+    if matches!(reward.goods_type, 1 | 6) {
+        let Ok(template_id) = blueoath_domain::TemplateId::new(reward.item_id as u64) else {
+            return false;
+        };
+        let current = account
+            .inventory
+            .items
+            .get(&template_id)
+            .copied()
+            .unwrap_or_default();
+        let Some(next) = current.checked_add(amount) else {
+            return false;
+        };
+        account.inventory.items.insert(template_id, next);
+        return true;
+    }
+    false
+}
+
+pub(super) fn can_grant_typed_task_reward(
+    account: &blueoath_domain::AccountState,
+    reward: &ShopReward,
+) -> bool {
+    let Ok(amount) = u64::try_from(reward.num) else {
+        return false;
+    };
+    if amount == 0 {
+        return false;
+    }
+    if reward.goods_type == 5 {
+        return typed_currency(reward.item_id).is_some_and(|currency| {
+            account
+                .resources
+                .amount(currency)
+                .get()
+                .checked_add(amount)
+                .is_some()
+        });
+    }
+    if matches!(reward.goods_type, 1 | 6) {
+        let Ok(template_id) = blueoath_domain::TemplateId::new(reward.item_id as u64) else {
+            return false;
+        };
+        return account
+            .inventory
+            .items
+            .get(&template_id)
+            .copied()
+            .unwrap_or_default()
+            .checked_add(amount)
+            .is_some();
+    }
+    false
+}
+
+pub(super) fn typed_task_claimed(account: &blueoath_domain::AccountState, task_id: u64) -> bool {
+    account.tasks.claimed.contains(&task_id)
+}
+
+pub(super) fn typed_task_completed(
+    account: &blueoath_domain::AccountState,
+    task_id: u64,
+    goal: i32,
+) -> bool {
+    account.tasks.completed.contains(&task_id)
+        || account
+            .tasks
+            .progress
+            .get(&task_id)
+            .copied()
+            .unwrap_or_default()
+            >= u64::try_from(goal.max(0)).unwrap_or_default()
+}
+
+pub(super) fn typed_task_visible(
+    account: &blueoath_domain::AccountState,
+    catalog: &TaskCatalog,
+    definition: &TaskDefinition,
+) -> bool {
+    if definition.abandoned != 0 {
+        return false;
+    }
+    let level = i64::from(account.character.level);
+    if (definition.level_min > 0 && level < i64::from(definition.level_min))
+        || (definition.level_max > 0 && level > i64::from(definition.level_max))
+    {
+        return false;
+    }
+    matches!(definition.task_type, 2 | 3 | 8 | 9)
+        || definition.previous_task_id <= 0
+        || typed_task_claimed(account, definition.id as u64)
+        || catalog.definitions.iter().any(|previous| {
+            previous.task_type == definition.task_type
+                && previous.id == definition.previous_task_id
+                && typed_task_claimed(account, previous.id as u64)
+        })
+}
+
+pub(super) fn complete_typed_task(account: &mut blueoath_domain::AccountState, task_id: u64) {
+    account.tasks.completed.insert(task_id);
+    account.tasks.claimed.insert(task_id);
+}
+
 /// Mirror legacy task records into normalized state until task handlers are fully typed.
 /// The mirror is request-scoped; normalized rows remain the persistence source of truth.
 pub(super) fn sync_typed_task_state(

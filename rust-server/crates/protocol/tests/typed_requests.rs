@@ -3,7 +3,7 @@ use blueoath_protocol::{
     CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode,
     FriendSearchRequest, FriendTargetRequest, ProtocolError, SeaDifficultyRequest,
     SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
-    SetSecretaryRequest,
+    SetSecretaryRequest, TaskRewardRequest,
 };
 
 #[test]
@@ -156,6 +156,14 @@ fn rejects_invalid_typed_battle_requests() {
             "copy attack hero ids are duplicated"
         ))
     ));
+}
+
+#[test]
+fn decodes_typed_task_reward_request() {
+    let request = TaskRewardRequest::decode(&[0x08, 101, 0x10, 1]).unwrap();
+    assert_eq!(request.task_id, 101);
+    assert_eq!(request.task_type, 1);
+    assert!(TaskRewardRequest::decode(&[]).is_err());
 }
 
 #[test]

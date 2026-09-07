@@ -171,6 +171,31 @@ pub struct CopyPassRequest {
     pub damage: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskRewardRequest {
+    pub task_id: u64,
+    pub task_type: u32,
+}
+
+impl Decode for TaskRewardRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let task_id = required_u64(&fields, 1, "task reward is missing task id")?;
+        if task_id == 0 {
+            return Err(ProtocolError::Invalid(
+                "task reward task id must be positive",
+            ));
+        }
+        let task_type = u32::try_from(optional_u64(
+            &fields,
+            2,
+            "task reward has duplicate task type",
+        )?)
+        .map_err(|_| ProtocolError::Invalid("task reward task type is out of range"))?;
+        Ok(Self { task_id, task_type })
+    }
+}
+
 impl Decode for CopyPassRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
