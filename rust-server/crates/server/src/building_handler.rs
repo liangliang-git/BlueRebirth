@@ -4,6 +4,14 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
+#[derive(Clone, Copy)]
+pub(super) struct BuildingTypedCatalogs<'a> {
+    pub(super) building: Option<&'a BuildingCatalog>,
+    pub(super) oil_multiplier: f64,
+    pub(super) gold_multiplier: f64,
+}
+
+#[allow(dead_code)]
 pub(crate) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
@@ -12,15 +20,45 @@ pub(crate) fn handle_typed(
     pre_pushes: &mut Vec<Vec<u8>>,
     building_catalog: Option<&BuildingCatalog>,
 ) -> HandlerResult {
+    handle_typed_with_multipliers(
+        account,
+        method,
+        request_args,
+        now,
+        pre_pushes,
+        BuildingTypedCatalogs {
+            building: building_catalog,
+            oil_multiplier: 1.0,
+            gold_multiplier: 1.0,
+        },
+    )
+}
+
+pub(super) fn handle_typed_with_multipliers(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    now: u32,
+    pre_pushes: &mut Vec<Vec<u8>>,
+    catalogs: BuildingTypedCatalogs<'_>,
+) -> HandlerResult {
+    let building_catalog = catalogs.building;
+    let oil_multiplier = catalogs.oil_multiplier;
+    let gold_multiplier = catalogs.gold_multiplier;
     match method {
         "building.UpdateBuildingInfo" => HandlerResult::Reply(Response::raw(
             method,
             UserBuildingInfoCodec::encode(&building_info_from_typed_account(account, now)),
         )),
         "building.AddBuilding" => {
-            let template_id = decode_varint_field(request_args, 1);
-            let land_index = decode_varint_field(request_args, 2);
-            let Some(building_id) = add_typed_building(account, template_id, land_index) else {
+            let Ok(request) = BuildingAddRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "building add request is invalid",
+                ));
+            };
+            let Some(building_id) =
+                add_typed_building(account, request.template_id, request.land_index)
+            else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "building placement is invalid",
                 ));
@@ -31,7 +69,12 @@ pub(crate) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, payload))
         }
         "building.UpgradeBuilding" | "building.DegradeBuilding" => {
-            let building_id = decode_varint_field(request_args, 1);
+            let Ok(request) = BuildingIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "building request is invalid",
+                ));
+            };
+            let building_id = request.building_id;
             let delta = if method == "building.UpgradeBuilding" {
                 1
             } else {
@@ -46,7 +89,12 @@ pub(crate) fn handle_typed(
             HandlerResult::PushOnly
         }
         "building.FinishBuilding" | "building.UseStrengthSpeedup" => {
-            let building_id = decode_varint_field(request_args, 1);
+            let Ok(request) = BuildingIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "building request is invalid",
+                ));
+            };
+            let building_id = request.building_id;
             let Some(building_id) = u64::try_from(building_id).ok() else {
                 return HandlerResult::Error(GameError::InvalidRequest("building id is invalid"));
             };
@@ -55,6 +103,70 @@ pub(crate) fn handle_typed(
             }
             append_typed_building_refresh(pre_pushes, account, now);
             HandlerResult::PushOnly
+        }
+        "building.ProduceItem" | "building.ComposeItem" => {
+            let Ok(request) = BuildingProduceRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "building production request is invalid",
+                ));
+            };
+            let Some(catalog) = building_catalog else {
+                return HandlerResult::Empty;
+            };
+            if !set_typed_building_production(account, &request, catalog, now) {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "building production request is invalid",
+                ));
+            }
+            append_typed_building_refresh(pre_pushes, account, now);
+            HandlerResult::PushOnly
+        }
+        "building.ReceiveBuilding"
+        | "building.ReceiveItem"
+        | "building.ReceiveAll"
+        | "building.ReceiveResource" => {
+            let Some(catalog) = building_catalog else {
+                return HandlerResult::Empty;
+            };
+            let (building_id, resource_id) = if method == "building.ReceiveAll" {
+                (None, None)
+            } else if method == "building.ReceiveResource" {
+                let Ok(request) = BuildingResourceRequest::decode(request_args) else {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "building resource request is invalid",
+                    ));
+                };
+                (None, Some(request.resource_id))
+            } else {
+                let Ok(request) = BuildingIdRequest::decode(request_args) else {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "building receive request is invalid",
+                    ));
+                };
+                (Some(request.building_id), None)
+            };
+            let rewards = collect_typed_building_rewards(
+                account,
+                catalog,
+                building_id,
+                resource_id,
+                now,
+                oil_multiplier,
+                gold_multiplier,
+            );
+            if rewards.is_empty() {
+                return HandlerResult::Reply(Response::raw(method, encode_rewards_list(&[])));
+            }
+            for reward in &rewards {
+                apply_typed_building_reward(account, reward);
+            }
+            append_typed_building_refresh(pre_pushes, account, now);
+            append_method_push(
+                pre_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            HandlerResult::Reply(Response::raw(method, encode_rewards_list(&rewards)))
         }
         "building.UpdateHeroAddition" => {
             append_typed_building_refresh(pre_pushes, account, now);
@@ -137,6 +249,266 @@ fn change_typed_building_level(
     }
     *level = u32::try_from(next).unwrap_or(u32::MAX);
     true
+}
+
+fn set_typed_building_production(
+    account: &mut blueoath_domain::AccountState,
+    request: &BuildingProduceRequest,
+    catalog: &BuildingCatalog,
+    now: u32,
+) -> bool {
+    let Ok(building_id) = u64::try_from(request.building_id) else {
+        return false;
+    };
+    if !account.buildings.levels.contains_key(&building_id) {
+        return false;
+    }
+    let Some(recipe) = catalog.recipe_configs.get(&request.recipe_id) else {
+        return false;
+    };
+    let template_id = account
+        .buildings
+        .template_ids
+        .get(&building_id)
+        .and_then(|value| i32::try_from(*value).ok())
+        .unwrap_or_default();
+    let Some(building_config) = catalog.building_configs.get(&template_id) else {
+        return false;
+    };
+    if json_i32(building_config, "type") != Some(7) {
+        return false;
+    }
+    let recipe_time = json_i32(recipe, "time").unwrap_or_default().max(1);
+    let productivity = json_i32(building_config, "productivity")
+        .unwrap_or_default()
+        .max(0);
+    let produce_speed = json_i32(building_config, "producespeed")
+        .or_else(|| json_i32(building_config, "produceSpeed"))
+        .unwrap_or_default()
+        .max(0);
+    account.buildings.productions.insert(
+        building_id,
+        blueoath_domain::BuildingProductionState {
+            status: 3,
+            recipe_id: u32::try_from(request.recipe_id).unwrap_or_default(),
+            item_count: u32::try_from(request.count).unwrap_or_default(),
+            product_count: 0,
+            last_update_at: u64::from(now),
+            recipe_time: u32::try_from(recipe_time).unwrap_or_default(),
+            productivity: u32::try_from(productivity).unwrap_or_default(),
+            produce_speed: u32::try_from(produce_speed).unwrap_or_default(),
+        },
+    );
+    true
+}
+
+fn collect_typed_building_rewards(
+    account: &mut blueoath_domain::AccountState,
+    catalog: &BuildingCatalog,
+    building_id: Option<i32>,
+    resource_id: Option<i32>,
+    now: u32,
+    oil_multiplier: f64,
+    gold_multiplier: f64,
+) -> Vec<ShopReward> {
+    let ids = account
+        .buildings
+        .productions
+        .keys()
+        .copied()
+        .collect::<Vec<_>>();
+    let mut rewards = Vec::new();
+    for id in ids {
+        if building_id.is_some_and(|value| u64::try_from(value).ok() != Some(id)) {
+            continue;
+        }
+        let template_id = account
+            .buildings
+            .template_ids
+            .get(&id)
+            .and_then(|value| i32::try_from(*value).ok())
+            .unwrap_or_default();
+        let Some(config) = catalog.building_configs.get(&template_id) else {
+            continue;
+        };
+        let building_type = json_i32(config, "type").unwrap_or_default();
+        let Some(production) = account.buildings.productions.get(&id).cloned() else {
+            continue;
+        };
+        let (reward, completed) = if matches!(building_type, 3 | 4) {
+            typed_resource_reward(
+                &production,
+                config,
+                catalog,
+                resource_id,
+                now,
+                oil_multiplier,
+                gold_multiplier,
+            )
+            .map(|reward| (reward, 0))
+            .unwrap_or((
+                ShopReward {
+                    goods_type: 0,
+                    item_id: 0,
+                    num: 0,
+                    instance_id: 0,
+                },
+                0,
+            ))
+        } else if building_type == 7 {
+            typed_item_reward(&production, config, catalog, now).unwrap_or((
+                ShopReward {
+                    goods_type: 0,
+                    item_id: 0,
+                    num: 0,
+                    instance_id: 0,
+                },
+                0,
+            ))
+        } else {
+            continue;
+        };
+        if reward.num <= 0 {
+            continue;
+        }
+        if let Some(state) = account.buildings.productions.get_mut(&id) {
+            if building_type == 7 {
+                state.item_count = state.item_count.saturating_sub(completed);
+                state.product_count = 0;
+                if state.item_count == 0 {
+                    state.recipe_id = 0;
+                    state.status = 1;
+                } else {
+                    state.last_update_at = u64::from(now);
+                }
+            } else {
+                let max = u32::try_from(json_i32(config, "productmax").unwrap_or_default().max(0))
+                    .unwrap_or_default();
+                let settled = state.product_count.min(max);
+                state.product_count = 0;
+                state.status = if settled >= max { 1 } else { 3 };
+                state.last_update_at = u64::from(now);
+            }
+        }
+        rewards.push(reward);
+    }
+    rewards
+}
+
+fn typed_resource_reward(
+    production: &blueoath_domain::BuildingProductionState,
+    config: &serde_json::Value,
+    catalog: &BuildingCatalog,
+    resource_id: Option<i32>,
+    now: u32,
+    oil_multiplier: f64,
+    gold_multiplier: f64,
+) -> Option<ShopReward> {
+    let product_id = json_i32_array(config, "productid").get(1).copied()?;
+    if !matches!(product_id, 1 | 5) || resource_id.is_some_and(|id| id != product_id) {
+        return None;
+    }
+    let max = json_i32(config, "productmax").unwrap_or_default().max(0);
+    let mut count = i64::from(production.product_count.min(u32::try_from(max).ok()?));
+    if production.status == 3 && production.productivity > 0 && count < i64::from(max) {
+        let delta = i64::from(now)
+            .saturating_sub(i64::try_from(production.last_update_at).ok()?)
+            .max(0);
+        let parameter_id = if product_id == 5 { 209 } else { 210 };
+        let period = i64::from(
+            catalog
+                .resource_time_seconds
+                .get(&parameter_id)
+                .copied()
+                .unwrap_or(600)
+                .max(1),
+        );
+        let produced = i128::from(delta)
+            .saturating_mul(i128::from(production.productivity))
+            .checked_div(i128::from(period) * 10_000)
+            .and_then(|value| i64::try_from(value).ok())
+            .unwrap_or_default();
+        let multiplier = if product_id == 5 {
+            oil_multiplier
+        } else {
+            gold_multiplier
+        };
+        count = count
+            .saturating_add(scale_reward(produced, multiplier))
+            .min(i64::from(max));
+    }
+    (count > 0).then_some(ShopReward {
+        goods_type: 5,
+        item_id: product_id,
+        num: i32::try_from(count).unwrap_or(i32::MAX),
+        instance_id: 0,
+    })
+}
+
+fn typed_item_reward(
+    production: &blueoath_domain::BuildingProductionState,
+    config: &serde_json::Value,
+    catalog: &BuildingCatalog,
+    now: u32,
+) -> Option<(ShopReward, u32)> {
+    let recipe_id = i32::try_from(production.recipe_id).ok()?;
+    let recipe = catalog.recipe_configs.get(&recipe_id)?;
+    let recipe_time = i64::from(json_i32(recipe, "time")?.max(1));
+    let item = recipe.get("item")?.as_array()?;
+    let goods_type = i32::try_from(item.first()?.as_i64()?).ok()?;
+    let item_id = i32::try_from(item.get(1)?.as_i64()?).ok()?;
+    let item_num = i32::try_from(item.get(2)?.as_i64()?).ok()?.max(1);
+    let completed = if production.status == 3 {
+        u32::try_from(
+            i64::from(now)
+                .saturating_sub(i64::try_from(production.last_update_at).ok()?)
+                .max(0)
+                / recipe_time,
+        )
+        .ok()?
+        .min(production.item_count)
+    } else {
+        0
+    };
+    let max = u32::try_from(json_i32(config, "productmax").unwrap_or_default().max(0))
+        .unwrap_or(u32::MAX);
+    let total = production.product_count.saturating_add(completed).min(max);
+    (total > 0).then_some((
+        ShopReward {
+            goods_type,
+            item_id,
+            num: i32::try_from(total)
+                .unwrap_or(i32::MAX)
+                .saturating_mul(item_num),
+            instance_id: 0,
+        },
+        completed,
+    ))
+}
+
+fn apply_typed_building_reward(account: &mut blueoath_domain::AccountState, reward: &ShopReward) {
+    if reward.num <= 0 {
+        return;
+    }
+    if reward.goods_type == 5 {
+        let kind = match reward.item_id {
+            1 => Some(blueoath_domain::CurrencyKind::Gold),
+            2 => Some(blueoath_domain::CurrencyKind::Diamond),
+            5 => Some(blueoath_domain::CurrencyKind::Supply),
+            30 => Some(blueoath_domain::CurrencyKind::PvePoint),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            let _ = account
+                .resources
+                .credit(kind, u64::try_from(reward.num).unwrap_or_default());
+        }
+    } else if let Ok(template_id) =
+        blueoath_domain::TemplateId::new(u64::try_from(reward.item_id).unwrap_or_default())
+    {
+        let entry = account.inventory.items.entry(template_id).or_default();
+        *entry = entry.saturating_add(u64::try_from(reward.num).unwrap_or_default());
+    }
 }
 
 fn set_typed_building_assignments(

@@ -431,6 +431,54 @@ fn typed_building_mutations_update_normalized_state() {
 }
 
 #[test]
+fn typed_building_production_persists_and_collects_typed_reward() {
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("typed-building-production").unwrap(), "Base");
+    let mut catalog = BuildingCatalog::default();
+    catalog
+        .building_configs
+        .insert(41, json!({"type": 7, "productmax": 10, "productivity": 0}));
+    catalog
+        .recipe_configs
+        .insert(9, json!({"time": 60, "item": [1, 30001, 2]}));
+    let mut pushes = Vec::new();
+    let mut produce_args = Vec::new();
+    append_varint_field(&mut produce_args, 1, 2);
+    append_varint_field(&mut produce_args, 2, 9);
+    append_varint_field(&mut produce_args, 3, 3);
+    let result = super::handle_typed_building(
+        &mut account,
+        "building.ProduceItem",
+        &produce_args,
+        100,
+        &mut pushes,
+        Some(&catalog),
+    );
+    assert!(matches!(
+        result,
+        super::common::response::HandlerResult::PushOnly
+    ));
+    assert_eq!(account.buildings.productions[&2].item_count, 3);
+
+    let mut receive_args = Vec::new();
+    append_varint_field(&mut receive_args, 1, 2);
+    let result = super::handle_typed_building(
+        &mut account,
+        "building.ReceiveItem",
+        &receive_args,
+        220,
+        &mut pushes,
+        Some(&catalog),
+    );
+    assert!(matches!(
+        result,
+        super::common::response::HandlerResult::Reply(_)
+    ));
+    assert_eq!(account.inventory.items[&TemplateId::new(30001).unwrap()], 4);
+    assert_eq!(account.buildings.productions[&2].item_count, 1);
+}
+
+#[test]
 fn typed_daily_copy_projection_resets_stale_challenge_counts() {
     let mut account = NewAccountFactory::create(ProfileId::new("typed-daily").unwrap(), "Daily");
     account.daily_copy.reset_day = 0;

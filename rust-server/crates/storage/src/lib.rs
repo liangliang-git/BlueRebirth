@@ -581,7 +581,9 @@ impl ProfileStore {
         }
 
         let mut statement = connection.prepare(
-            "SELECT building_id, template_id, level, land_index
+            "SELECT building_id, template_id, level, land_index,
+                    production_status, recipe_id, item_count, product_count,
+                    last_update_at, recipe_time, productivity, produce_speed
              FROM buildings WHERE profile_id = ?1 ORDER BY building_id",
         )?;
         let buildings = statement
@@ -591,10 +593,32 @@ impl ProfileStore {
                     row.get::<_, i64>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, i64>(9)?,
+                    row.get::<_, i64>(10)?,
+                    row.get::<_, i64>(11)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        for (building_id, template_id, level, land_index) in buildings {
+        for (
+            building_id,
+            template_id,
+            level,
+            land_index,
+            production_status,
+            recipe_id,
+            item_count,
+            product_count,
+            last_update_at,
+            recipe_time,
+            productivity,
+            produce_speed,
+        ) in buildings
+        {
             let building_id = u64::try_from(building_id).map_err(|_| {
                 StorageError::InvalidTypedAccount("building id is invalid".to_owned())
             })?;
@@ -610,6 +634,32 @@ impl ProfileStore {
                 building_id,
                 non_negative_u32(land_index, "building land index")?,
             );
+            if production_status != 1
+                || recipe_id != 0
+                || item_count != 0
+                || product_count != 0
+                || last_update_at != 0
+                || recipe_time != 0
+                || productivity != 0
+                || produce_speed != 0
+            {
+                account.buildings.productions.insert(
+                    building_id,
+                    blueoath_domain::BuildingProductionState {
+                        status: non_negative_u32(production_status, "building production status")?,
+                        recipe_id: non_negative_u32(recipe_id, "building recipe id")?,
+                        item_count: non_negative_u32(item_count, "building item count")?,
+                        product_count: non_negative_u32(product_count, "building product count")?,
+                        last_update_at: non_negative_u64(
+                            last_update_at,
+                            "building production update time",
+                        )?,
+                        recipe_time: non_negative_u32(recipe_time, "building recipe time")?,
+                        productivity: non_negative_u32(productivity, "building productivity")?,
+                        produce_speed: non_negative_u32(produce_speed, "building produce speed")?,
+                    },
+                );
+            }
         }
         let mut statement = connection.prepare(
             "SELECT building_id, position, hero_id
@@ -1140,9 +1190,13 @@ impl ProfileStore {
             )?;
         }
         for (building_id, level) in &account.buildings.levels {
+            let production = account.buildings.productions.get(building_id);
             transaction.execute(
-                "INSERT INTO buildings(profile_id, building_id, level, land_index, template_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO buildings(
+                    profile_id, building_id, level, land_index, template_id,
+                    production_status, recipe_id, item_count, product_count,
+                    last_update_at, recipe_time, productivity, produce_speed
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
                     profile.id.as_str(),
                     typed_i64(*building_id, "building id")?,
@@ -1164,6 +1218,48 @@ impl ProfileStore {
                             .copied()
                             .unwrap_or(*building_id),
                         "building template id",
+                    )?,
+                    typed_i64(
+                        production.map(|value| value.status).unwrap_or(1),
+                        "building production status",
+                    )?,
+                    typed_i64(
+                        production.map(|value| value.recipe_id).unwrap_or_default(),
+                        "building recipe id",
+                    )?,
+                    typed_i64(
+                        production.map(|value| value.item_count).unwrap_or_default(),
+                        "building item count",
+                    )?,
+                    typed_i64(
+                        production
+                            .map(|value| value.product_count)
+                            .unwrap_or_default(),
+                        "building product count",
+                    )?,
+                    typed_i64(
+                        production
+                            .map(|value| value.last_update_at)
+                            .unwrap_or_default(),
+                        "building production update time",
+                    )?,
+                    typed_i64(
+                        production
+                            .map(|value| value.recipe_time)
+                            .unwrap_or_default(),
+                        "building recipe time",
+                    )?,
+                    typed_i64(
+                        production
+                            .map(|value| value.productivity)
+                            .unwrap_or_default(),
+                        "building productivity",
+                    )?,
+                    typed_i64(
+                        production
+                            .map(|value| value.produce_speed)
+                            .unwrap_or_default(),
+                        "building produce speed",
                     )?,
                 ],
             )?;
@@ -2020,6 +2116,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0011_preset_fleets.sql"),
     include_str!("../../../migrations/0012_building_hero_assignments.sql"),
     include_str!("../../../migrations/0013_hero_names.sql"),
+    include_str!("../../../migrations/0014_building_production.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

@@ -273,6 +273,20 @@ pub struct BuildingState {
     pub land_indices: BTreeMap<u64, u32>,
     #[serde(default)]
     pub hero_assignments: BTreeMap<u64, Vec<HeroId>>,
+    #[serde(default)]
+    pub productions: BTreeMap<u64, BuildingProductionState>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildingProductionState {
+    pub status: u32,
+    pub recipe_id: u32,
+    pub item_count: u32,
+    pub product_count: u32,
+    pub last_update_at: u64,
+    pub recipe_time: u32,
+    pub productivity: u32,
+    pub produce_speed: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -425,6 +439,16 @@ impl AccountState {
                     "building assignment references missing hero",
                 ));
             }
+        }
+        if self
+            .buildings
+            .productions
+            .keys()
+            .any(|building_id| !self.buildings.levels.contains_key(building_id))
+        {
+            return Err(DomainError::InvalidState(
+                "building production references missing building",
+            ));
         }
         Ok(())
     }

@@ -671,6 +671,7 @@ pub(super) fn building_info_from_typed_account(
         .levels
         .iter()
         .filter_map(|(building_id, level)| {
+            let production = account.buildings.productions.get(building_id);
             Some(BuildingInfo {
                 id: i32::try_from(*building_id).ok()?,
                 template_id: i32::try_from(
@@ -691,8 +692,31 @@ pub(super) fn building_info_from_typed_account(
                     .flatten()
                     .filter_map(|hero_id| u32::try_from(hero_id.get()).ok())
                     .collect(),
-                status: 1,
-                last_update_time: i64::from(now),
+                productivity: production
+                    .and_then(|value| i32::try_from(value.productivity).ok())
+                    .unwrap_or_default(),
+                produce_speed: production
+                    .and_then(|value| i32::try_from(value.produce_speed).ok())
+                    .unwrap_or_default(),
+                product_count: production
+                    .and_then(|value| i32::try_from(value.product_count).ok())
+                    .unwrap_or_default(),
+                status: production
+                    .and_then(|value| i32::try_from(value.status).ok())
+                    .unwrap_or(1),
+                last_update_time: production
+                    .and_then(|value| i64::try_from(value.last_update_at).ok())
+                    .filter(|value| *value > 0)
+                    .unwrap_or(i64::from(now)),
+                recipe_id: production
+                    .and_then(|value| i32::try_from(value.recipe_id).ok())
+                    .unwrap_or_default(),
+                item_count: production
+                    .and_then(|value| i32::try_from(value.item_count).ok())
+                    .unwrap_or_default(),
+                recipe_time: production
+                    .and_then(|value| i32::try_from(value.recipe_time).ok())
+                    .unwrap_or_default(),
                 last_build_update_time: i64::from(now),
                 ..BuildingInfo::default()
             })

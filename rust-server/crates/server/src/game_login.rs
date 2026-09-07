@@ -1098,13 +1098,17 @@ where
             || method.is_family(MethodFamily::Discuss) =>
         {
             let result = if let Some(typed) = typed_account.as_mut() {
-                let result = building_handler::handle_typed(
+                let result = building_handler::handle_typed_with_multipliers(
                     typed,
                     request.method.as_str(),
                     request_args,
                     current_unix_seconds(),
                     &mut pre_pushes,
-                    catalogs.buildings,
+                    building_handler::BuildingTypedCatalogs {
+                        building: catalogs.buildings,
+                        oil_multiplier: state.building_oil_multiplier,
+                        gold_multiplier: state.building_gold_multiplier,
+                    },
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result

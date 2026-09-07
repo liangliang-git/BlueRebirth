@@ -193,6 +193,69 @@ single_string_request!(
 );
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildingAddRequest {
+    pub template_id: i32,
+    pub land_index: i32,
+}
+
+impl Decode for BuildingAddRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let template_id = required_field(&fields, 1, "building add is missing template id")?;
+        let land_index = required_field(&fields, 2, "building add is missing land index")?;
+        if template_id <= 0 || land_index <= 0 {
+            return Err(ProtocolError::Invalid("building add request is invalid"));
+        }
+        Ok(Self {
+            template_id,
+            land_index,
+        })
+    }
+}
+
+single_varint_request!(
+    BuildingIdRequest,
+    building_id,
+    1,
+    "building request is missing building id",
+    "building request has duplicate building id"
+);
+
+single_varint_request!(
+    BuildingResourceRequest,
+    resource_id,
+    1,
+    "building resource request is missing resource id",
+    "building resource request has duplicate resource id"
+);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildingProduceRequest {
+    pub building_id: i32,
+    pub recipe_id: i32,
+    pub count: i32,
+}
+
+impl Decode for BuildingProduceRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let building_id = required_field(&fields, 1, "building production is missing building id")?;
+        let recipe_id = required_field(&fields, 2, "building production is missing recipe id")?;
+        let count = required_field(&fields, 3, "building production is missing count")?;
+        if building_id <= 0 || recipe_id <= 0 || count <= 0 {
+            return Err(ProtocolError::Invalid(
+                "building production request is invalid",
+            ));
+        }
+        Ok(Self {
+            building_id,
+            recipe_id,
+            count,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeroLockRequest {
     pub hero_id: u64,
     pub locked: bool,
