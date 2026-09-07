@@ -1571,6 +1571,20 @@ impl ProfileStore {
         Ok(profiles)
     }
 
+    pub fn list_typed_accounts(&self) -> Result<Vec<AccountState>, StorageError> {
+        let profile_ids = self.list()?;
+        profile_ids
+            .into_iter()
+            .map(|profile_id| {
+                let profile_id = ProfileId::new(profile_id)
+                    .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
+                self.load_typed_account(&profile_id)
+                    .map(|account| account.into_iter().collect::<Vec<_>>())
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(|accounts| accounts.into_iter().flatten().collect())
+    }
+
     pub fn reset(&self, profile_id: &str) -> Result<(), StorageError> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
