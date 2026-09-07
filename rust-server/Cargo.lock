@@ -87,6 +87,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "blueoath-testkit"
+version = "0.1.0"
+dependencies = [
+ "blueoath-domain",
+ "blueoath-protocol",
+]
+
+[[package]]
 name = "blueoath-transport"
 version = "0.1.0"
 dependencies = [

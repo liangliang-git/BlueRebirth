@@ -6,6 +6,7 @@ members = [
     "crates/protocol",
     "crates/domain",
     "crates/game",
+    "crates/testkit",
 ]
 resolver = "2"
 

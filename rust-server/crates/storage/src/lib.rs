@@ -1,4 +1,6 @@
-use blueoath_domain::{AccountRepository, AccountState, ProfileId, RepositoryError};
+use blueoath_domain::{
+    AccountRepository, AccountState, NewAccountFactory, ProfileId, RepositoryError,
+};
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::Value;
@@ -601,10 +603,9 @@ impl AccountRepository for ProfileStore {
                     .map_err(|error| RepositoryError::Storage(error.to_string()))
             })
             .transpose()?
-            .unwrap_or_else(|| AccountState {
-                profile: None,
-                resources: Default::default(),
-                ..AccountState::default()
+            .unwrap_or_else(|| {
+                let profile = profile_id.clone();
+                NewAccountFactory::create(profile, profile_id.as_str())
             });
         let result = operation(&mut account)?;
         account.validate()?;

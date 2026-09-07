@@ -349,11 +349,14 @@ pub struct NewAccountFactory;
 
 impl NewAccountFactory {
     pub fn create(profile_id: ProfileId, name: impl Into<String>) -> AccountState {
-        AccountState::new(ProfileState {
+        let name = name.into();
+        let mut account = AccountState::new(ProfileState {
             id: profile_id,
-            name: name.into(),
+            name: name.clone(),
             revision: 0,
-        })
+        });
+        account.character.name = name;
+        account
     }
 }
 
