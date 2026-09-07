@@ -616,42 +616,23 @@ pub(super) fn hero_advance_mub_state(
         .by_template
         .get(&template_id)
         .ok_or("advance config is missing")?;
-    if json_i32(&hero, "level").unwrap_or_default()
-        < json_i32(config, "min_level").unwrap_or_default()
-    {
+    if json_i32(&hero, "level").unwrap_or_default() < config.min_level {
         return Err("hero level is too low for advance");
     }
-    let break_to = config
-        .get("break_to")
-        .and_then(Value::as_str)
-        .and_then(|value| value.parse::<i32>().ok())
-        .or_else(|| json_i32(config, "break_to"))
-        .filter(|value| *value > 0)
-        .ok_or("advance target has no next template")?;
-    let required = config
-        .get("break_item_mub")
-        .and_then(Value::as_array)
+    let break_to = config.break_to;
+    if break_to <= 0 {
+        return Err("advance target has no next template");
+    }
+    let (fragment_id, required_count) = config
+        .break_item_mub
         .ok_or("advance fragment config is missing")?;
-    if required.len() < 2 {
+    if fragment_id <= 0 || required_count <= 0 {
         return Err("advance fragment config is invalid");
     }
-    let fragment_id = required[0]
-        .as_i64()
-        .and_then(|value| i32::try_from(value).ok())
-        .filter(|value| *value > 0)
-        .ok_or("advance fragment config is invalid")?;
-    let required_count = required[1]
-        .as_i64()
-        .and_then(|value| i32::try_from(value).ok())
-        .filter(|value| *value > 0)
-        .ok_or("advance fragment config is invalid")?;
     let allowed = config
-        .get("break_usableitem_mub")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_i64)
-        .filter_map(|value| i32::try_from(value).ok())
+        .break_usableitem_mub
+        .iter()
+        .copied()
         .collect::<std::collections::HashSet<_>>();
     let conversion = |item_id: i32| match item_id {
         // Client config parameter 507/508 defaults used by MubConversionLoader.
@@ -674,19 +655,12 @@ pub(super) fn hero_advance_mub_state(
     if effective != i64::from(required_count) {
         return Err("advance fragment count is invalid");
     }
-    let currency = config
-        .get("currency_cost")
-        .and_then(Value::as_array)
-        .filter(|values| values.len() >= 3 && values[0].as_i64() == Some(5))
+    let (currency_type, currency_id, currency_cost) = config
+        .currency_cost
         .ok_or("advance currency config is invalid")?;
-    let currency_id = currency[1]
-        .as_i64()
-        .and_then(|value| i32::try_from(value).ok())
-        .ok_or("advance currency config is invalid")?;
-    let currency_cost = currency[2]
-        .as_i64()
-        .filter(|value| *value >= 0)
-        .ok_or("advance currency config is invalid")?;
+    if currency_type != 5 || currency_cost < 0 {
+        return Err("advance currency config is invalid");
+    }
     let currency_key =
         currency_character_key(currency_id).ok_or("advance currency is unsupported")?;
     if character_i64(account, currency_key) < currency_cost {
@@ -729,7 +703,7 @@ pub(super) fn hero_remould_state(
         .ship_info_by_sf_id
         .get(&sf_id)
         .ok_or("this hero cannot be remoulded")?;
-    let stage_ids = json_i32_array(ship_info, "remould_template");
+    let stage_ids = &ship_info.remould_template;
     if stage_ids.is_empty() {
         return Err("this hero cannot be remoulded");
     }
@@ -742,7 +716,7 @@ pub(super) fn hero_remould_state(
         if catalog
             .templates
             .get(stage_id)
-            .map(|stage| json_i32_array(stage, "remould_item_group").contains(&effect_id))
+            .map(|stage| stage.remould_item_group.contains(&effect_id))
             .unwrap_or(false)
         {
             effect_stage = Some(index);
@@ -758,11 +732,11 @@ pub(super) fn hero_remould_state(
         return Err("remould effect is already active");
     }
     let mut current_stage = 0;
-    for stage_id in &stage_ids {
+    for stage_id in stage_ids {
         let group = catalog
             .templates
             .get(stage_id)
-            .map(|stage| json_i32_array(stage, "remould_item_group"))
+            .map(|stage| stage.remould_item_group.clone())
             .unwrap_or_default();
         if group.iter().any(|id| !completed.contains(id)) {
             break;
@@ -774,11 +748,11 @@ pub(super) fn hero_remould_state(
     let mut before = completed.clone();
     before.remove(&effect_id);
     let mut expected_stage = 0;
-    for stage_id in &stage_ids {
+    for stage_id in stage_ids {
         let group = catalog
             .templates
             .get(stage_id)
-            .map(|stage| json_i32_array(stage, "remould_item_group"))
+            .map(|stage| stage.remould_item_group.clone())
             .unwrap_or_default();
         if group.iter().any(|id| !before.contains(id)) {
             break;
@@ -788,53 +762,29 @@ pub(super) fn hero_remould_state(
     if effect_stage != expected_stage {
         return Err("remould effect is not in the current stage");
     }
-    let prerequisites = json_i32_array(effect, "remould_prev");
+    let prerequisites = &effect.remould_prev;
     if prerequisites.iter().any(|id| *id > 0) && !prerequisites.iter().any(|id| before.contains(id))
     {
         return Err("remould prerequisite is not complete");
     }
-    if json_i32(&hero, "level").unwrap_or_default()
-        < json_i32(effect, "limit_level").unwrap_or_default()
-    {
+    if json_i32(&hero, "level").unwrap_or_default() < effect.limit_level {
         return Err("hero level is too low for this remould effect");
     }
-    if json_i32(&hero, "advance").unwrap_or_default()
-        < json_i32(effect, "limit_star").unwrap_or_default()
-    {
+    if json_i32(&hero, "advance").unwrap_or_default() < effect.limit_star {
         return Err("hero advance level is too low for this remould effect");
     }
 
     let mut costs = std::collections::BTreeMap::<(i32, i32), i64>::new();
-    for cost in effect
-        .get("cost")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let values = cost
-            .as_array()
-            .ok_or("remould cost configuration is invalid")?;
-        if values.len() < 3 {
+    for (goods_type, item_id, amount) in &effect.costs {
+        if *amount <= 0 {
             return Err("remould cost configuration is invalid");
         }
-        let goods_type = values[0]
-            .as_i64()
-            .and_then(|value| i32::try_from(value).ok())
-            .ok_or("remould cost configuration is invalid")?;
-        let item_id = values[1]
-            .as_i64()
-            .and_then(|value| i32::try_from(value).ok())
-            .ok_or("remould cost configuration is invalid")?;
-        let amount = values[2]
-            .as_i64()
-            .filter(|value| *value > 0)
-            .ok_or("remould cost configuration is invalid")?;
-        if item_id <= 0 || matches!(goods_type, 2 | 3) {
+        if *item_id <= 0 || matches!(*goods_type, 2 | 3) {
             return Err("unsupported remould cost type");
         }
-        let entry = costs.entry((goods_type, item_id)).or_default();
+        let entry = costs.entry((*goods_type, *item_id)).or_default();
         *entry = entry
-            .checked_add(amount)
+            .checked_add(*amount)
             .ok_or("remould cost is too large")?;
     }
     for ((goods_type, item_id), amount) in &costs {
@@ -862,15 +812,9 @@ pub(super) fn hero_remould_state(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    for effect_type in effect
-        .get("remould_effect_type")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let values = effect_type.as_array().ok_or("remould effect is invalid")?;
-        let kind = values.first().and_then(Value::as_i64).unwrap_or_default();
-        let first = values.get(1).and_then(Value::as_i64).unwrap_or_default();
+    for values in &effect.remould_effect_type {
+        let kind = values.first().copied().unwrap_or_default() as i64;
+        let first = values.get(1).copied().unwrap_or_default() as i64;
         if kind == 4 && first > 0 {
             if !skills.iter().any(|skill| {
                 json_i32(skill, "pSkillId").or_else(|| json_i32(skill, "pskillId"))
@@ -879,7 +823,7 @@ pub(super) fn hero_remould_state(
                 skills.push(json!({"pSkillId": first, "level": 1, "pSkillExp": 0, "replace": 0}));
             }
         } else if kind == 5 && values.len() >= 3 && first > 0 {
-            let replacement = values[2].as_i64().unwrap_or_default();
+            let replacement = values[2];
             for skill in &mut skills {
                 if json_i32(skill, "pSkillId").or_else(|| json_i32(skill, "pskillId"))
                     == i32::try_from(first).ok()
@@ -989,37 +933,30 @@ pub(super) fn hero_advance_state(
         .by_template
         .get(&template_id)
         .ok_or("advance config is missing")?;
-    let min_level = json_i32(config, "min_level").unwrap_or_default();
-    if json_i32(target, "level").unwrap_or_default() < min_level {
+    if json_i32(target, "level").unwrap_or_default() < config.min_level {
         return Err("hero level is too low for advance");
     }
-    let break_to = config
-        .get("break_to")
-        .and_then(Value::as_str)
-        .and_then(|value| value.parse::<i32>().ok())
-        .or_else(|| json_i32(config, "break_to"))
-        .filter(|value| *value > 0)
-        .ok_or("advance target has no next template")?;
-    let break_item = config.get("break_item").and_then(Value::as_array);
-    let allowed_templates = break_item
-        .and_then(|values| values.first())
-        .and_then(Value::as_array)
+    let break_to = config.break_to;
+    if break_to <= 0 {
+        return Err("advance target has no next template");
+    }
+    let allowed_templates = config
+        .break_item
+        .as_ref()
+        .map(|(templates, _)| templates.iter().copied())
         .into_iter()
         .flatten()
-        .filter_map(Value::as_i64)
-        .filter_map(|value| i32::try_from(value).ok())
         .filter(|value| *value > 0)
         .collect::<std::collections::HashSet<_>>();
-    let optional_quality_count = config
-        .get("break_item_optional")
-        .and_then(Value::as_array)
-        .map(|values| values.len())
-        .unwrap_or_default();
-    let required_hero_count = break_item
-        .and_then(|values| values.get(1))
-        .and_then(Value::as_i64)
-        .and_then(|value| usize::try_from(value).ok())
-        .unwrap_or(if optional_quality_count > 0 { 1 } else { 0 });
+    let required_hero_count = config
+        .break_item
+        .as_ref()
+        .map(|(_, count)| *count)
+        .unwrap_or(if config.break_item_optional_count > 0 {
+            1
+        } else {
+            0
+        });
     if consumed_ids.len() != required_hero_count
         || consumed_ids.iter().any(|id| *id == 0 || *id == hero_id)
         || consumed_ids
@@ -1049,15 +986,8 @@ pub(super) fn hero_advance_state(
         return Err("advance material is invalid");
     }
     let item_requirement = config
-        .get("break_item_mub")
-        .and_then(Value::as_array)
-        .filter(|values| values.len() >= 2)
-        .map(|values| {
-            (
-                i32::try_from(values[0].as_i64().unwrap_or_default()).unwrap_or_default(),
-                usize::try_from(values[1].as_i64().unwrap_or_default()).unwrap_or_default(),
-            )
-        });
+        .break_item_mub
+        .map(|(item_id, count)| (item_id, usize::try_from(count).unwrap_or_default()));
     if let Some((required_item, required_count)) = item_requirement {
         if consume_item_ids.len() != required_count
             || consume_item_ids.iter().any(|id| *id != required_item)
@@ -1073,15 +1003,13 @@ pub(super) fn hero_advance_state(
     } else if !consume_item_ids.is_empty() {
         return Err("advance does not accept items");
     }
-    let currency = config
-        .get("currency_cost")
-        .and_then(Value::as_array)
+    let (currency_type, currency_id, currency_cost) = config
+        .currency_cost
         .ok_or("advance currency config is missing")?;
-    if currency.len() < 3 || currency[0].as_i64() != Some(5) {
+    if currency_type != 5 {
         return Err("advance currency config is invalid");
     }
-    let currency_id = i32::try_from(currency[1].as_i64().unwrap_or_default()).unwrap_or_default();
-    let currency_cost = currency[2].as_i64().unwrap_or_default().max(0);
+    let currency_cost = currency_cost.max(0);
     let Some(currency_key) = currency_character_key(currency_id) else {
         return Err("advance currency is unsupported");
     };

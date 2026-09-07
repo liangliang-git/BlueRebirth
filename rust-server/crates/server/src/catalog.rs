@@ -789,7 +789,18 @@ pub(super) struct ShipIntensifyCatalog {
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShipBreakCatalog {
-    pub(super) by_template: std::collections::BTreeMap<i32, Value>,
+    pub(super) by_template: std::collections::BTreeMap<i32, ShipBreakConfig>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct ShipBreakConfig {
+    pub(super) min_level: i32,
+    pub(super) break_to: i32,
+    pub(super) break_item: Option<(Vec<i32>, usize)>,
+    pub(super) break_item_optional_count: usize,
+    pub(super) break_item_mub: Option<(i32, i32)>,
+    pub(super) break_usableitem_mub: Vec<i32>,
+    pub(super) currency_cost: Option<(i32, i32, i64)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -807,9 +818,28 @@ pub(super) struct ShipAdvanceConfig {
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShipRemouldCatalog {
     /// sf_id -> config_ship_info row。
-    pub(super) ship_info_by_sf_id: std::collections::BTreeMap<i32, Value>,
-    pub(super) templates: std::collections::BTreeMap<i32, Value>,
-    pub(super) effects: std::collections::BTreeMap<i32, Value>,
+    pub(super) ship_info_by_sf_id: std::collections::BTreeMap<i32, ShipInfoRemouldConfig>,
+    pub(super) templates: std::collections::BTreeMap<i32, ShipRemouldTemplateConfig>,
+    pub(super) effects: std::collections::BTreeMap<i32, ShipRemouldEffectConfig>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct ShipInfoRemouldConfig {
+    pub(super) remould_template: Vec<i32>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct ShipRemouldTemplateConfig {
+    pub(super) remould_item_group: Vec<i32>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct ShipRemouldEffectConfig {
+    pub(super) remould_prev: Vec<i32>,
+    pub(super) limit_level: i32,
+    pub(super) limit_star: i32,
+    pub(super) costs: Vec<(i32, i32, i64)>,
+    pub(super) remould_effect_type: Vec<Vec<i32>>,
 }
 
 #[derive(Clone, Debug, Default)]

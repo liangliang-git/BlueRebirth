@@ -48,9 +48,10 @@ use super::{
     CommanderLevelCatalog, EquipCatalog, EquipLevelbreakRule, EquipNewTestCatalog, EquipNum,
     EquipRenovateRule, HeroBreakdownCatalog, HeroLevelCatalog, HeroSkillUpgradeCatalog,
     MailTemplate, RecipeConfig, ServerConfig, ServerState, ShipAdvanceCatalog, ShipAdvanceConfig,
-    ShipBreakCatalog, ShipRemouldCatalog, ShipStat, ShipStatCatalog, ShopCatalog, ShopCost,
-    ShopGood, ShopReward, SupportCatalog, SupportFleetItem, TalentCatalog, TalentNode, TaskCatalog,
-    TaskDefinition, UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
+    ShipBreakCatalog, ShipBreakConfig, ShipInfoRemouldConfig, ShipRemouldCatalog,
+    ShipRemouldEffectConfig, ShipRemouldTemplateConfig, ShipStat, ShipStatCatalog, ShopCatalog,
+    ShopCost, ShopGood, ShopReward, SupportCatalog, SupportFleetItem, TalentCatalog, TalentNode,
+    TaskCatalog, TaskDefinition, UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
 };
 use blueoath_domain::{FleetId, FleetRecord, HeroId, NewAccountFactory, ProfileId, TemplateId};
 use blueoath_protocol::{
@@ -3212,13 +3213,15 @@ fn hero_mub_breakthrough_consumes_fragments_and_updates_template() {
     let mut catalog = ShipBreakCatalog::default();
     catalog.by_template.insert(
         101,
-        json!({
-            "min_level": 1,
-            "break_to": "102",
-            "break_item_mub": [60000, 2],
-            "break_usableitem_mub": [],
-            "currency_cost": [5, 1, 100]
-        }),
+        ShipBreakConfig {
+            min_level: 1,
+            break_to: 102,
+            break_item: None,
+            break_item_optional_count: 0,
+            break_item_mub: Some((60000, 2)),
+            break_usableitem_mub: Vec::new(),
+            currency_cost: Some((5, 1, 100)),
+        },
     );
     let mut account = json!({
         "dock": {"heroes": [{"heroId": 10, "templateId": 101, "level": 1, "advance": 0}]},
@@ -3235,21 +3238,27 @@ fn hero_mub_breakthrough_consumes_fragments_and_updates_template() {
 #[test]
 fn hero_remould_consumes_cost_updates_level_and_unlocks_skill() {
     let mut catalog = ShipRemouldCatalog::default();
-    catalog
-        .ship_info_by_sf_id
-        .insert(10, json!({"remould_template": [100], "min_level": 1}));
-    catalog
-        .templates
-        .insert(100, json!({"remould_item_group": [200]}));
+    catalog.ship_info_by_sf_id.insert(
+        10,
+        ShipInfoRemouldConfig {
+            remould_template: vec![100],
+        },
+    );
+    catalog.templates.insert(
+        100,
+        ShipRemouldTemplateConfig {
+            remould_item_group: vec![200],
+        },
+    );
     catalog.effects.insert(
         200,
-        json!({
-            "limit_level": 1,
-            "limit_star": 0,
-            "cost": [[1, 60000, 2]],
-            "remould_prev": [],
-            "remould_effect_type": [[4, 9001]]
-        }),
+        ShipRemouldEffectConfig {
+            remould_prev: Vec::new(),
+            limit_level: 1,
+            limit_star: 0,
+            costs: vec![(1, 60000, 2)],
+            remould_effect_type: vec![vec![4, 9001]],
+        },
     );
     let mut account = json!({
         "dock": {"heroes": [{"heroId": 10, "templateId": 101, "level": 1,

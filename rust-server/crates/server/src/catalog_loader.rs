@@ -1591,12 +1591,63 @@ pub(super) fn load_ship_break_catalog(client_path: Option<&PathBuf>) -> ShipBrea
     let Some(client_path) = client_path else {
         return ShipBreakCatalog::default();
     };
-    ShipBreakCatalog {
-        by_template: read_config_rows(&config_dir(client_path).join("config_ship_break.db"))
-            .into_iter()
-            .filter(|(template_id, _)| *template_id > 0)
-            .collect(),
-    }
+    let by_template = read_config_rows(&config_dir(client_path).join("config_ship_break.db"))
+        .into_iter()
+        .filter_map(|(template_id, value)| {
+            let break_to = value
+                .get("break_to")
+                .and_then(|value| value.as_i64())
+                .and_then(|value| i32::try_from(value).ok())
+                .or_else(|| {
+                    value
+                        .get("break_to")
+                        .and_then(Value::as_str)
+                        .and_then(|value| value.parse::<i32>().ok())
+                })
+                .unwrap_or_default();
+            let break_item = value.get("break_item").and_then(|value| {
+                let values = value.as_array()?;
+                let templates =
+                    values.first()?.as_array()?.iter().filter_map(|value| {
+                        value.as_i64().and_then(|value| i32::try_from(value).ok())
+                    });
+                let templates = templates.collect::<Vec<_>>();
+                let count = usize::try_from(values.get(1)?.as_i64()?).ok()?;
+                Some((templates, count))
+            });
+            let break_item_mub = value.get("break_item_mub").and_then(|value| {
+                let values = value.as_array()?;
+                Some((
+                    i32::try_from(values.first()?.as_i64()?).ok()?,
+                    i32::try_from(values.get(1)?.as_i64()?).ok()?,
+                ))
+            });
+            let currency_cost = value.get("currency_cost").and_then(|value| {
+                let values = value.as_array()?;
+                Some((
+                    i32::try_from(values.first()?.as_i64()?).ok()?,
+                    i32::try_from(values.get(1)?.as_i64()?).ok()?,
+                    values.get(2)?.as_i64()?,
+                ))
+            });
+            (template_id > 0).then_some((
+                template_id,
+                ShipBreakConfig {
+                    min_level: json_i32(&value, "min_level").unwrap_or_default(),
+                    break_to,
+                    break_item,
+                    break_item_optional_count: value
+                        .get("break_item_optional")
+                        .and_then(Value::as_array)
+                        .map_or(0, Vec::len),
+                    break_item_mub,
+                    break_usableitem_mub: json_i32_array(&value, "break_usableitem_mub"),
+                    currency_cost,
+                },
+            ))
+        })
+        .collect();
+    ShipBreakCatalog { by_template }
 }
 
 pub(super) fn load_ship_advance_catalog(client_path: Option<&PathBuf>) -> ShipAdvanceCatalog {
@@ -1631,24 +1682,61 @@ pub(super) fn load_ship_remould_catalog(client_path: Option<&PathBuf>) -> ShipRe
         if sf_id <= 0 {
             continue;
         }
-        let has_remould = !json_i32_array(&value, "remould_template").is_empty();
+        let config = ShipInfoRemouldConfig {
+            remould_template: json_i32_array(&value, "remould_template"),
+        };
+        let has_remould = !config.remould_template.is_empty();
         let replace = ship_info_by_sf_id
             .get(&sf_id)
-            .map(|current: &Value| {
-                has_remould && json_i32_array(current, "remould_template").is_empty()
+            .map(|current: &ShipInfoRemouldConfig| {
+                has_remould && current.remould_template.is_empty()
             })
             .unwrap_or(true);
         if replace {
-            ship_info_by_sf_id.insert(sf_id, value);
+            ship_info_by_sf_id.insert(sf_id, config);
         }
     }
     let templates = read_config_rows(&dir.join("config_ship_remould_template.db"))
         .into_iter()
         .filter(|(id, _)| *id > 0)
+        .map(|(id, value)| {
+            (
+                id,
+                ShipRemouldTemplateConfig {
+                    remould_item_group: json_i32_array(&value, "remould_item_group"),
+                },
+            )
+        })
         .collect();
     let effects = read_config_rows(&dir.join("config_ship_remould_effect.db"))
         .into_iter()
         .filter(|(id, _)| *id > 0)
+        .map(|(id, value)| {
+            let costs = value
+                .get("cost")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|row| {
+                    let values = row.as_array()?;
+                    Some((
+                        i32::try_from(values.first()?.as_i64()?).ok()?,
+                        i32::try_from(values.get(1)?.as_i64()?).ok()?,
+                        values.get(2)?.as_i64()?,
+                    ))
+                })
+                .collect();
+            (
+                id,
+                ShipRemouldEffectConfig {
+                    remould_prev: json_i32_array(&value, "remould_prev"),
+                    limit_level: json_i32(&value, "limit_level").unwrap_or_default(),
+                    limit_star: json_i32(&value, "limit_star").unwrap_or_default(),
+                    costs,
+                    remould_effect_type: config_i32_nested_array(&value, "remould_effect_type"),
+                },
+            )
+        })
         .collect();
     ShipRemouldCatalog {
         ship_info_by_sf_id,
