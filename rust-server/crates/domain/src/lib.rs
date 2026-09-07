@@ -407,6 +407,75 @@ impl NewAccountFactory {
         account.character.head = 1021051;
         account.character.secretary_id = HeroId::new(1).ok();
         account
+            .resources
+            .credit(CurrencyKind::Diamond, 10_000)
+            .expect("starter diamond balance is bounded");
+        account
+            .resources
+            .credit(CurrencyKind::Supply, 10_000)
+            .expect("starter supply balance is bounded");
+
+        let starter_hero_id = HeroId::new(1).expect("starter hero id is positive");
+        account.dock.heroes.insert(
+            starter_hero_id,
+            HeroState {
+                id: starter_hero_id,
+                template_id: TemplateId::new(10_210_511)
+                    .expect("starter hero template is positive"),
+                level: 1,
+                exp: 0,
+                mood: 100,
+                affection: 500_000,
+                hp: 10_000_000_000,
+                locked: true,
+                equip_slots: vec![
+                    Some(EquipId::new(1).expect("starter equipment id is positive")),
+                    None,
+                    Some(EquipId::new(2).expect("starter equipment id is positive")),
+                    None,
+                    None,
+                    None,
+                ],
+            },
+        );
+        for (id, template_id) in [(1, 30_091), (2, 30_221)] {
+            let id = EquipId::new(id).expect("starter equipment id is positive");
+            account.dock.equipments.insert(
+                id,
+                EquipmentState {
+                    id,
+                    template_id: TemplateId::new(template_id)
+                        .expect("starter equipment template is positive"),
+                    enhance_level: 0,
+                    star: 0,
+                    enhance_exp: 0,
+                    hero_id: Some(starter_hero_id),
+                },
+            );
+        }
+        for template_id in [60_000, 60_001, 60_002, 60_003] {
+            account.inventory.items.insert(
+                TemplateId::new(template_id).expect("starter item id is positive"),
+                1_000,
+            );
+        }
+        for fleet_id in 1..=5u64 {
+            account.fleet.fleets.insert(
+                FleetId::new(fleet_id).expect("starter fleet id is positive"),
+                FleetRecord {
+                    formation_id: 2,
+                    tactic_id: 0,
+                    members: Vec::new(),
+                },
+            );
+        }
+        account.buildings.levels.insert(1, 2);
+        account.buildings.template_ids.insert(1, 2);
+        account.buildings.land_indices.insert(1, 1);
+        account.buildings.levels.insert(2, 1);
+        account.buildings.template_ids.insert(2, 41);
+        account.buildings.land_indices.insert(2, 6);
+        account
     }
 }
 
@@ -460,5 +529,10 @@ mod tests {
         assert!(account.validate().is_ok());
         assert_eq!(account.character.level, 1);
         assert!(account.profile.is_some());
+        assert_eq!(account.dock.heroes.len(), 1);
+        assert_eq!(account.dock.equipments.len(), 2);
+        assert_eq!(account.inventory.items.len(), 4);
+        assert_eq!(account.fleet.fleets.len(), 5);
+        assert_eq!(account.buildings.levels.get(&1), Some(&2));
     }
 }
