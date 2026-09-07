@@ -48,6 +48,7 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "hero.HeroCombineBreak"
             | "bag.GetNormalTreasureInfo"
             | "bag.GetSelectTreasureInfo"
+            | "illustrate.VowHero"
             | "illustrate.VowDecTime"
             | "illustrate.IllustrateNew"
             | "repair.RepairHero"
@@ -110,6 +111,41 @@ pub(super) fn handle_typed(
         let mut output = Vec::new();
         append_varint_field(&mut output, 1, 0);
         append_varint_field(&mut output, 2, 0);
+        return HandlerResult::Reply(Response::raw(method, output));
+    }
+    if method == "illustrate.VowHero" {
+        let ship_info_id = decode_repeated_varint_field(request_args, 1)
+            .into_iter()
+            .find(|id| *id > 0);
+        let Some(ship_info_id) = ship_info_id else {
+            return HandlerResult::Error(GameError::InvalidRequest("wish hero is invalid"));
+        };
+        let Some(template_id) = ship_info_id
+            .checked_mul(10)
+            .and_then(|id| id.checked_add(1))
+        else {
+            return HandlerResult::Error(GameError::InvalidRequest("wish hero id is invalid"));
+        };
+        let mut reward = ShopReward {
+            goods_type: 3,
+            item_id: template_id,
+            num: 1,
+            instance_id: 0,
+        };
+        if !grant_typed_treasure_reward(account, &mut reward) {
+            return HandlerResult::Error(GameError::InvalidState("wish hero cannot be granted"));
+        }
+        pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
+        append_method_push(
+            pre_pushes,
+            "illustrate.IllustrateInfo",
+            illustrate_info_payload_for_templates(&[template_id], None),
+        );
+        let mut output = Vec::new();
+        append_varint_field(&mut output, 1, reward.goods_type as u64);
+        append_varint_field(&mut output, 2, reward.item_id as u64);
+        append_varint_field(&mut output, 3, reward.num as u64);
+        append_varint_field(&mut output, 4, reward.instance_id as u64);
         return HandlerResult::Reply(Response::raw(method, output));
     }
     if method == "illustrate.IllustrateNew" {
@@ -2608,5 +2644,21 @@ mod tests {
             &mut fashion_reward
         ));
         assert!(account.fashion.entries.contains_key(&40_000_001));
+
+        let mut vow = Vec::new();
+        append_varint_field(&mut vow, 1, 1_234);
+        assert!(matches!(
+            handle_typed(
+                &state,
+                &mut account,
+                "illustrate.VowHero",
+                &vow,
+                None,
+                None,
+                &mut pushes,
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(account.dock.heroes.len(), 3);
     }
 }
