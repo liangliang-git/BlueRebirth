@@ -546,7 +546,7 @@ fn canonical_typed_method(method: &str) -> Option<&str> {
             "CancelFocus" => Some("matchsvr.CancelFocus"),
             "SetAutoReady" => Some("matchsvr.SetAutoReady"),
             "CancelAutoReady" => Some("matchsvr.CancelAutoReady"),
-            _ => None,
+            _ => Some(method),
         };
     }
     match method {
@@ -1945,6 +1945,10 @@ mod typed_tests {
                 &mut pushes
             ),
             HandlerResult::Reply(_)
+        ));
+        assert!(matches!(
+            handle_typed(&state, &mut account, "matchsvr_7.Unknown", &[], &mut pushes),
+            HandlerResult::Error(GameError::InvalidRequest(_))
         ));
     }
 
