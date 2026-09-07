@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use blueoath_protocol::*;
 use serde_json::Value;
 

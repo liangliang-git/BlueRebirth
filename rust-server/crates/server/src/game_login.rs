@@ -2,7 +2,7 @@ use blueoath_domain::{AccountState, ChapterId, CopyId, FleetId};
 use blueoath_game::BattleService;
 use blueoath_protocol::*;
 use blueoath_transport::NetSocketFrameCodec;
-use serde_json::{json, Value};
+use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::catalog::*;
@@ -72,7 +72,7 @@ mod task_handler;
 #[path = "teaching_handler.rs"]
 mod teaching_handler;
 #[cfg(test)]
-pub(super) use compat_feature::pass_mini_game;
+pub(super) use compat_feature::legacy_test_handler::pass_mini_game;
 #[path = "progression_handler.rs"]
 mod progression_handler;
 #[path = "talent_handler.rs"]
@@ -82,6 +82,7 @@ pub(super) mod tower_handler;
 
 type BattlePassDetails = (i32, i32, i32, bool, Vec<i32>, Vec<(u64, i32)>);
 
+#[allow(dead_code)]
 struct GameLoginRequestContext<'state, 'account, 'scratch> {
     state: &'state ServerState,
     account: &'scratch mut Option<&'account mut Value>,
@@ -163,10 +164,14 @@ where
     );
     let mut pre_pushes = Vec::<Vec<u8>>::new();
     let mut post_pushes = Vec::<Vec<u8>>::new();
-    let mut pass_details = None;
+    #[allow(unused_mut)]
+    let mut pass_details: Option<BattlePassDetails> = None;
     let mut pass_rewards = Vec::<ShopReward>::new();
+    #[allow(unused_mut)]
     let mut pass_hero_ids = Vec::<u64>::new();
+    #[allow(unused_mut)]
     let mut pass_mvp_hero_id = None;
+    #[allow(unused_mut)]
     let mut pass_shipwrecked_ids = std::collections::HashSet::new();
     let mut handler_error: Option<GameError> = None;
     let mut typed_daily_copy_handled = false;
@@ -279,21 +284,37 @@ where
                 | "task.GetTeachingTask"
         ) =>
         {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            let result = if typed_account.is_some() {
+                HandlerResult::Error(GameError::InvalidRequest("compat request is not supported"))
+            } else {
+                #[cfg(test)]
+                {
+                    let mut context = GameLoginRequestContext {
+                        state,
+                        account: &mut account,
+                        catalogs: *catalogs,
+                        pre_pushes: &mut pre_pushes,
+                        post_pushes: &mut post_pushes,
+                        handler_error: &mut handler_error,
+                        pass_details: &mut pass_details,
+                        pass_rewards: &mut pass_rewards,
+                        pass_hero_ids: &mut pass_hero_ids,
+                        pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                        pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                    };
+                    compat_feature::legacy_test_handler::handle(
+                        &mut context,
+                        request.method.as_str(),
+                        request_args,
+                    )
+                }
+                #[cfg(not(test))]
+                {
+                    HandlerResult::Error(GameError::InvalidRequest(
+                        "compat request requires typed account",
+                    ))
+                }
             };
-            let result =
-                compat_feature::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -1054,41 +1075,15 @@ where
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result
-                } else if typed_account.is_some() {
+                } else {
                     HandlerResult::Error(GameError::InvalidRequest(
                         "building request is not supported",
                     ))
-                } else {
-                    let mut context = GameLoginRequestContext {
-                        state,
-                        account: &mut account,
-                        catalogs: *catalogs,
-                        pre_pushes: &mut pre_pushes,
-                        post_pushes: &mut post_pushes,
-                        handler_error: &mut handler_error,
-                        pass_details: &mut pass_details,
-                        pass_rewards: &mut pass_rewards,
-                        pass_hero_ids: &mut pass_hero_ids,
-                        pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                        pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                    };
-                    building_handler::handle(&mut context, request.method.as_str(), request_args)
                 }
             } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                building_handler::handle(&mut context, request.method.as_str(), request_args)
+                HandlerResult::Error(GameError::InvalidRequest(
+                    "building request requires typed account",
+                ))
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -1162,9 +1157,26 @@ where
                     )
                 }
             } else {
-                HandlerResult::Error(GameError::InvalidRequest(
-                    "progression request requires typed account",
-                ))
+                if method.is_family(MethodFamily::Bathroom) {
+                    let profile_id = blueoath_domain::ProfileId::new(state.profile_id.clone())
+                        .unwrap_or_else(|_| {
+                            blueoath_domain::ProfileId::new("anonymous").expect("static id")
+                        });
+                    let mut transient =
+                        blueoath_domain::NewAccountFactory::create(profile_id, &state.name);
+                    progression_handler::handle_bathroom_typed(
+                        &mut transient,
+                        request.method.as_str(),
+                        request_args,
+                        current_unix_seconds(),
+                        state.mood_recovery_multiplier,
+                        &mut post_pushes,
+                    )
+                } else {
+                    HandlerResult::Error(GameError::InvalidRequest(
+                        "progression request requires typed account",
+                    ))
+                }
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -1219,41 +1231,15 @@ where
                 if matches!(result, HandlerResult::PushOnly | HandlerResult::Error(_)) {
                     typed_daily_copy_handled = true;
                     result
-                } else if typed_account.is_some() {
+                } else {
                     HandlerResult::Error(GameError::InvalidRequest(
                         "daily copy request is not supported",
                     ))
-                } else {
-                    let mut context = GameLoginRequestContext {
-                        state,
-                        account: &mut account,
-                        catalogs: *catalogs,
-                        pre_pushes: &mut pre_pushes,
-                        post_pushes: &mut post_pushes,
-                        handler_error: &mut handler_error,
-                        pass_details: &mut pass_details,
-                        pass_rewards: &mut pass_rewards,
-                        pass_hero_ids: &mut pass_hero_ids,
-                        pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                        pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                    };
-                    battle_handler::handle(&mut context, request.method.as_str(), request_args)
                 }
             } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                battle_handler::handle(&mut context, request.method.as_str(), request_args)
+                HandlerResult::Error(GameError::InvalidRequest(
+                    "daily copy request requires typed account",
+                ))
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -1303,11 +1289,14 @@ where
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     typed_handled = true;
                     result
-                } else if typed_account.is_some() {
+                } else {
                     HandlerResult::Error(GameError::InvalidRequest(
                         "battle request is not supported",
                     ))
-                } else {
+                }
+            } else {
+                #[cfg(test)]
+                {
                     let mut context = GameLoginRequestContext {
                         state,
                         account: &mut account,
@@ -1321,23 +1310,18 @@ where
                         pass_mvp_hero_id: &mut pass_mvp_hero_id,
                         pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
                     };
-                    battle_handler::handle(&mut context, request.method.as_str(), request_args)
+                    battle_handler::legacy_test_handler::handle(
+                        &mut context,
+                        request.method.as_str(),
+                        request_args,
+                    )
                 }
-            } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                battle_handler::handle(&mut context, request.method.as_str(), request_args)
+                #[cfg(not(test))]
+                {
+                    HandlerResult::Error(GameError::InvalidRequest(
+                        "battle request requires typed account",
+                    ))
+                }
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -1360,16 +1344,6 @@ where
                         UserInfoCodec::encode(&user_info_from_typed_account(state, typed)),
                     );
                 }
-            }
-            if !typed_handled && handler_error.is_none() {
-                sync_typed_battle_state_with_catalog(
-                    typed_account.as_deref_mut(),
-                    account.as_deref(),
-                    request.method.as_str(),
-                    request_args,
-                    battle_catalog,
-                    current_unix_seconds(),
-                );
             }
             payload
         }
@@ -2326,6 +2300,7 @@ pub(super) fn sync_typed_battle_state(
     );
 }
 
+#[allow(dead_code)]
 fn sync_typed_battle_state_with_catalog(
     typed_account: Option<&mut AccountState>,
     legacy_account: Option<&Value>,
