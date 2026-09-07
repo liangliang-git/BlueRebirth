@@ -104,7 +104,7 @@ struct GameLoginRequestContext<'state, 'account, 'scratch> {
 pub(super) async fn process_game_login_frame_payload_with_catalogs_typed_mut<S>(
     stream: &mut S,
     state: &ServerState,
-    mut account: Option<&mut Value>,
+    #[cfg(test)] mut account: Option<&mut Value>,
     mut typed_account: Option<&mut AccountState>,
     frame: blueoath_transport::NetSocketFrame,
     catalogs: &GameLoginCatalogs<'_>,
@@ -112,6 +112,9 @@ pub(super) async fn process_game_login_frame_payload_with_catalogs_typed_mut<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    #[cfg(not(test))]
+    let mut account: Option<&mut Value> = None;
+
     let GameLoginCatalogs {
         fashion: fashion_catalog,
         equip: equip_catalog,
@@ -2331,10 +2334,21 @@ pub(super) async fn process_game_login_frame_payload_with_typed_account<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    process_game_login_frame_payload_with_catalogs_typed_mut(
+    #[cfg(test)]
+    return process_game_login_frame_payload_with_catalogs_typed_mut(
         stream,
         state,
         None,
+        Some(typed_account),
+        frame,
+        catalogs,
+    )
+    .await;
+
+    #[cfg(not(test))]
+    process_game_login_frame_payload_with_catalogs_typed_mut(
+        stream,
+        state,
         Some(typed_account),
         frame,
         catalogs,
