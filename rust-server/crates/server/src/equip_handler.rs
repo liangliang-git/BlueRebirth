@@ -32,6 +32,9 @@ pub(super) fn handle_typed(
                 return HandlerResult::Error(GameError::InvalidRequest("equipment was not found"));
             };
             let template_id = i32::try_from(target.template_id.get()).unwrap_or_default();
+            if catalog.quality_by_template.get(&template_id) == Some(&5) {
+                return HandlerResult::Empty;
+            }
             let max_level = *catalog
                 .enhance_max_by_template
                 .get(&template_id)
