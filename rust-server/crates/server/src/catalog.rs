@@ -762,6 +762,59 @@ pub(super) struct GameplayCatalog {
     pub(super) sportsmeet_awards: std::collections::BTreeMap<i32, SportsMeetAwardConfig>,
 }
 
+impl GameplayCatalog {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        for (reward_id, rewards) in &self.rewards_by_id {
+            if *reward_id <= 0
+                || rewards
+                    .iter()
+                    .any(|reward| reward.goods_type <= 0 || reward.item_id <= 0 || reward.num <= 0)
+            {
+                return Err(format!("gameplay reward config is invalid: {reward_id}"));
+            }
+        }
+        for (drop_id, drop) in &self.drop_items {
+            if *drop_id <= 0
+                || drop.entries.iter().any(|entry| {
+                    entry.goods_type <= 0
+                        || entry.item_id <= 0
+                        || entry.min <= 0
+                        || entry.max < entry.min
+                        || entry.rate <= 0
+                })
+            {
+                return Err(format!("gameplay drop config is invalid: {drop_id}"));
+            }
+        }
+        for (activity_id, activity) in &self.activity {
+            if *activity_id <= 0 || activity.id <= 0 || activity.activity_type <= 0 {
+                return Err(format!("activity config is invalid: {activity_id}"));
+            }
+        }
+        for (event_id, event) in &self.world_events {
+            if *event_id <= 0
+                || event
+                    .server_stage_rewards
+                    .iter()
+                    .any(|(stage, reward)| *stage < 0 || *reward < 0)
+            {
+                return Err(format!("world event config is invalid: {event_id}"));
+            }
+        }
+        for (recipe_id, recipe) in &self.food_recipes {
+            if *recipe_id <= 0
+                || recipe.reward_id < 0
+                || recipe.material.iter().any(|(goods_type, item_id, amount)| {
+                    *goods_type <= 0 || *item_id <= 0 || *amount <= 0
+                })
+            {
+                return Err(format!("food recipe config is invalid: {recipe_id}"));
+            }
+        }
+        Ok(())
+    }
+}
+
 pub(super) const MAX_SHOP_BUY_NUM: i32 = 99;
 
 #[derive(Clone, Debug, Default)]
@@ -805,6 +858,33 @@ pub(super) struct ShipBreakConfig {
     pub(super) currency_cost: Option<(i32, i32, i64)>,
 }
 
+impl ShipBreakCatalog {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        for (template_id, config) in &self.by_template {
+            if *template_id <= 0
+                || config.min_level < 0
+                || config.break_to <= 0
+                || config
+                    .break_item
+                    .as_ref()
+                    .is_some_and(|(templates, count)| {
+                        *count == 0 || templates.iter().any(|template| *template <= 0)
+                    })
+                || config
+                    .break_item_mub
+                    .is_some_and(|(item, count)| item <= 0 || count <= 0)
+                || config.break_usableitem_mub.iter().any(|item| *item <= 0)
+                || config
+                    .currency_cost
+                    .is_some_and(|(kind, item, cost)| kind != 5 || item <= 0 || cost < 0)
+            {
+                return Err(format!("ship break config is invalid: {template_id}"));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShipAdvanceCatalog {
     /// 下一次 AdvLv -> config_ship_advance row。
@@ -815,6 +895,18 @@ pub(super) struct ShipAdvanceCatalog {
 pub(super) struct ShipAdvanceConfig {
     pub(super) initial_level: i32,
     pub(super) max_level: i32,
+}
+
+impl ShipAdvanceCatalog {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        for (level, config) in &self.by_level {
+            if *level <= 0 || config.initial_level <= 0 || config.max_level <= config.initial_level
+            {
+                return Err(format!("ship advance config is invalid: {level}"));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -842,6 +934,39 @@ pub(super) struct ShipRemouldEffectConfig {
     pub(super) limit_star: i32,
     pub(super) costs: Vec<(i32, i32, i64)>,
     pub(super) remould_effect_type: Vec<Vec<i32>>,
+}
+
+impl ShipRemouldCatalog {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        for (sf_id, config) in &self.ship_info_by_sf_id {
+            if *sf_id <= 0 || config.remould_template.iter().any(|id| *id <= 0) {
+                return Err(format!("ship remould info is invalid: {sf_id}"));
+            }
+        }
+        for (template_id, config) in &self.templates {
+            if *template_id <= 0 || config.remould_item_group.iter().any(|id| *id <= 0) {
+                return Err(format!("ship remould template is invalid: {template_id}"));
+            }
+        }
+        for (effect_id, config) in &self.effects {
+            if *effect_id <= 0
+                || config.remould_prev.iter().any(|id| *id <= 0)
+                || config.limit_level < 0
+                || config.limit_star < 0
+                || config
+                    .costs
+                    .iter()
+                    .any(|(kind, item, amount)| *kind <= 0 || *item <= 0 || *amount <= 0)
+                || config
+                    .remould_effect_type
+                    .iter()
+                    .any(|row| row.is_empty() || row.iter().any(|value| *value < 0))
+            {
+                return Err(format!("ship remould effect is invalid: {effect_id}"));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Default)]

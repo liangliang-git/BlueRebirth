@@ -40,6 +40,26 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
     let _ = COMMANDER_LEVEL_CATALOG
         .get_or_init(|| load_commander_level_catalog(config.client_path.as_ref()));
     let _ = SUPPORT_CATALOG.get_or_init(|| load_support_catalog(config.client_path.as_ref()));
+    GAMEPLAY_CATALOG
+        .get()
+        .expect("gameplay catalog initialized")
+        .validate()
+        .map_err(ServerError::Catalog)?;
+    SHIP_BREAK_CATALOG
+        .get()
+        .expect("ship break catalog initialized")
+        .validate()
+        .map_err(ServerError::Catalog)?;
+    SHIP_ADVANCE_CATALOG
+        .get()
+        .expect("ship advance catalog initialized")
+        .validate()
+        .map_err(ServerError::Catalog)?;
+    SHIP_REMOULD_CATALOG
+        .get()
+        .expect("ship remould catalog initialized")
+        .validate()
+        .map_err(ServerError::Catalog)?;
     let listener = TcpListener::bind(("127.0.0.1", config.port)).await?;
     let address = listener.local_addr()?;
     // Always expose game-login endpoint. Port 0 keeps default startup collision-free while
