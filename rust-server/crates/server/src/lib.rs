@@ -159,49 +159,41 @@ pub async fn process_game_login_frame<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    process_game_login_frame_with_account(stream, state, None).await
+    let mut account = transient_typed_account(state);
+    let catalogs = GameLoginCatalogs::empty();
+    process_game_login_frame_with_catalogs_typed_mut(
+        stream,
+        state,
+        None,
+        Some(&mut account),
+        &catalogs,
+    )
+    .await
 }
 
-pub async fn process_game_login_frame_with_account<S>(
+fn transient_typed_account(state: &ServerState) -> blueoath_domain::AccountState {
+    let profile_id = blueoath_domain::ProfileId::new(state.profile_id.clone())
+        .unwrap_or_else(|_| blueoath_domain::ProfileId::new("anonymous").expect("static id"));
+    let mut account = blueoath_domain::NewAccountFactory::create(profile_id, &state.name);
+    let _ = account
+        .resources
+        .debit(blueoath_domain::CurrencyKind::Supply, 9_900);
+    let _ = account
+        .resources
+        .credit(blueoath_domain::CurrencyKind::PvePoint, 100);
+    account
+}
+
+pub async fn process_game_login_frame_with_typed_account<S>(
     stream: &mut S,
     state: &ServerState,
-    account: Option<&Value>,
+    account: &mut blueoath_domain::AccountState,
 ) -> Result<bool, ServerError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    process_game_login_frame_with_account_and_catalog(stream, state, account, None, None).await
-}
-
-pub(crate) async fn process_game_login_frame_with_account_and_catalog<S>(
-    stream: &mut S,
-    state: &ServerState,
-    account: Option<&Value>,
-    fashion_catalog: Option<&FashionList>,
-    equip_catalog: Option<&EquipCatalog>,
-) -> Result<bool, ServerError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let catalogs = GameLoginCatalogs {
-        fashion: fashion_catalog,
-        equip: equip_catalog,
-        ..GameLoginCatalogs::empty()
-    };
-    process_game_login_frame_with_catalog(stream, state, account, &catalogs).await
-}
-
-async fn process_game_login_frame_with_catalog<S>(
-    stream: &mut S,
-    state: &ServerState,
-    account: Option<&Value>,
-    catalogs: &GameLoginCatalogs<'_>,
-) -> Result<bool, ServerError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let mut account_owned = account.cloned();
-    process_game_login_frame_with_catalogs_mut(stream, state, account_owned.as_mut(), catalogs)
+    let catalogs = GameLoginCatalogs::empty();
+    process_game_login_frame_with_catalogs_typed_mut(stream, state, None, Some(account), &catalogs)
         .await
 }
 
@@ -249,6 +241,7 @@ where
     process_game_login_frame_with_catalogs_mut(stream, state, account, &catalogs).await
 }
 
+#[cfg(test)]
 async fn process_game_login_frame_with_catalogs_mut<S>(
     stream: &mut S,
     state: &ServerState,

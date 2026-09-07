@@ -143,6 +143,9 @@ fn typed_social_relations_round_trip_through_normalized_storage() {
     account.daily_copy.reset_day = 42;
     account.daily_copy.challenge_times.insert(chapter, 3);
     account.daily_copy.select_ex.insert(chapter, true);
+    account.daily_copy.ex_stars.insert(chapter, 5);
+    account.daily_copy.group_success_times.insert(1, 3);
+    account.daily_copy.extra_group_success_times.insert(1, 4);
     account.battle.passed_copies.insert(CopyId::new(7).unwrap());
     account.social.friends.insert(42);
     account.social.pending.insert(43);
@@ -252,7 +255,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 29);
+    assert_eq!(version, 30);
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",

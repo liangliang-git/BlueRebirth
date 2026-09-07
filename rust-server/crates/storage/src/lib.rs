@@ -564,7 +564,8 @@ impl ProfileStore {
         }
 
         let mut statement = connection.prepare(
-            "SELECT reset_day, chapter_id, challenge_times, select_ex
+            "SELECT reset_day, chapter_id, group_id, challenge_times,
+                    success_times, select_ex, extra_group, ex_star
              FROM daily_copy_progress WHERE profile_id = ?1 ORDER BY chapter_id",
         )?;
         let daily_rows = statement
@@ -574,10 +575,24 @@ impl ProfileStore {
                     row.get::<_, i64>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        for (reset_day, chapter_value, challenge_times, select_ex) in daily_rows {
+        for (
+            reset_day,
+            chapter_value,
+            group_id,
+            challenge_times,
+            success_times,
+            select_ex,
+            extra_group,
+            ex_star,
+        ) in daily_rows
+        {
             account.daily_copy.reset_day = non_negative_u32(reset_day, "daily reset day")?;
             let chapter_id = ChapterId::new(positive_u64(chapter_value, "daily chapter id")?)
                 .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
@@ -589,6 +604,25 @@ impl ProfileStore {
                 .daily_copy
                 .select_ex
                 .insert(chapter_id, select_ex != 0);
+            let ex_star = non_negative_u32(ex_star, "daily ex star")?;
+            if ex_star > 0 {
+                account.daily_copy.ex_stars.insert(chapter_id, ex_star);
+            }
+            let group_id = positive_u64(group_id, "daily group id")?;
+            let success_times = non_negative_u32(success_times, "daily group success times")?;
+            let extra_group = non_negative_u32(extra_group, "daily extra group success times")?;
+            if success_times > 0 {
+                account
+                    .daily_copy
+                    .group_success_times
+                    .insert(group_id, success_times);
+            }
+            if extra_group > 0 {
+                account
+                    .daily_copy
+                    .extra_group_success_times
+                    .insert(group_id, extra_group);
+            }
         }
 
         let mut statement = connection.prepare(
@@ -2559,15 +2593,23 @@ impl ProfileStore {
             )?;
         }
         for (chapter_id, challenge_times) in &account.daily_copy.challenge_times {
+            let group_id = account
+                .daily_copy
+                .group_success_times
+                .keys()
+                .next()
+                .copied()
+                .unwrap_or(1);
             transaction.execute(
                 "INSERT INTO daily_copy_progress(
                     profile_id, reset_day, chapter_id, group_id, challenge_times,
-                    success_times, select_ex, extra_group
-                ) VALUES (?1, ?2, ?3, 1, ?4, 0, ?5, 0)",
+                    success_times, select_ex, extra_group, ex_star
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?7, ?6, ?8, ?9)",
                 params![
                     profile.id.as_str(),
                     typed_i64(account.daily_copy.reset_day, "daily reset day")?,
                     typed_i64(chapter_id.get(), "daily chapter id")?,
+                    typed_i64(group_id, "daily group id")?,
                     typed_i64(*challenge_times, "daily challenge times")?,
                     i64::from(
                         account
@@ -2577,6 +2619,33 @@ impl ProfileStore {
                             .copied()
                             .unwrap_or(false),
                     ),
+                    typed_i64(
+                        account
+                            .daily_copy
+                            .group_success_times
+                            .get(&group_id)
+                            .copied()
+                            .unwrap_or_default(),
+                        "daily group success times",
+                    )?,
+                    typed_i64(
+                        account
+                            .daily_copy
+                            .extra_group_success_times
+                            .get(&group_id)
+                            .copied()
+                            .unwrap_or_default(),
+                        "daily extra group success times",
+                    )?,
+                    typed_i64(
+                        account
+                            .daily_copy
+                            .ex_stars
+                            .get(chapter_id)
+                            .copied()
+                            .unwrap_or_default(),
+                        "daily ex star",
+                    )?,
                 ],
             )?;
         }
@@ -3738,6 +3807,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0027_supply_typed_state.sql"),
     include_str!("../../../migrations/0028_support_typed_state.sql"),
     include_str!("../../../migrations/0029_battle_session_constraints.sql"),
+    include_str!("../../../migrations/0030_daily_copy_ex_star.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

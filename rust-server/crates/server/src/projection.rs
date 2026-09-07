@@ -1680,7 +1680,19 @@ pub(super) fn daily_copy_progress_from_typed_account(
                     .get(&chapter_id)
                     .copied()
                     .unwrap_or(false),
-                ex_star: 0,
+                ex_star: if u64::from(account.daily_copy.reset_day) == reset_day {
+                    i32::try_from(
+                        account
+                            .daily_copy
+                            .ex_stars
+                            .get(&chapter_id)
+                            .copied()
+                            .unwrap_or_default(),
+                    )
+                    .unwrap_or(i32::MAX)
+                } else {
+                    0
+                },
             })
         })
         .collect()
@@ -1703,9 +1715,36 @@ pub(super) fn daily_copy_snapshot_payload_from_typed_account(
         &catalog.daily_chapters,
         &catalog.daily_groups,
         &daily_copy_progress_from_typed_account(account, now),
-        &[],
-        &[],
+        &daily_copy_group_progress_from_typed_account(account, false, now),
+        &daily_copy_group_progress_from_typed_account(account, true, now),
     )
+}
+
+pub(super) fn daily_copy_group_progress_from_typed_account(
+    account: &blueoath_domain::AccountState,
+    extra: bool,
+    now: u32,
+) -> Vec<DailyCopyGroupProgress> {
+    let reset_day = (u64::from(now) + 8 * 60 * 60) / 86_400;
+    let reset = u64::from(account.daily_copy.reset_day) != reset_day;
+    let values = if extra {
+        &account.daily_copy.extra_group_success_times
+    } else {
+        &account.daily_copy.group_success_times
+    };
+    values
+        .iter()
+        .filter_map(|(group_id, success_times)| {
+            Some(DailyCopyGroupProgress {
+                group_id: i32::try_from(*group_id).ok()?,
+                success_times: if reset && !extra {
+                    0
+                } else {
+                    i32::try_from(*success_times).unwrap_or(i32::MAX)
+                },
+            })
+        })
+        .collect()
 }
 
 pub(super) fn sync_typed_daily_copy_state(
@@ -1724,6 +1763,9 @@ pub(super) fn sync_typed_daily_copy_state(
     let is_current_day = stored_reset_day == next_reset_day;
     let mut next_challenges = std::collections::BTreeMap::new();
     let mut next_select_ex = std::collections::BTreeMap::new();
+    let mut next_ex_stars = std::collections::BTreeMap::new();
+    let mut next_groups = std::collections::BTreeMap::new();
+    let mut next_extra_groups = std::collections::BTreeMap::new();
     if is_current_day {
         for chapter in daily
             .get("chapters")
@@ -1748,6 +1790,11 @@ pub(super) fn sync_typed_daily_copy_state(
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
             );
+            next_ex_stars.insert(
+                chapter_id,
+                u32::try_from(json_i32(chapter, "exStar").unwrap_or_default().max(0))
+                    .unwrap_or_default(),
+            );
             for copy_id in json_i32_array(chapter, "passCopy") {
                 if let Some(copy_id) = u64::try_from(copy_id)
                     .ok()
@@ -1757,13 +1804,42 @@ pub(super) fn sync_typed_daily_copy_state(
                 }
             }
         }
+        for (key, target) in [
+            ("groups", &mut next_groups),
+            ("extraGroups", &mut next_extra_groups),
+        ] {
+            for group in daily
+                .get(key)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let Some(group_id) = json_i32(group, "dailyGroupId")
+                    .and_then(|value| u64::try_from(value).ok())
+                    .filter(|value| *value > 0)
+                else {
+                    continue;
+                };
+                target.insert(
+                    group_id,
+                    u32::try_from(json_i32(group, "successTimes").unwrap_or_default().max(0))
+                        .unwrap_or_default(),
+                );
+            }
+        }
     }
     let changed = account.daily_copy.reset_day != next_reset_day
         || account.daily_copy.challenge_times != next_challenges
-        || account.daily_copy.select_ex != next_select_ex;
+        || account.daily_copy.select_ex != next_select_ex
+        || account.daily_copy.ex_stars != next_ex_stars
+        || account.daily_copy.group_success_times != next_groups
+        || account.daily_copy.extra_group_success_times != next_extra_groups;
     account.daily_copy.reset_day = next_reset_day;
     account.daily_copy.challenge_times = next_challenges;
     account.daily_copy.select_ex = next_select_ex;
+    account.daily_copy.ex_stars = next_ex_stars;
+    account.daily_copy.group_success_times = next_groups;
+    account.daily_copy.extra_group_success_times = next_extra_groups;
     changed
 }
 

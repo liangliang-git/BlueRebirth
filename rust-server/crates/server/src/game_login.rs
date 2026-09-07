@@ -437,13 +437,9 @@ where
             if let Some(typed) = typed_account.as_deref_mut() {
                 advance_typed_task_event(typed, task_catalog, 1, 1);
                 if typed.guild.is_some() {
-                    guild_handler::push_guild_state_typed(&mut post_pushes, typed);
+                    guild_handler::push_guild_state_typed(&mut pre_pushes, typed);
                 }
-                append_method_push(
-                    &mut post_pushes,
-                    "task.TaskInfo",
-                    task_info_payload_from_typed_account(typed, task_catalog),
-                );
+                append_typed_user_login_bootstrap(&mut pre_pushes, state, typed, chapter_catalog);
             } else if let Some(account) = account.as_deref() {
                 append_method_push(
                     &mut post_pushes,
@@ -1639,7 +1635,7 @@ where
             ret = Some(Vec::new());
         }
     }
-    if is_user_login {
+    if is_user_login && typed_account.is_none() {
         let now = current_unix_seconds();
         let fallback_catalog;
         let catalog = match chapter_catalog {
@@ -1818,208 +1814,201 @@ where
             NetSocketFrameCodec::write(stream, 0, &push).await?;
         }
     }
-    if is_user_info {
-        if let Some(account) = account.as_deref() {
-            let typed_account_view = typed_account.as_deref();
-            // Match the C# post-GetUserInfo bootstrap prefix. These state snapshots must
-            // arrive before inventory pushes: the client enters MainStage and reads them
-            // synchronously from its login state machine.
-            let now = current_unix_seconds();
-            let mut login_time = Vec::new();
-            append_varint_field(&mut login_time, 1, u64::from(now));
-            append_varint_field(&mut login_time, 2, u64::from(now.saturating_sub(3600)));
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "user.UpdateLoginTime".to_owned(),
-                ret: Some(login_time),
-                time: now,
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
+    if is_user_info && (account.is_some() || typed_account.is_some()) {
+        let account = account.as_deref().unwrap_or(&Value::Null);
+        let typed_account_view = typed_account.as_deref();
+        // Match the C# post-GetUserInfo bootstrap prefix. These state snapshots must
+        // arrive before inventory pushes: the client enters MainStage and reads them
+        // synchronously from its login state machine.
+        let now = current_unix_seconds();
+        let mut login_time = Vec::new();
+        append_varint_field(&mut login_time, 1, u64::from(now));
+        append_varint_field(&mut login_time, 2, u64::from(now.saturating_sub(3600)));
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "user.UpdateLoginTime".to_owned(),
+            ret: Some(login_time),
+            time: now,
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
 
-            let mut server_time = Vec::new();
-            append_varint_field(&mut server_time, 1, u64::from(now));
-            append_varint_field(&mut server_time, 2, u64::from(now));
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "user.UpdateSvrTime".to_owned(),
-                ret: Some(server_time),
-                time: now,
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
+        let mut server_time = Vec::new();
+        append_varint_field(&mut server_time, 1, u64::from(now));
+        append_varint_field(&mut server_time, 2, u64::from(now));
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "user.UpdateSvrTime".to_owned(),
+            ret: Some(server_time),
+            time: now,
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
 
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "user.GetUserInfo".to_owned(),
-                ret: Some(UserInfoCodec::encode(
-                    &typed_account_view
-                        .map(|typed| user_info_from_typed_account(state, typed))
-                        .unwrap_or_else(|| user_info_from_account(state, Some(account))),
-                )),
-                time: now,
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "user.GetUserInfo".to_owned(),
+            ret: Some(UserInfoCodec::encode(
+                &typed_account_view
+                    .map(|typed| user_info_from_typed_account(state, typed))
+                    .unwrap_or_else(|| user_info_from_account(state, Some(account))),
+            )),
+            time: now,
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
 
-            for (method, ret) in [
-                ("build.BuildsInfo", construction_info_payload(account, now)),
-                ("bathroom.BathroomInfo", bathroom_info_payload(account)),
-                ("study.GetStudyInfo", study_info_payload(account, now)),
-                // TaskInfo: explicit teaching-stage row + daily count. Repeated task groups
-                // may be empty when this Rust profile has no task catalog; persisted teaching
-                // reward ids are retained so the client does not re-offer claimed rewards.
-                (
-                    "task.TaskInfo",
-                    typed_account_view
-                        .map(|typed| task_info_payload_from_typed_account(typed, task_catalog))
-                        .unwrap_or_else(|| task_info_payload(account, task_catalog)),
-                ),
-            ] {
-                let push = TMessageCodec::encode_response(&TResponse {
-                    method: method.to_owned(),
-                    ret: Some(ret),
-                    time: now,
-                    ..TResponse::default()
-                });
-                NetSocketFrameCodec::write(stream, 0, &push).await?;
-            }
-
+        for (method, ret) in [
+            ("build.BuildsInfo", construction_info_payload(account, now)),
+            ("bathroom.BathroomInfo", bathroom_info_payload(account)),
+            ("study.GetStudyInfo", study_info_payload(account, now)),
+            // TaskInfo: explicit teaching-stage row + daily count. Repeated task groups
+            // may be empty when this Rust profile has no task catalog; persisted teaching
+            // reward ids are retained so the client does not re-offer claimed rewards.
+            (
+                "task.TaskInfo",
+                typed_account_view
+                    .map(|typed| task_info_payload_from_typed_account(typed, task_catalog))
+                    .unwrap_or_else(|| task_info_payload(account, task_catalog)),
+            ),
+        ] {
             let push = TMessageCodec::encode_response(&TResponse {
-                method: "bag.UpdateBagData".to_owned(),
-                ret: Some(BagInfoCodec::encode(
-                    &typed_account_view
-                        .map(bag_info_from_typed_account)
-                        .unwrap_or_else(|| bag_info_from_account(account)),
-                )),
-                time: current_unix_seconds(),
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "fashion.updateData".to_owned(),
-                ret: Some(FashionListCodec::encode(
-                    &typed_account_view
-                        .map(|typed| fashion_list_from_typed_account(typed, fashion_catalog))
-                        .unwrap_or_else(|| fashion_list_from_account(account, fashion_catalog)),
-                )),
-                time: current_unix_seconds(),
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "equip.UpdateEquipBagData".to_owned(),
-                ret: Some(EquipListCodec::encode(
-                    &typed_account_view
-                        .map(equip_list_from_typed_account)
-                        .unwrap_or_else(|| equip_list_from_account(account, equip_catalog)),
-                )),
-                time: current_unix_seconds(),
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "hero.UpdateHeroBagData".to_owned(),
-                ret: Some(HeroBagCodec::encode(
-                    &typed_account_view
-                        .map(hero_bag_from_typed_account)
-                        .unwrap_or_else(|| hero_bag_from_account(account)),
-                )),
-                time: current_unix_seconds(),
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "building.UpdateBuildingInfo".to_owned(),
-                ret: Some(UserBuildingInfoCodec::encode(
-                    &typed_account_view
-                        .map(|typed| {
-                            building_info_from_typed_account(typed, current_unix_seconds())
-                        })
-                        .unwrap_or_else(|| {
-                            building_info_from_account(account, current_unix_seconds())
-                        }),
-                )),
-                time: current_unix_seconds(),
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "tactic.GetHerosTactic".to_owned(),
-                ret: Some(FleetInfoCodec::encode(
-                    &typed_account_view
-                        .map(fleet_info_from_typed_account)
-                        .unwrap_or_else(|| fleet_info_from_account(account)),
-                )),
-                time: current_unix_seconds(),
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "shop.UpdateShopInfo".to_owned(),
-                ret: Some(shop_info_payload(shop_catalog)),
-                time: current_unix_seconds(),
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "recharge.RechargeInfo".to_owned(),
-                ret: Some(vec![0x1A, 0x00]),
-                time: current_unix_seconds(),
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "buildship.BuildShipInfo".to_owned(),
-                ret: Some(buildship_info_payload(
-                    Some(account),
-                    current_unix_seconds(),
-                )),
-                time: current_unix_seconds(),
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "presetfleet.PresetFleetsInfo".to_owned(),
-                ret: Some(PresetFleetCodec::encode(
-                    &typed_account_view
-                        .map(preset_fleet_info_from_typed_account)
-                        .unwrap_or_else(|| preset_fleet_info_from_account(account)),
-                )),
-                time: current_unix_seconds(),
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
-            for (method, ret) in [
-                (
-                    "illustrate.IllustrateInfo",
-                    illustrate_info_payload(account, handbook_behaviours, hero_memories),
-                ),
-                ("illustrate.OldIllustrateInfo", Vec::new()),
-                (
-                    "illustrate.Memory",
-                    story_memory_payload(
-                        chapter_catalog.map(|catalog| catalog.memories.as_slice()),
-                    ),
-                ),
-            ] {
-                let push = TMessageCodec::encode_response(&TResponse {
-                    method: method.to_owned(),
-                    ret: Some(ret),
-                    time: now,
-                    ..TResponse::default()
-                });
-                NetSocketFrameCodec::write(stream, 0, &push).await?;
-            }
-            let talent_catalog = current_talent_catalog();
-            let talent_payload = typed_account_view
-                .map(|typed| talent_tree_payload_typed(typed, &talent_catalog))
-                .unwrap_or_default();
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "talentTree.TalentTreeAllList".to_owned(),
-                ret: Some(talent_payload),
+                method: method.to_owned(),
+                ret: Some(ret),
                 time: now,
                 ..TResponse::default()
             });
             NetSocketFrameCodec::write(stream, 0, &push).await?;
         }
+
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "bag.UpdateBagData".to_owned(),
+            ret: Some(BagInfoCodec::encode(
+                &typed_account_view
+                    .map(bag_info_from_typed_account)
+                    .unwrap_or_else(|| bag_info_from_account(account)),
+            )),
+            time: current_unix_seconds(),
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "fashion.updateData".to_owned(),
+            ret: Some(FashionListCodec::encode(
+                &typed_account_view
+                    .map(|typed| fashion_list_from_typed_account(typed, fashion_catalog))
+                    .unwrap_or_else(|| fashion_list_from_account(account, fashion_catalog)),
+            )),
+            time: current_unix_seconds(),
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "equip.UpdateEquipBagData".to_owned(),
+            ret: Some(EquipListCodec::encode(
+                &typed_account_view
+                    .map(equip_list_from_typed_account)
+                    .unwrap_or_else(|| equip_list_from_account(account, equip_catalog)),
+            )),
+            time: current_unix_seconds(),
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "hero.UpdateHeroBagData".to_owned(),
+            ret: Some(HeroBagCodec::encode(
+                &typed_account_view
+                    .map(hero_bag_from_typed_account)
+                    .unwrap_or_else(|| hero_bag_from_account(account)),
+            )),
+            time: current_unix_seconds(),
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "building.UpdateBuildingInfo".to_owned(),
+            ret: Some(UserBuildingInfoCodec::encode(
+                &typed_account_view
+                    .map(|typed| building_info_from_typed_account(typed, current_unix_seconds()))
+                    .unwrap_or_else(|| building_info_from_account(account, current_unix_seconds())),
+            )),
+            time: current_unix_seconds(),
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "tactic.GetHerosTactic".to_owned(),
+            ret: Some(FleetInfoCodec::encode(
+                &typed_account_view
+                    .map(fleet_info_from_typed_account)
+                    .unwrap_or_else(|| fleet_info_from_account(account)),
+            )),
+            time: current_unix_seconds(),
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "shop.UpdateShopInfo".to_owned(),
+            ret: Some(shop_info_payload(shop_catalog)),
+            time: current_unix_seconds(),
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "recharge.RechargeInfo".to_owned(),
+            ret: Some(vec![0x1A, 0x00]),
+            time: current_unix_seconds(),
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "buildship.BuildShipInfo".to_owned(),
+            ret: Some(buildship_info_payload(
+                Some(account),
+                current_unix_seconds(),
+            )),
+            time: current_unix_seconds(),
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "presetfleet.PresetFleetsInfo".to_owned(),
+            ret: Some(PresetFleetCodec::encode(
+                &typed_account_view
+                    .map(preset_fleet_info_from_typed_account)
+                    .unwrap_or_else(|| preset_fleet_info_from_account(account)),
+            )),
+            time: current_unix_seconds(),
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
+        for (method, ret) in [
+            (
+                "illustrate.IllustrateInfo",
+                illustrate_info_payload(account, handbook_behaviours, hero_memories),
+            ),
+            ("illustrate.OldIllustrateInfo", Vec::new()),
+            (
+                "illustrate.Memory",
+                story_memory_payload(chapter_catalog.map(|catalog| catalog.memories.as_slice())),
+            ),
+        ] {
+            let push = TMessageCodec::encode_response(&TResponse {
+                method: method.to_owned(),
+                ret: Some(ret),
+                time: now,
+                ..TResponse::default()
+            });
+            NetSocketFrameCodec::write(stream, 0, &push).await?;
+        }
+        let talent_catalog = current_talent_catalog();
+        let talent_payload = typed_account_view
+            .map(|typed| talent_tree_payload_typed(typed, &talent_catalog))
+            .unwrap_or_default();
+        let push = TMessageCodec::encode_response(&TResponse {
+            method: "talentTree.TalentTreeAllList".to_owned(),
+            ret: Some(talent_payload),
+            time: now,
+            ..TResponse::default()
+        });
+        NetSocketFrameCodec::write(stream, 0, &push).await?;
     }
     if let Some((copy_id, grade, battle_time, _first_pass, ex_buffs, exp_rewards)) = pass_details {
         if let Some(account) = account.as_deref_mut() {
@@ -2225,6 +2214,90 @@ where
         NetSocketFrameCodec::write(stream, 0, &push).await?;
     }
     Ok(true)
+}
+
+fn append_typed_user_login_bootstrap(
+    pushes: &mut Vec<Vec<u8>>,
+    state: &ServerState,
+    account: &AccountState,
+    chapter_catalog: Option<&ChapterCatalog>,
+) {
+    let fallback_catalog;
+    let catalog = match chapter_catalog {
+        Some(catalog) => catalog,
+        None => {
+            fallback_catalog = ChapterCatalog::fallback();
+            &fallback_catalog
+        }
+    };
+    let now = current_unix_seconds();
+    let passed = account
+        .battle
+        .passed_copies
+        .iter()
+        .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
+        .collect::<Vec<_>>();
+    append_method_push(
+        pushes,
+        "user.UpdateUserInfo",
+        UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+    );
+    append_method_push(
+        pushes,
+        "guide.GuideInfo",
+        GuideInfoCodec::encode_initial_progress_completed(),
+    );
+    append_method_push(
+        pushes,
+        "copy.GetCopy",
+        CopyInfoCodec::encode_with_progress(
+            1,
+            &catalog.plot,
+            copy_progress_max_or_first(&catalog.plot, &passed),
+            &passed,
+        ),
+    );
+    append_method_push(
+        pushes,
+        "copy.GetCopy",
+        CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
+            &catalog.sea,
+            copy_progress_max_or_initial(&catalog.sea, &passed, catalog.sea_initial),
+            &passed,
+            &[],
+            1,
+        ),
+    );
+    append_method_push(
+        pushes,
+        "copy.GetCopy",
+        CopyInfoCodec::encode(
+            33,
+            &catalog.mubar,
+            catalog.mubar.iter().copied().max().unwrap_or_default(),
+        ),
+    );
+    append_method_push(
+        pushes,
+        "copy.GetCopy",
+        CopyInfoCodec::encode(
+            9,
+            &catalog.daily,
+            catalog.daily.iter().copied().max().unwrap_or_default(),
+        ),
+    );
+    append_method_push(
+        pushes,
+        "dailycopy.UpdateDailyCopyData",
+        daily_copy_snapshot_payload_from_typed_account(account, chapter_catalog, now),
+    );
+    append_method_push(pushes, "illustrate.IllustrateInfo", Vec::new());
+    append_method_push(pushes, "illustrate.OldIllustrateInfo", Vec::new());
+    append_method_push(
+        pushes,
+        "illustrate.Memory",
+        story_memory_payload(chapter_catalog.map(|catalog| catalog.memories.as_slice())),
+    );
 }
 
 fn legacy_only_method(method: &str) -> bool {

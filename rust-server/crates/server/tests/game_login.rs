@@ -1,10 +1,11 @@
-use blueoath_protocol::{
-    GameLoginCodec, TMessageCodec, TRequest, TRetLogin, UserInfo, UserInfoCodec,
+use blueoath_domain::{
+    ChapterId, CurrencyKind, EquipId, EquipmentState, HeroId, NewAccountFactory, ProfileId,
+    TemplateId,
 };
-use blueoath_server::process_game_login_frame_with_account;
+use blueoath_protocol::{GameLoginCodec, TMessageCodec, TRequest, TRetLogin, UserInfoCodec};
+use blueoath_server::process_game_login_frame_with_typed_account;
 use blueoath_server::{process_game_login_frame, ServerState};
 use blueoath_transport::NetSocketFrameCodec;
-use serde_json::json;
 use tokio::io::duplex;
 
 #[tokio::test]
@@ -119,22 +120,19 @@ async fn game_login_session_returns_user_info_payload() {
     let response = TMessageCodec::decode_response(&frame.payload).unwrap();
     assert_eq!(response.method, "user.GetUserInfo");
     assert_eq!(response.callback_handler, 9);
-    assert_eq!(
-        UserInfoCodec::decode(response.ret.as_deref().unwrap()).unwrap(),
-        UserInfo {
-            uid: 1,
-            uname: "Captain".to_owned(),
-            level: 1,
-            class_id: 1,
-            secretary_id: 1,
-            supply: 100,
-            head: 1021051,
-            pve_pt: 100,
-            new_task_stage: 7,
-            server_id: 1,
-            ..UserInfo::default()
-        }
-    );
+    let info = UserInfoCodec::decode(response.ret.as_deref().unwrap()).unwrap();
+    assert_eq!(info.uid, 1);
+    assert_eq!(info.uname, "Captain");
+    assert_eq!(info.level, 1);
+    assert_eq!(info.class_id, 1);
+    assert_eq!(info.secretary_id, 1);
+    assert_eq!(info.diamond, 10_000);
+    assert_eq!(info.supply, 100);
+    assert_eq!(info.pve_pt, 100);
+    assert_eq!(info.head, 1021051);
+    assert_eq!(info.new_task_stage, 7);
+    assert_eq!(info.server_id, 1);
+    assert!(info.create_time > 0);
 }
 
 #[tokio::test]
@@ -179,31 +177,37 @@ async fn bathroom_info_request_emits_post_snapshot_after_response() {
 async fn user_info_reads_character_values_from_account_snapshot() {
     let (mut client, mut server) = duplex(4096);
     let state = ServerState::new("slot-a", "Fallback", "1.4.0");
-    let account = json!({
-        "character": {
-            "uid": 42,
-            "name": "Stored Captain",
-            "level": 80,
-            "class": 3,
-            "secretaryId": 9,
-            "createTime": 123,
-            "gold": 99999999,
-            "diamond": 999999,
-            "supply": 9999,
-            "pvePt": 100
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("slot-a").unwrap(), "Stored Captain");
+    account.character.uid = 42;
+    account.character.level = 80;
+    account.character.class_id = 3;
+    account.character.create_time = 123;
+    account.character.secretary_id = Some(HeroId::new(9).unwrap());
+    account
+        .resources
+        .debit(CurrencyKind::Diamond, 10_000)
+        .unwrap();
+    account
+        .resources
+        .credit(CurrencyKind::Diamond, 999_999)
+        .unwrap();
+    account.fashion.entries.insert(
+        1021051,
+        [TemplateId::new(1021051).unwrap()].into_iter().collect(),
+    );
+    let equip_id = EquipId::new(9).unwrap();
+    account.dock.equipments.insert(
+        equip_id,
+        EquipmentState {
+            id: equip_id,
+            template_id: TemplateId::new(30091).unwrap(),
+            enhance_level: 2,
+            star: 1,
+            enhance_exp: 3,
+            hero_id: Some(HeroId::new(1).unwrap()),
         },
-        "bag": {
-            "bagSize": 77,
-            "items": [{"templateId": 3001, "num": 0}]
-        },
-        "fashion": {
-            "entries": [{"sfId": 1021051, "fashionTids": [1021051]}]
-        },
-        "equip": {
-            "equipBagSize": 2000,
-            "items": [{"equipId": 9, "templateId": 30091, "heroId": 1, "enhanceLv": 2, "star": 1, "enhanceExp": 3}]
-        }
-    });
+    );
     let request = TMessageCodec::encode_request(&TRequest {
         method: "user.GetUserInfo".to_owned(),
         ..TRequest::default()
@@ -213,7 +217,7 @@ async fn user_info_reads_character_values_from_account_snapshot() {
         .unwrap();
 
     assert!(
-        process_game_login_frame_with_account(&mut server, &state, Some(&account))
+        process_game_login_frame_with_typed_account(&mut server, &state, &mut account)
             .await
             .unwrap()
     );
@@ -260,7 +264,7 @@ async fn user_info_reads_character_values_from_account_snapshot() {
     assert_eq!(bag_push.is_response, 0);
     let bag_payload = bag_push.ret.as_deref().unwrap();
     assert!(bag_payload.windows(2).any(|window| window == [0x08, 0x01]));
-    assert!(bag_payload.windows(2).any(|window| window == [0x10, 0x4D]));
+    assert!(bag_payload.windows(2).any(|window| window == [0x10, 0x64]));
     assert!(bag_payload.contains(&0x1A));
 
     let fashion_frame = NetSocketFrameCodec::read(&mut client)
@@ -398,7 +402,7 @@ async fn game_login_session_handles_fleet_save_and_copy_reads() {
     let state = ServerState::new("slot-a", "Captain", "1.4.0");
     let fleet_args = {
         let mut tactic = Vec::new();
-        tactic.extend_from_slice(&[0x10, 0x2A]); // heroInfo=[42]
+        tactic.extend_from_slice(&[0x10, 0x01]); // heroInfo=[1]
         tactic.extend_from_slice(&[0x18, 0x01, 0x20, 0x07, 0x28, 0x03, 0x30, 0x01]);
         vec![0x0A, tactic.len() as u8]
             .into_iter()
@@ -442,20 +446,14 @@ async fn user_login_preserves_daily_copy_progress_from_account_snapshot() {
             .as_secs() as u32,
     ) + 8 * 60 * 60)
         / 86_400;
-    let account = json!({
-        "dailyCopy": {
-            "resetDay": reset_day,
-            "chapters": [{
-                "chapterId": 1,
-                "challengeTimes": 2,
-                "passCopy": [101],
-                "selectEx": true,
-                "exStar": 5
-            }],
-            "groups": [{"dailyGroupId": 1, "successTimes": 3}],
-            "extraGroups": [{"dailyGroupId": 1, "successTimes": 4}]
-        }
-    });
+    let mut account = NewAccountFactory::create(ProfileId::new("slot-a").unwrap(), "Captain");
+    account.daily_copy.reset_day = u32::try_from(reset_day).unwrap();
+    let chapter_id = ChapterId::new(1).unwrap();
+    account.daily_copy.challenge_times.insert(chapter_id, 2);
+    account.daily_copy.select_ex.insert(chapter_id, true);
+    account.daily_copy.ex_stars.insert(chapter_id, 5);
+    account.daily_copy.group_success_times.insert(1, 3);
+    account.daily_copy.extra_group_success_times.insert(1, 4);
     let request = TMessageCodec::encode_request(&TRequest {
         method: "user.UserLogin".to_owned(),
         ..TRequest::default()
@@ -465,7 +463,7 @@ async fn user_login_preserves_daily_copy_progress_from_account_snapshot() {
         .unwrap();
 
     assert!(
-        process_game_login_frame_with_account(&mut server, &state, Some(&account))
+        process_game_login_frame_with_typed_account(&mut server, &state, &mut account)
             .await
             .unwrap()
     );

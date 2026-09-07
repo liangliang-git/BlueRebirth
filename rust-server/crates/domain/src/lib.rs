@@ -289,6 +289,12 @@ pub struct DailyCopyState {
     pub challenge_times: BTreeMap<ChapterId, u32>,
     #[serde(default)]
     pub select_ex: BTreeMap<ChapterId, bool>,
+    #[serde(default)]
+    pub ex_stars: BTreeMap<ChapterId, u32>,
+    #[serde(default)]
+    pub group_success_times: BTreeMap<u64, u32>,
+    #[serde(default)]
+    pub extra_group_success_times: BTreeMap<u64, u32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
