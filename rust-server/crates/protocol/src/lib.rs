@@ -2376,6 +2376,166 @@ impl Decode for HeroChangeEquipRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActivitySelectShipRequest {
+    pub ship_id: i32,
+}
+
+impl Decode for ActivitySelectShipRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            ship_id: optional_i32(&fields, 1, "activity ship has duplicate id")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActivitySelectTeamRequest {
+    pub team_id: i32,
+}
+
+impl Decode for ActivitySelectTeamRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            team_id: optional_i32(&fields, 1, "activity team has duplicate id")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActivityRewardIndexRequest {
+    pub index: i32,
+}
+
+impl Decode for ActivityRewardIndexRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let index = required_field(&fields, 1, "activity is missing reward index")?;
+        if index <= 0 {
+            return Err(ProtocolError::Invalid("activity reward index is invalid"));
+        }
+        Ok(Self { index })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActivityItemIdRequest {
+    pub item_id: i32,
+}
+
+impl Decode for ActivityItemIdRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let item_id = required_field(&fields, 1, "activity is missing item id")?;
+        if item_id <= 0 {
+            return Err(ProtocolError::Invalid("activity item id is invalid"));
+        }
+        Ok(Self { item_id })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActivityCodeExchangeRequest {
+    pub code: i32,
+    pub number: i32,
+}
+
+impl Decode for ActivityCodeExchangeRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let code = required_field(&fields, 1, "activity exchange is missing code")?;
+        let number = optional_i32(&fields, 3, "activity exchange has duplicate count")?;
+        if code <= 0 || number < 0 {
+            return Err(ProtocolError::Invalid(
+                "activity exchange request is invalid",
+            ));
+        }
+        Ok(Self { code, number })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActivityExchangeRewardRequest {
+    pub reward_index: i32,
+    pub number: i32,
+}
+
+impl Decode for ActivityExchangeRewardRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let reward_index = required_field(&fields, 1, "activity exchange is missing reward index")?;
+        let number = optional_i32(&fields, 2, "activity exchange has duplicate count")?;
+        if reward_index <= 0 || number < 0 {
+            return Err(ProtocolError::Invalid(
+                "activity exchange reward request is invalid",
+            ));
+        }
+        Ok(Self {
+            reward_index,
+            number,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChristmasBuyItemRequest {
+    pub buy_way: i32,
+    pub buy_times: i32,
+}
+
+impl Decode for ChristmasBuyItemRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let buy_way = required_field(&fields, 1, "christmas buy is missing way")?;
+        let buy_times = optional_i32(&fields, 2, "christmas buy has duplicate count")?;
+        if buy_times < 0 {
+            return Err(ProtocolError::Invalid("christmas buy request is invalid"));
+        }
+        Ok(Self { buy_way, buy_times })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChristmasBuyBlindBoxRequest {
+    pub buy_index: i32,
+}
+
+impl Decode for ChristmasBuyBlindBoxRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let buy_index = required_field(&fields, 1, "christmas box is missing index")?;
+        if buy_index <= 0 {
+            return Err(ProtocolError::Invalid("christmas box index is invalid"));
+        }
+        Ok(Self { buy_index })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FashionPurchaseRequest {
+    pub requested: i32,
+    pub group_id: i32,
+}
+
+impl Decode for FashionPurchaseRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let requested = required_field(&fields, 1, "activity fashion is missing count")?;
+        let group_id = optional_i32(&fields, 2, "activity fashion has duplicate group")?;
+        if requested <= 0 || group_id < 0 {
+            return Err(ProtocolError::Invalid(
+                "activity fashion purchase request is invalid",
+            ));
+        }
+        Ok(Self {
+            requested,
+            group_id,
+        })
+    }
+}
+
 impl Decode for GuildTaskDonateRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

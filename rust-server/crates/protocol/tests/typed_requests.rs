@@ -1,20 +1,23 @@
 use blueoath_protocol::{
-    ActivityExtractDrawRequest, BattleAutoMessageRequest, BigActivityRankRequest,
+    ActivityCodeExchangeRequest, ActivityExchangeRewardRequest, ActivityExtractDrawRequest,
+    ActivityItemIdRequest, ActivityRewardIndexRequest, ActivitySelectShipRequest,
+    ActivitySelectTeamRequest, BattleAutoMessageRequest, BigActivityRankRequest,
     BirthdayFeedRequest, BuildShipRequest, BuildShipRewardRequest, ChangeNameRequest,
-    ChangeWorldChannelRequest, CoopChangeChapterRequest, CoopCreateRoomRequest, CoopKickRequest,
-    CoopMatchTypeRequest, CoopPasswordRequest, CoopRoomHeroesRequest, CoopRoomIdRequest,
-    CopyAttackRequest, CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
-    DailyCopySelectExRequest, Decode, FriendSearchRequest, FriendTargetRequest,
-    GetBarrageByIdRequest, GuildActivityPresentRequest, GuildBoxAnonymousRequest,
-    GuildBoxIdRequest, GuildCreateRequest, GuildIdRequest, GuildListRequest, GuildModifyRequest,
-    GuildOfferRequest, GuildSearchRequest, GuildTaskDonateRequest, GuildTaskIdRequest,
-    GuildTaskMemberRequest, GuildWarBaseRequest, GuildWarScoreRequest, HeroAwakenFinishRequest,
-    HeroAwakenRewardRequest, HeroChangeEquipRequest, InviteRecordVersionRequest,
-    InviteStateTypeRequest, OutpostBuildingRequest, OutpostSetHeroRequest, ProtocolError,
-    SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest,
-    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, ShipTaskCurrentShipRequest,
-    ShipTaskRewardRequest, SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest,
-    TeachingUserRequest,
+    ChangeWorldChannelRequest, ChristmasBuyBlindBoxRequest, ChristmasBuyItemRequest,
+    CoopChangeChapterRequest, CoopCreateRoomRequest, CoopKickRequest, CoopMatchTypeRequest,
+    CoopPasswordRequest, CoopRoomHeroesRequest, CoopRoomIdRequest, CopyAttackRequest,
+    CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
+    DailyCopySelectExRequest, Decode, FashionPurchaseRequest, FriendSearchRequest,
+    FriendTargetRequest, GetBarrageByIdRequest, GuildActivityPresentRequest,
+    GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildCreateRequest, GuildIdRequest,
+    GuildListRequest, GuildModifyRequest, GuildOfferRequest, GuildSearchRequest,
+    GuildTaskDonateRequest, GuildTaskIdRequest, GuildTaskMemberRequest, GuildWarBaseRequest,
+    GuildWarScoreRequest, HeroAwakenFinishRequest, HeroAwakenRewardRequest, HeroChangeEquipRequest,
+    InviteRecordVersionRequest, InviteStateTypeRequest, OutpostBuildingRequest,
+    OutpostSetHeroRequest, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
+    SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
+    SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest,
+    SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
 };
 
 #[test]
@@ -355,6 +358,51 @@ fn decodes_typed_activity_requests() {
     assert_eq!(
         ActivityExtractDrawRequest::decode(&[0x08, 7, 0x10, 2]).unwrap(),
         ActivityExtractDrawRequest { draw_id: 7, num: 2 }
+    );
+    assert_eq!(
+        ActivitySelectShipRequest::decode(&[0x08, 3]).unwrap(),
+        ActivitySelectShipRequest { ship_id: 3 }
+    );
+    assert_eq!(
+        ActivitySelectTeamRequest::decode(&[0x08, 4]).unwrap(),
+        ActivitySelectTeamRequest { team_id: 4 }
+    );
+    assert_eq!(
+        ActivityRewardIndexRequest::decode(&[0x08, 2]).unwrap(),
+        ActivityRewardIndexRequest { index: 2 }
+    );
+    assert_eq!(
+        ActivityItemIdRequest::decode(&[0x08, 5]).unwrap(),
+        ActivityItemIdRequest { item_id: 5 }
+    );
+    assert_eq!(
+        ActivityCodeExchangeRequest::decode(&[0x08, 7, 0x18, 2]).unwrap(),
+        ActivityCodeExchangeRequest { code: 7, number: 2 }
+    );
+    assert_eq!(
+        ActivityExchangeRewardRequest::decode(&[0x08, 2, 0x10, 3]).unwrap(),
+        ActivityExchangeRewardRequest {
+            reward_index: 2,
+            number: 3,
+        }
+    );
+    assert_eq!(
+        ChristmasBuyItemRequest::decode(&[0x08, 1, 0x10, 2]).unwrap(),
+        ChristmasBuyItemRequest {
+            buy_way: 1,
+            buy_times: 2,
+        }
+    );
+    assert_eq!(
+        ChristmasBuyBlindBoxRequest::decode(&[0x08, 2]).unwrap(),
+        ChristmasBuyBlindBoxRequest { buy_index: 2 }
+    );
+    assert_eq!(
+        FashionPurchaseRequest::decode(&[0x08, 2, 0x10, 3]).unwrap(),
+        FashionPurchaseRequest {
+            requested: 2,
+            group_id: 3,
+        }
     );
 }
 

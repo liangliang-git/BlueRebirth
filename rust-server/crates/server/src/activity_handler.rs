@@ -127,11 +127,16 @@ pub(super) fn handle_typed(
             let state = "activitySSR";
             match method {
                 "activitySSR.ActivitySSRSelect" => {
+                    let Ok(request) = ActivitySelectShipRequest::decode(request_args) else {
+                        return HandlerResult::Error(GameError::InvalidRequest(
+                            "activity ship request is invalid",
+                        ));
+                    };
                     set_activity_value(
                         progress,
                         state,
                         "selectShipId",
-                        decode_varint_field(request_args, 1).max(0) as u64,
+                        request.ship_id.max(0) as u64,
                     );
                 }
                 "activitySSR.ActivitySSRRand" => {
@@ -153,7 +158,12 @@ pub(super) fn handle_typed(
             let state = "activitySSRRolls";
             match method {
                 "activitySSRrolls.ActivityRollsSelect" => {
-                    let team_id = decode_varint_field(request_args, 1).max(0);
+                    let Ok(request) = ActivitySelectTeamRequest::decode(request_args) else {
+                        return HandlerResult::Error(GameError::InvalidRequest(
+                            "activity team request is invalid",
+                        ));
+                    };
+                    let team_id = request.team_id.max(0);
                     set_activity_value(progress, state, "selectTeamId", team_id as u64);
                     set_activity_value(progress, state, "selectTeam", team_id as u64);
                     increment_activity_value(progress, state, "daySelectCount");
@@ -204,12 +214,12 @@ pub(super) fn handle_typed(
             typed_reply(method, typed_secret_copy_payload(progress))
         }
         "activitysecretcopy.GetReward" => {
-            let rate_index = decode_varint_field(request_args, 1).max(0) as u64;
-            if rate_index == 0 {
+            let Ok(request) = ActivityRewardIndexRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
-                    "secret copy reward index is invalid",
+                    "secret copy reward request is invalid",
                 ));
-            }
+            };
+            let rate_index = request.index as u64;
             let key = format!("activity:activitySecretCopy:reward:{rate_index}:getReward");
             if progress.contains_key(&key) {
                 return HandlerResult::Error(GameError::InvalidState(
@@ -227,12 +237,12 @@ pub(super) fn handle_typed(
             typed_reply(method, typed_christmas_payload(progress))
         }
         "activitychristmasshop.OpenSpecialBlindBox" => {
-            let item_id = decode_varint_field(request_args, 1).max(0) as u64;
-            if item_id == 0 {
+            let Ok(request) = ActivityItemIdRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
-                    "christmas special box id is invalid",
+                    "christmas special box request is invalid",
                 ));
-            }
+            };
+            let item_id = request.item_id as u64;
             progress.insert(
                 format!("activity:activityChristmasShop:specialBox:{item_id}"),
                 1,
@@ -242,11 +252,16 @@ pub(super) fn handle_typed(
             typed_reply(method, output)
         }
         "activitychristmasshop.SetToy" => {
+            let Ok(request) = ActivityItemIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "christmas toy request is invalid",
+                ));
+            };
             set_activity_value(
                 progress,
                 "activityChristmasShop",
                 "crystalBallToyId",
-                decode_varint_field(request_args, 1).max(0) as u64,
+                request.item_id as u64,
             );
             typed_reply(method, typed_christmas_payload(progress))
         }
@@ -267,13 +282,13 @@ fn handle_typed_code_exchange(
 ) -> HandlerResult {
     match method {
         "activitycodeexchange.ExchangeCode" => {
-            let code = decode_varint_field(request_args, 1).max(0) as u64;
-            let number = decode_varint_field(request_args, 3).clamp(1, 99) as u64;
-            if code == 0 {
+            let Ok(request) = ActivityCodeExchangeRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
-                    "activity exchange code is invalid",
+                    "activity exchange request is invalid",
                 ));
-            }
+            };
+            let code = request.code as u64;
+            let number = request.number.clamp(1, 99) as u64;
             let key = format!("activity:activityCodeExchange:receipt:{code}:count");
             let progress = &mut account.activities.progress;
             let count = progress.entry(key).or_default();
@@ -281,13 +296,13 @@ fn handle_typed_code_exchange(
             typed_reply(method, typed_code_exchange_payload(progress))
         }
         "activitycodeexchange.ExchangeReward" => {
-            let reward_index = decode_varint_field(request_args, 1).max(0) as u64;
-            let number = decode_varint_field(request_args, 2).clamp(1, 99) as u64;
-            if reward_index == 0 {
+            let Ok(request) = ActivityExchangeRewardRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
-                    "activity exchange reward index is invalid",
+                    "activity exchange reward request is invalid",
                 ));
-            }
+            };
+            let reward_index = request.reward_index as u64;
+            let number = request.number.clamp(1, 99) as u64;
             let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
             let Some(activity) = code_exchange_activity(catalog) else {
                 return HandlerResult::Error(GameError::InvalidState(
@@ -1195,8 +1210,13 @@ fn handle_typed_christmas_buy(
     let snapshot = account.clone();
 
     if method == "activitychristmasshop.BuyBlindItem" {
-        let buy_way = decode_varint_field(request_args, 1);
-        let buy_times = decode_varint_field(request_args, 2).clamp(1, 99);
+        let Ok(request) = ChristmasBuyItemRequest::decode(request_args) else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "christmas buy request is invalid",
+            ));
+        };
+        let buy_way = request.buy_way;
+        let buy_times = request.buy_times.clamp(1, 99);
         let (goods_type, item_id, unit_cost) = match buy_way {
             1 => (5, 1, parameter_value(catalog, 311).unwrap_or(5_000).max(1)),
             2 => (
@@ -1251,7 +1271,12 @@ fn handle_typed_christmas_buy(
         return typed_reply(method, encode_rewards_list(&[reward]));
     }
 
-    let buy_index = decode_varint_field(request_args, 1);
+    let Ok(request) = ChristmasBuyBlindBoxRequest::decode(request_args) else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "christmas blind box request is invalid",
+        ));
+    };
+    let buy_index = request.buy_index;
     let limit = parameter_value(catalog, 314).unwrap_or(8).max(1) as u64;
     let cost = parameter_value(catalog, 313).unwrap_or(10).max(1);
     let buy_key = format!("activity:activityChristmasShop:buy:{buy_index}:count");
@@ -1437,7 +1462,12 @@ fn handle_typed_fashion(
         return HandlerResult::Error(GameError::CatalogUnavailable);
     };
     if method == "activityfashion.Reward" {
-        let index = decode_varint_field(request_args, 1);
+        let Ok(request) = ActivityRewardIndexRequest::decode(request_args) else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "activity fashion reward request is invalid",
+            ));
+        };
+        let index = request.index;
         let (threshold, drop_id) = match index {
             1 => activity_fashion_milestone(config, "p2"),
             2 => activity_fashion_milestone(config, "p3"),
@@ -1484,13 +1514,18 @@ fn handle_typed_fashion(
         .and_then(|values| values.first())
         .and_then(Value::as_i64)
         .unwrap_or_default();
-    let requested = decode_varint_field(request_args, 1).clamp(1, 99);
+    let Ok(request) = FashionPurchaseRequest::decode(request_args) else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "activity fashion purchase request is invalid",
+        ));
+    };
+    let requested = request.requested.clamp(1, 99);
     if max_count <= current as i64 || i64::from(requested) > max_count - current as i64 {
         return HandlerResult::Error(GameError::InvalidState(
             "activity fashion purchase limit reached",
         ));
     }
-    let gid = decode_varint_field(request_args, 2).max(0);
+    let gid = request.group_id.max(0);
     let pools = config
         .get("p1")
         .and_then(Value::as_array)
