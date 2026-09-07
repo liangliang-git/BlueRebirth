@@ -1,5 +1,5 @@
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 #[cfg(test)]
@@ -17,7 +17,7 @@ pub(super) fn handle_typed_copy_star_reward(
     request_args: &[u8],
     chapter_catalog: Option<&ChapterCatalog>,
     task_catalog: Option<&TaskCatalog>,
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let Ok(request) = CopyStarRewardRequest::decode(request_args) else {
         return HandlerResult::Error(GameError::InvalidRequest(
@@ -125,7 +125,10 @@ pub(super) fn handle_typed_copy_star_reward(
             .claimed_star_rewards
             .insert((chapter_id_u32, u32::try_from(index).unwrap_or_default()));
     }
-    pre_pushes.push(BagInfoCodec::encode(&bag_info_from_typed_account(account)));
+    effects.push_pre(Response::raw(
+        "bag.UpdateBagData",
+        BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+    ));
     HandlerResult::Reply(Response::raw(method, encode_task_reward_list(&pending)))
 }
 
@@ -603,8 +606,7 @@ pub(super) fn handle_typed_mop_up(
     method: &str,
     request_args: &[u8],
     battle_catalog: Option<&BattleCatalog>,
-    pre_pushes: &mut Vec<Vec<u8>>,
-    post_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let now = current_unix_seconds() as u64;
     match method {
@@ -631,7 +633,7 @@ pub(super) fn handle_typed_mop_up(
                     || (copy_id != 0 && entry.copy_id != copy_id)
             });
             let payload = typed_mop_up_payload(account, &[]);
-            append_method_push(post_pushes, "mopUp.GetMopUpData", payload.clone());
+            effects.push_post(Response::raw("mopUp.GetMopUpData", payload.clone()));
             HandlerResult::Reply(Response::raw(method, payload))
         }
         "mopUp.StartSweep" => {
@@ -707,17 +709,15 @@ pub(super) fn handle_typed_mop_up(
             account.sweep.entries.retain(|entry| entry.end_time > now);
             let pass_rets = mop_up_pass_rets(copy_id as i32, &rewards);
             let payload = typed_mop_up_payload(account, &pass_rets);
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "user.UpdateUserInfo",
                 UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
-            append_method_push(post_pushes, "mopUp.GetMopUpData", payload.clone());
+            ));
+            effects.push_post(Response::raw("mopUp.GetMopUpData", payload.clone()));
             HandlerResult::Reply(Response::raw(method, payload))
         }
         _ => HandlerResult::Empty,
@@ -1853,7 +1853,7 @@ mod tests {
         let mut request = Vec::new();
         append_varint_field(&mut request, 1, 1);
         append_varint_field(&mut request, 2, 1);
-        let mut pre_pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         assert!(matches!(
             handle_typed_copy_star_reward(
@@ -1862,7 +1862,7 @@ mod tests {
                 &request,
                 Some(&chapter_catalog),
                 Some(&task_catalog),
-                &mut pre_pushes,
+                &mut effects,
             ),
             HandlerResult::Reply(_)
         ));
@@ -1880,7 +1880,7 @@ mod tests {
                 &request,
                 Some(&chapter_catalog),
                 Some(&task_catalog),
-                &mut pre_pushes,
+                &mut effects,
             ),
             HandlerResult::Error(GameError::InvalidState(_))
         ));
@@ -1995,16 +1995,14 @@ mod tests {
                 sweep_counts: 2,
                 chapter_id: 0,
             });
-        let mut pre_pushes = Vec::new();
-        let mut post_pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
         let result = handle_typed_mop_up(
             &ServerState::new("mop-up", "Battle", "test"),
             &mut account,
             "mopUp.GetMopUpData",
             &[],
             None,
-            &mut pre_pushes,
-            &mut post_pushes,
+            &mut effects,
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert_eq!(account.sweep.entries[0].copy_id, 9);

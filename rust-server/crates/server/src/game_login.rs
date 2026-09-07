@@ -366,13 +366,20 @@ where
                 "copy.StarReward" | "copy.FetchRewardBox"
             ) =>
         {
+            let mut copy_star_effects = ResponseEffects::default();
             let result = battle_handler::handle_typed_copy_star_reward(
                 typed_account.as_mut().expect("typed copy account"),
                 request.method.as_str(),
                 request_args,
                 chapter_catalog,
                 task_catalog,
+                &mut copy_star_effects,
+            );
+            apply_response_effects(
+                copy_star_effects,
                 &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
             );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -1745,14 +1752,20 @@ where
             )
         }),
         _ if method.is_family(MethodFamily::MopUp) && typed_account.is_some() => {
+            let mut mop_up_effects = ResponseEffects::default();
             let result = battle_handler::handle_typed_mop_up(
                 state,
                 typed_account.as_mut().expect("typed mop up account"),
                 request.method.as_str(),
                 request_args,
                 battle_catalog,
+                &mut mop_up_effects,
+            );
+            apply_response_effects(
+                mop_up_effects,
                 &mut pre_pushes,
                 &mut post_pushes,
+                &mut handler_error,
             );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
