@@ -1,16 +1,19 @@
 use serde_json::{json, Value};
 
+use super::common::response::HandlerResult;
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     match method {
         "invitescore.SetInviteStateByType" => {
             let payload = {
-                let account = context.account.as_deref_mut()?;
+                let Some(account) = context.account.as_deref_mut() else {
+                    return HandlerResult::Error(GameError::AccountUnavailable);
+                };
                 let invite = invite_state_mut(account);
                 match decode_varint_field(request_args, 1) {
                     1 => invite["haveGotSSR"] = json!(1),
@@ -21,19 +24,21 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 invite_payload(account)
             };
             append_invite_refresh(context, payload);
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "invitescore.CheckAndResetInviteState" => {
             let payload = {
-                let account = context.account.as_deref_mut()?;
+                let Some(account) = context.account.as_deref_mut() else {
+                    return HandlerResult::Error(GameError::AccountUnavailable);
+                };
                 let invite = invite_state_mut(account);
                 invite["recordInviteScoreVersion"] = json!(decode_varint_field(request_args, 1));
                 invite_payload(account)
             };
             append_invite_refresh(context, payload);
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
 }
 
