@@ -7,7 +7,7 @@ use blueoath_domain::{
     RepositoryError, TemplateId, TowerRewardState,
 };
 use chrono::{SecondsFormat, Utc};
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -129,6 +129,13 @@ impl ProfileStore {
         profile_id: &ProfileId,
     ) -> Result<Option<AccountState>, StorageError> {
         let connection = self.connection()?;
+        Self::load_typed_account_from_connection(&connection, profile_id)
+    }
+
+    fn load_typed_account_from_connection(
+        connection: &Connection,
+        profile_id: &ProfileId,
+    ) -> Result<Option<AccountState>, StorageError> {
         let Some((name, revision)) = connection
             .query_row(
                 "SELECT name, updated_utc FROM profiles WHERE id = ?1",
@@ -2185,14 +2192,25 @@ impl ProfileStore {
         account: &AccountState,
         expected_revision: Option<u64>,
     ) -> Result<u64, StorageError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let next_revision =
+            Self::save_typed_account_in_transaction(&transaction, account, expected_revision)?;
+        transaction.commit()?;
+        Ok(next_revision)
+    }
+
+    fn save_typed_account_in_transaction(
+        transaction: &Transaction<'_>,
+        account: &AccountState,
+        expected_revision: Option<u64>,
+    ) -> Result<u64, StorageError> {
         let profile = account.profile.as_ref().ok_or_else(|| {
             StorageError::InvalidTypedAccount("account profile is required".to_owned())
         })?;
         if !is_valid_profile_id(profile.id.as_str()) {
             return Err(StorageError::InvalidProfileId);
         }
-        let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
         let actual = transaction
             .query_row(
                 "SELECT revision FROM account_revisions WHERE profile_id = ?1",
@@ -2224,7 +2242,7 @@ impl ProfileStore {
                updated_utc = excluded.updated_utc",
             params![profile.id.as_str(), profile.name, timestamp()],
         )?;
-        clear_normalized_account(&transaction, profile.id.as_str())?;
+        clear_normalized_account(transaction, profile.id.as_str())?;
 
         if let Some(guild) = &account.guild {
             transaction.execute(
@@ -3572,7 +3590,6 @@ impl ProfileStore {
                updated_utc = excluded.updated_utc",
             params![profile.id.as_str(), sql_revision, timestamp()],
         )?;
-        transaction.commit()?;
         Ok(next_revision)
     }
 
@@ -3759,16 +3776,24 @@ impl AccountRepository for ProfileStore {
     where
         F: FnOnce(&mut AccountState) -> Result<T, blueoath_domain::DomainError>,
     {
-        let existing = self
-            .load_typed_account(profile_id)
+        let mut connection = self
+            .connection()
+            .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+        let existing = Self::load_typed_account_from_connection(&transaction, profile_id)
             .map_err(|error| RepositoryError::Storage(error.to_string()))?
             .unwrap_or_else(|| NewAccountFactory::create(profile_id.clone(), profile_id.as_str()));
         let expected_revision = existing.profile.as_ref().map(|profile| profile.revision);
         let mut account = existing;
         let result = operation(&mut account)?;
         account.validate()?;
-        let next_revision = self
-            .save_typed_account_with_revision(&account, expected_revision)
+        let next_revision =
+            Self::save_typed_account_in_transaction(&transaction, &account, expected_revision)
+                .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+        transaction
+            .commit()
             .map_err(|error| RepositoryError::Storage(error.to_string()))?;
         if let Some(profile) = account.profile.as_mut() {
             profile.revision = next_revision;

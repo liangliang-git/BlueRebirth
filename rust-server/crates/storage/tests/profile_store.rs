@@ -752,6 +752,27 @@ fn typed_repository_transaction_commits_domain_mutation() {
 }
 
 #[test]
+fn typed_repository_transaction_rolls_back_partial_storage_failure() {
+    let (store, root) = store();
+    let profile_id = ProfileId::new("atomic").unwrap();
+    let account = NewAccountFactory::create(profile_id.clone(), "Atomic Captain");
+    AccountRepository::create(&store, &account).unwrap();
+
+    let result = AccountRepository::transact(&store, &profile_id, |account| {
+        account.character.exp = u64::MAX;
+        Ok::<_, blueoath_domain::DomainError>(())
+    });
+
+    assert!(result.is_err());
+    let loaded = AccountRepository::load(&store, &profile_id)
+        .unwrap()
+        .expect("original account must survive failed transaction");
+    assert_eq!(loaded.character.exp, 0);
+    assert_eq!(loaded.profile.expect("profile must survive").revision, 1);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn typed_loader_does_not_treat_profile_row_as_complete_account() {
     let (store, root) = store();
     let state = StoredProfileState {
