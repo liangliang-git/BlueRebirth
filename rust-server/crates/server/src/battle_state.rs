@@ -1006,6 +1006,7 @@ pub(super) fn set_sea_difficulty(account: &mut Value, difficulty: i32) {
     }
 }
 
+#[cfg(test)]
 pub(super) fn account_has_fleet(account: &Value, fleet_id: u64) -> bool {
     if fleet_id == 0 {
         return false;
@@ -1022,6 +1023,7 @@ pub(super) fn account_has_fleet(account: &Value, fleet_id: u64) -> bool {
         })
 }
 
+#[cfg(test)]
 pub(super) fn consume_battle_supply(
     account: &mut Value,
     catalog: Option<&BattleCatalog>,
@@ -1136,6 +1138,7 @@ pub(super) fn consume_battle_supply_typed(
         .is_ok()
 }
 
+#[cfg(test)]
 pub(super) fn add_commander_battle_exp(
     account: &mut Value,
     gained: i32,
@@ -1187,6 +1190,7 @@ pub(super) fn add_commander_battle_exp(
     character.insert("exp".to_owned(), json!(exp.min(i64::from(i32::MAX)) as i32));
 }
 
+#[cfg(test)]
 pub(super) fn add_ship_battle_exp(
     account: &mut Value,
     hero_ids: &[u64],
@@ -1258,6 +1262,7 @@ pub(super) fn add_ship_battle_exp(
     }
 }
 
+#[cfg(test)]
 pub(super) fn apply_battle_settlement(
     account: &mut Value,
     hero_ids: &[u64],
@@ -1409,6 +1414,7 @@ pub(super) fn battle_task_progress_enabled(catalog: Option<&BattleCatalog>, copy
     !catalog.is_some_and(|catalog| catalog.task_disabled_copies.contains(&copy_id))
 }
 
+#[cfg(test)]
 pub(super) fn draw_battle_drop_rewards(
     account: &mut Value,
     catalog: Option<&BattleCatalog>,
@@ -1428,6 +1434,7 @@ pub(super) fn draw_battle_drop_rewards(
     )
 }
 
+#[cfg(test)]
 pub(super) fn draw_battle_drop_rewards_for_grade(
     account: &mut Value,
     catalog: Option<&BattleCatalog>,
@@ -1551,6 +1558,7 @@ pub(super) fn draw_battle_drop_rewards_for_grade(
     rewards
 }
 
+#[cfg(test)]
 pub(super) fn record_battle_pass(
     account: &mut Value,
     copy_id: i32,

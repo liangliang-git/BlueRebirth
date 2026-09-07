@@ -1273,6 +1273,7 @@ fn typed_milestone_info_payload(account: &blueoath_domain::AccountState) -> Vec<
     output
 }
 
+#[cfg(test)]
 fn apply_support_reward(
     account: &mut Value,
     hero_ids: &[u64],
