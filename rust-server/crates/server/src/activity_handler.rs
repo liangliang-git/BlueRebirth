@@ -30,6 +30,8 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "activitybirthday.FeedBirthdayCake"
             | "activityfashion.PushActivityFashionInfo"
             | "activitycodeexchange.UpdateActivityCodeExgInfo"
+            | "activitycodeexchange.ExchangeCode"
+            | "activitycodeexchange.ExchangeReward"
             | "activitypapercut.UpdateActivityPaperCutInfo"
             | "activitysecretcopy.UpdateActivitySecretCopyInfo"
             | "activitysecretcopy.GetReward"
@@ -48,8 +50,19 @@ pub(super) fn handle_typed(
     method: &str,
     request_args: &[u8],
 ) -> HandlerResult {
-    if method == "activityVideo.SetActivityVideo" {
-        return handle_typed_video_set(account, request_args);
+    if matches!(
+        method,
+        "activityVideo.SetActivityVideo"
+            | "activitycodeexchange.ExchangeCode"
+            | "activitycodeexchange.ExchangeReward"
+    ) {
+        return match method {
+            "activityVideo.SetActivityVideo" => handle_typed_video_set(account, request_args),
+            "activitycodeexchange.ExchangeCode" | "activitycodeexchange.ExchangeReward" => {
+                handle_typed_code_exchange(account, method, request_args)
+            }
+            _ => unreachable!(),
+        };
     }
     let progress = &mut account.activities.progress;
     match method {
@@ -203,6 +216,98 @@ pub(super) fn handle_typed(
         }
         _ => HandlerResult::Error(GameError::InvalidRequest(
             "activity method requires typed activity rule",
+        )),
+    }
+}
+
+fn handle_typed_code_exchange(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    match method {
+        "activitycodeexchange.ExchangeCode" => {
+            let code = decode_varint_field(request_args, 1).max(0) as u64;
+            let number = decode_varint_field(request_args, 3).clamp(1, 99) as u64;
+            if code == 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "activity exchange code is invalid",
+                ));
+            }
+            let key = format!("activity:activityCodeExchange:receipt:{code}:count");
+            let progress = &mut account.activities.progress;
+            let count = progress.entry(key).or_default();
+            *count = count.saturating_add(number);
+            typed_reply(method, typed_code_exchange_payload(progress))
+        }
+        "activitycodeexchange.ExchangeReward" => {
+            let reward_index = decode_varint_field(request_args, 1).max(0) as u64;
+            let number = decode_varint_field(request_args, 2).clamp(1, 99) as u64;
+            if reward_index == 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "activity exchange reward index is invalid",
+                ));
+            }
+            let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
+            let Some(activity) = code_exchange_activity(catalog) else {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "activity exchange config is unavailable",
+                ));
+            };
+            let reward_id = activity
+                .get("p4")
+                .and_then(Value::as_array)
+                .and_then(|rewards| rewards.get((reward_index - 1) as usize))
+                .and_then(Value::as_array)
+                .and_then(|reward| reward.first())
+                .and_then(Value::as_i64)
+                .and_then(|id| i32::try_from(id).ok())
+                .unwrap_or_default();
+            let reward_defs = catalog
+                .rewards_by_id
+                .get(&reward_id)
+                .cloned()
+                .unwrap_or_default();
+            let receipt_key = format!("activity:activityCodeExchange:receipt:{reward_index}:count");
+            let available = account
+                .activities
+                .progress
+                .get(&receipt_key)
+                .copied()
+                .unwrap_or_default();
+            if reward_id <= 0 || reward_defs.is_empty() {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "activity exchange reward is invalid",
+                ));
+            }
+            if available < number {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "activity exchange reward count is insufficient",
+                ));
+            }
+            let rewards = (0..number)
+                .flat_map(|_| reward_defs.iter().copied())
+                .collect::<Vec<_>>();
+            if !task_state::can_grant_typed_task_rewards(account, &rewards) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "activity exchange reward is unsupported",
+                ));
+            }
+            for reward in &rewards {
+                if !task_state::grant_typed_task_reward(account, reward) {
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "activity exchange reward is unsupported",
+                    ));
+                }
+            }
+            account
+                .activities
+                .progress
+                .insert(receipt_key, available - number);
+            typed_reply(method, encode_rewards_list(&rewards))
+        }
+        _ => HandlerResult::Error(GameError::InvalidRequest(
+            "activity exchange method is unsupported",
         )),
     }
 }
@@ -2571,5 +2676,19 @@ mod tests {
             .activities
             .progress
             .contains_key("activity:activitySecretCopy:reward:2:getReward"));
+        let mut exchange = Vec::new();
+        append_varint_field(&mut exchange, 1, 55);
+        append_varint_field(&mut exchange, 3, 2);
+        assert!(matches!(
+            handle_typed(&mut account, "activitycodeexchange.ExchangeCode", &exchange),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account
+                .activities
+                .progress
+                .get("activity:activityCodeExchange:receipt:55:count"),
+            Some(&2)
+        );
     }
 }
