@@ -869,6 +869,13 @@ pub(super) static COMMANDER_LEVEL_CATALOG: OnceLock<CommanderLevelCatalog> = Onc
 pub(super) static BUILD_DRAW_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 pub(super) static BATTLE_DRAW_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, OnceLock};
+
+use blueoath_protocol::FashionList;
+
+use super::{json_i32, json_i32_array, mix_build_draw_roll, ShopReward};
+
 #[cfg(test)]
 mod validation_tests {
     use super::{BattleCatalog, ChapterCatalog};
@@ -886,9 +893,3 @@ mod validation_tests {
         assert!(catalog.validate().is_err());
     }
 }
-use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, OnceLock};
-
-use blueoath_protocol::FashionList;
-
-use super::{json_i32, json_i32_array, mix_build_draw_roll, ShopReward};
