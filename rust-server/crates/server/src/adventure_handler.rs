@@ -1,16 +1,19 @@
 use serde_json::{json, Value};
 
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     _request_args: &[u8],
-) -> Option<Vec<u8>> {
-    let account = context.account.as_deref_mut()?;
+) -> HandlerResult {
+    let Some(account) = context.account.as_deref_mut() else {
+        return HandlerResult::Error(GameError::AccountUnavailable);
+    };
     let adventure = adventure_state_mut(account);
     match method {
-        "adventure.GetAdventure" => Some(adventure_payload(adventure)),
+        "adventure.GetAdventure" => reply(method, adventure_payload(adventure)),
         "adventure.LevelUp" => {
             for role in adventure
                 .get_mut("roles")
@@ -22,7 +25,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 role["level"] = json!(level);
                 role["hp"] = json!(level.saturating_mul(1_000));
             }
-            Some(adventure_payload(adventure))
+            reply(method, adventure_payload(adventure))
         }
         "adventure.Attack" => {
             let enemy_index = json_i64(adventure, "enemyIndex").unwrap_or(0).max(0);
@@ -46,10 +49,14 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             let mut output = Vec::new();
             append_varint_field(&mut output, 1, 100);
             append_varint_field(&mut output, 2, u64::from(is_killed));
-            Some(output)
+            reply(method, output)
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
 }
 
 fn adventure_state_mut(account: &mut Value) -> &mut Value {
