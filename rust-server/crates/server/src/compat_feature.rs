@@ -42,6 +42,7 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "user.GetHeadBuyCount"
             | "hero.Marry"
             | "hero.AddAffection"
+            | "illustrate.VowDecTime"
             | "repair.RepairHero"
     )
 }
@@ -59,6 +60,49 @@ pub(super) fn handle_typed(
     }
     if method == "user.GetHeadBuyCount" {
         return HandlerResult::Reply(Response::raw(method, head_buy_count_payload()));
+    }
+    if method == "illustrate.VowDecTime" {
+        let items = decode_repeated_message_field(request_args, 1)
+            .into_iter()
+            .map(|item| (decode_varint_field(&item, 1), decode_varint_field(&item, 2)))
+            .filter(|(item_id, count)| *item_id > 0 && *count > 0)
+            .collect::<Vec<_>>();
+        if items.is_empty() {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "wish cooldown item list is empty",
+            ));
+        }
+        for (item_id, count) in &items {
+            let Some(template_id) = blueoath_domain::TemplateId::new(*item_id as u64).ok() else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "wish cooldown item id is invalid",
+                ));
+            };
+            if account
+                .inventory
+                .items
+                .get(&template_id)
+                .copied()
+                .unwrap_or_default()
+                < *count as u64
+            {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "not enough wish cooldown items",
+                ));
+            }
+        }
+        for (item_id, count) in items {
+            if !consume_typed_item(account, item_id, count as u64) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "wish cooldown item cannot be consumed",
+                ));
+            }
+        }
+        pre_pushes.push(BagInfoCodec::encode(&bag_info_from_typed_account(account)));
+        let mut output = Vec::new();
+        append_varint_field(&mut output, 1, 0);
+        append_varint_field(&mut output, 2, 0);
+        return HandlerResult::Reply(Response::raw(method, output));
     }
     if method == "hero.Marry" {
         let hero_id = decode_varint_u64_field(request_args, 1);
@@ -1901,5 +1945,31 @@ mod tests {
             .inventory
             .items
             .contains_key(&blueoath_domain::TemplateId::new(item_id as u64).unwrap()));
+
+        let cooldown_id: i32 = 12_345;
+        account.inventory.items.insert(
+            blueoath_domain::TemplateId::new(cooldown_id as u64).unwrap(),
+            2,
+        );
+        let mut cooldown_item = Vec::new();
+        append_varint_field(&mut cooldown_item, 1, cooldown_id as u64);
+        append_varint_field(&mut cooldown_item, 2, 2);
+        let mut cooldown = Vec::new();
+        append_message_field(&mut cooldown, 1, &cooldown_item);
+        assert!(matches!(
+            handle_typed(
+                &state,
+                &mut account,
+                "illustrate.VowDecTime",
+                &cooldown,
+                None,
+                &mut pushes,
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert!(!account
+            .inventory
+            .items
+            .contains_key(&blueoath_domain::TemplateId::new(cooldown_id as u64).unwrap()));
     }
 }
