@@ -662,6 +662,36 @@ pub(super) fn fleet_info_from_account(account: &Value) -> FleetInfo {
     }
 }
 
+pub(super) fn fleet_info_from_typed_account(account: &blueoath_domain::AccountState) -> FleetInfo {
+    let tactics = account
+        .fleet
+        .fleets
+        .iter()
+        .filter_map(|(fleet_id, fleet)| {
+            Some(FleetTactic {
+                tactic_name: String::new(),
+                hero_ids: fleet
+                    .members
+                    .iter()
+                    .filter_map(|hero_id| i32::try_from(hero_id.get()).ok())
+                    .collect(),
+                mode_id: i32::try_from(fleet_id.get()).ok()?,
+                strategy_id: i32::try_from(fleet.tactic_id).ok()?,
+                formation_id: i32::try_from(fleet.formation_id).ok()?,
+                tactic_type: 1,
+                ex_hero_ids: Vec::new(),
+            })
+        })
+        .collect::<Vec<_>>();
+    if tactics.is_empty() {
+        return default_fleet_info();
+    }
+    FleetInfo {
+        tactics,
+        ..FleetInfo::default()
+    }
+}
+
 pub(super) fn decode_fleet_info(payload: &[u8]) -> FleetInfo {
     let mut index = 0;
     let mut fleet = FleetInfo::default();

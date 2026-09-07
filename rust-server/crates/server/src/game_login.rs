@@ -272,9 +272,13 @@ where
             }
             result.into_payload()
         }
-        "tactic.GetHerosTactic" => Some(FleetInfoCodec::encode(&fleet_info_from_account(
-            account_view.unwrap_or(&Value::Null),
-        ))),
+        "tactic.GetHerosTactic" => {
+            let fleet = typed_account
+                .as_deref()
+                .map(fleet_info_from_typed_account)
+                .unwrap_or_else(|| fleet_info_from_account(account_view.unwrap_or(&Value::Null)));
+            Some(FleetInfoCodec::encode(&fleet))
+        }
         "tactic.SetHerosTactic" => {
             let fleet = decode_fleet_info(request_args);
             if let Some(account) = account.as_deref_mut() {

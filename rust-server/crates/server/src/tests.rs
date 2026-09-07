@@ -21,33 +21,34 @@ use super::{
     encode_hero_add_exp_response, encode_mail_list_response, encode_retire_hero_response,
     enhance_bind_equip_state, enhance_equip_state, equip_list_from_account, expand_build_drop,
     fashion_equip_state, fashion_list_from_account, finish_building_state, finish_study_state,
-    fleet_info_from_account, hero_advance_max_level_state, hero_advance_mub_state,
-    hero_advance_state, hero_auto_equip_state, hero_auto_unequip_state, hero_change_equip_state,
-    hero_equip_binding_state, hero_equip_effect_state, hero_equip_lock_transplant_state,
-    hero_intensify_state, hero_remould_state, illustrate_info_payload,
-    illustrate_info_payload_for_templates, json_i32, load_affection_catalog, load_battle_catalog,
-    load_chapter_catalog, load_equip_catalog, load_server_shop_goods, load_ship_break_catalog,
-    load_ship_intensify_catalog, load_ship_stat_catalog, load_shop_catalog, load_task_catalog,
-    mark_battle_fleet_passed, mop_up_pass_rets, mop_up_payload, mop_up_payload_with_pass_rets,
-    normalize_daily_copy_state, normalize_task_state, prepare_local_request,
-    preset_fleet_info_from_account, process_game_login_frame_with_catalog_mut,
-    process_game_login_frame_with_catalogs_typed_mut, receive_construction, record_battle_pass,
-    renovate_equip_state, resolve_study_skill_id, return_shop_buy_response, scale_reward,
-    sea_difficulty_for_account, set_preset_fleet_from_account, set_sea_difficulty, settle_mop_up,
-    settle_mop_up_with_config, settle_support_state, ship_attributes_for_hero,
-    ship_attributes_for_template, shop_costs_from_value, shop_info_payload, start_construction,
-    start_study_state, start_support_state, story_memory_payload, study_info_payload,
-    study_skill_state, sync_achievement_points, task_completed, task_info_payload,
-    update_bathroom_state, update_building_assignments, update_mop_up_state,
-    validate_battle_attack, BattleCatalog, BattleCopy, BattleEnemy, BattleFleetReward,
-    BuildShipCatalog, BuildingCatalog, ChapterCatalog, CommanderLevelCatalog, EquipCatalog,
-    EquipLevelbreakRule, EquipNewTestCatalog, EquipNum, EquipRenovateRule, HeroBreakdownCatalog,
-    HeroLevelCatalog, HeroSkillUpgradeCatalog, MailTemplate, ServerConfig, ServerState,
-    ShipAdvanceCatalog, ShipBreakCatalog, ShipRemouldCatalog, ShipStat, ShipStatCatalog,
-    ShopCatalog, ShopCost, ShopGood, ShopReward, SupportCatalog, SupportFleetItem, TalentCatalog,
-    TalentNode, TaskCatalog, TaskDefinition, UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
+    fleet_info_from_account, fleet_info_from_typed_account, hero_advance_max_level_state,
+    hero_advance_mub_state, hero_advance_state, hero_auto_equip_state, hero_auto_unequip_state,
+    hero_change_equip_state, hero_equip_binding_state, hero_equip_effect_state,
+    hero_equip_lock_transplant_state, hero_intensify_state, hero_remould_state,
+    illustrate_info_payload, illustrate_info_payload_for_templates, json_i32,
+    load_affection_catalog, load_battle_catalog, load_chapter_catalog, load_equip_catalog,
+    load_server_shop_goods, load_ship_break_catalog, load_ship_intensify_catalog,
+    load_ship_stat_catalog, load_shop_catalog, load_task_catalog, mark_battle_fleet_passed,
+    mop_up_pass_rets, mop_up_payload, mop_up_payload_with_pass_rets, normalize_daily_copy_state,
+    normalize_task_state, prepare_local_request, preset_fleet_info_from_account,
+    process_game_login_frame_with_catalog_mut, process_game_login_frame_with_catalogs_typed_mut,
+    receive_construction, record_battle_pass, renovate_equip_state, resolve_study_skill_id,
+    return_shop_buy_response, scale_reward, sea_difficulty_for_account,
+    set_preset_fleet_from_account, set_sea_difficulty, settle_mop_up, settle_mop_up_with_config,
+    settle_support_state, ship_attributes_for_hero, ship_attributes_for_template,
+    shop_costs_from_value, shop_info_payload, start_construction, start_study_state,
+    start_support_state, story_memory_payload, study_info_payload, study_skill_state,
+    sync_achievement_points, task_completed, task_info_payload, update_bathroom_state,
+    update_building_assignments, update_mop_up_state, validate_battle_attack, BattleCatalog,
+    BattleCopy, BattleEnemy, BattleFleetReward, BuildShipCatalog, BuildingCatalog, ChapterCatalog,
+    CommanderLevelCatalog, EquipCatalog, EquipLevelbreakRule, EquipNewTestCatalog, EquipNum,
+    EquipRenovateRule, HeroBreakdownCatalog, HeroLevelCatalog, HeroSkillUpgradeCatalog,
+    MailTemplate, ServerConfig, ServerState, ShipAdvanceCatalog, ShipBreakCatalog,
+    ShipRemouldCatalog, ShipStat, ShipStatCatalog, ShopCatalog, ShopCost, ShopGood, ShopReward,
+    SupportCatalog, SupportFleetItem, TalentCatalog, TalentNode, TaskCatalog, TaskDefinition,
+    UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
 };
-use blueoath_domain::{NewAccountFactory, ProfileId};
+use blueoath_domain::{FleetId, FleetRecord, HeroId, NewAccountFactory, ProfileId};
 use blueoath_protocol::{
     CopyRecordListCodec, EquipListCodec, FashionInfo, FashionList, HeroBagCodec, PresetFleet,
     PresetFleetCodec, PresetFleetInfo, TMessageCodec, TRequest,
@@ -115,6 +116,26 @@ async fn typed_user_routes_update_account_state_without_json_account() {
     .unwrap();
     let _ = NetSocketFrameCodec::read(&mut client).await.unwrap();
     assert_eq!(account.character.head, 1021052);
+}
+
+#[test]
+fn typed_fleet_projection_reads_normalized_fleet_rows() {
+    let mut account = NewAccountFactory::create(ProfileId::new("typed-fleet").unwrap(), "Fleet");
+    account.fleet.fleets.insert(
+        FleetId::new(3).unwrap(),
+        FleetRecord {
+            formation_id: 7,
+            tactic_id: 11,
+            members: vec![HeroId::new(101).unwrap(), HeroId::new(102).unwrap()],
+        },
+    );
+
+    let fleet = fleet_info_from_typed_account(&account);
+    assert_eq!(fleet.tactics.len(), 1);
+    assert_eq!(fleet.tactics[0].mode_id, 3);
+    assert_eq!(fleet.tactics[0].hero_ids, vec![101, 102]);
+    assert_eq!(fleet.tactics[0].strategy_id, 11);
+    assert_eq!(fleet.tactics[0].formation_id, 7);
 }
 
 #[test]
