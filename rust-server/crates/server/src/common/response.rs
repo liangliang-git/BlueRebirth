@@ -64,7 +64,10 @@ impl HandlerResult {
     pub fn into_payload(self) -> Option<Vec<u8>> {
         match self {
             Self::Reply(response) => Some(response.payload),
-            Self::PushOnly | Self::Empty | Self::Error(_) => None,
+            Self::PushOnly | Self::Empty => None,
+            // Errors still complete request callback with empty payload. The
+            // outer session carries client error code/message separately.
+            Self::Error(_) => Some(Vec::new()),
         }
     }
 }
@@ -110,7 +113,7 @@ impl ResponseEffects {
 
 #[cfg(test)]
 mod tests {
-    use super::{Response, ResponseEffects};
+    use super::{HandlerResult, Response, ResponseEffects};
 
     #[test]
     fn response_effects_map_domain_failure_to_client_fields() {
@@ -127,6 +130,14 @@ mod tests {
         assert_eq!(
             Response::raw("user.GetInfo", [1, 2, 3].to_vec()),
             Response::new("user.GetInfo", vec![1, 2, 3])
+        );
+    }
+
+    #[test]
+    fn handler_error_still_completes_callback_with_empty_payload() {
+        assert_eq!(
+            HandlerResult::Error(super::GameError::AccountUnavailable).into_payload(),
+            Some(Vec::new())
         );
     }
 }
