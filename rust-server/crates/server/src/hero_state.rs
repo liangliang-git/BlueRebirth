@@ -1410,6 +1410,7 @@ pub(super) fn illustrate_info_payload_for_entries(entries: &[(i32, Vec<i32>)]) -
     output
 }
 
+#[cfg(test)]
 pub(super) fn illustrate_info_payload_for_rewards(
     rewards: &[ShopReward],
     handbook_behaviours: Option<&[i32]>,
