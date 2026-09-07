@@ -1574,6 +1574,7 @@ where
     }
     if is_user_info {
         if let Some(account) = account.as_deref() {
+            let typed_account_view = typed_account.as_deref();
             // Match the C# post-GetUserInfo bootstrap prefix. These state snapshots must
             // arrive before inventory pushes: the client enters MainStage and reads them
             // synchronously from its login state machine.
@@ -1602,10 +1603,11 @@ where
 
             let push = TMessageCodec::encode_response(&TResponse {
                 method: "user.GetUserInfo".to_owned(),
-                ret: Some(UserInfoCodec::encode(&user_info_from_account(
-                    state,
-                    Some(account),
-                ))),
+                ret: Some(UserInfoCodec::encode(
+                    &typed_account_view
+                        .map(|typed| user_info_from_typed_account(state, typed))
+                        .unwrap_or_else(|| user_info_from_account(state, Some(account))),
+                )),
                 time: now,
                 ..TResponse::default()
             });
@@ -1631,7 +1633,11 @@ where
 
             let push = TMessageCodec::encode_response(&TResponse {
                 method: "bag.UpdateBagData".to_owned(),
-                ret: Some(BagInfoCodec::encode(&bag_info_from_account(account))),
+                ret: Some(BagInfoCodec::encode(
+                    &typed_account_view
+                        .map(bag_info_from_typed_account)
+                        .unwrap_or_else(|| bag_info_from_account(account)),
+                )),
                 time: current_unix_seconds(),
                 ..TResponse::default()
             });
@@ -1648,17 +1654,22 @@ where
             NetSocketFrameCodec::write(stream, 0, &push).await?;
             let push = TMessageCodec::encode_response(&TResponse {
                 method: "equip.UpdateEquipBagData".to_owned(),
-                ret: Some(EquipListCodec::encode(&equip_list_from_account(
-                    account,
-                    equip_catalog,
-                ))),
+                ret: Some(EquipListCodec::encode(
+                    &typed_account_view
+                        .map(equip_list_from_typed_account)
+                        .unwrap_or_else(|| equip_list_from_account(account, equip_catalog)),
+                )),
                 time: current_unix_seconds(),
                 ..TResponse::default()
             });
             NetSocketFrameCodec::write(stream, 0, &push).await?;
             let push = TMessageCodec::encode_response(&TResponse {
                 method: "hero.UpdateHeroBagData".to_owned(),
-                ret: Some(HeroBagCodec::encode(&hero_bag_from_account(account))),
+                ret: Some(HeroBagCodec::encode(
+                    &typed_account_view
+                        .map(hero_bag_from_typed_account)
+                        .unwrap_or_else(|| hero_bag_from_account(account)),
+                )),
                 time: current_unix_seconds(),
                 ..TResponse::default()
             });
@@ -1675,7 +1686,11 @@ where
             NetSocketFrameCodec::write(stream, 0, &push).await?;
             let push = TMessageCodec::encode_response(&TResponse {
                 method: "tactic.GetHerosTactic".to_owned(),
-                ret: Some(FleetInfoCodec::encode(&fleet_info_from_account(account))),
+                ret: Some(FleetInfoCodec::encode(
+                    &typed_account_view
+                        .map(fleet_info_from_typed_account)
+                        .unwrap_or_else(|| fleet_info_from_account(account)),
+                )),
                 time: current_unix_seconds(),
                 ..TResponse::default()
             });
