@@ -288,10 +288,21 @@ where
         }
         "tactic.SetHerosTactic" => {
             let fleet = decode_fleet_info(request_args);
-            if let Some(account) = account.as_deref_mut() {
+            if let Some(typed) = typed_account.as_mut() {
+                if !set_fleet_on_typed_account(typed, &fleet) {
+                    handler_error = Some(GameError::InvalidRequest(
+                        "fleet tactic contains invalid or unowned hero",
+                    ));
+                    Some(Vec::new())
+                } else {
+                    Some(FleetInfoCodec::encode(&fleet))
+                }
+            } else if let Some(account) = account.as_deref_mut() {
                 set_fleet_from_account(account, &fleet);
+                Some(FleetInfoCodec::encode(&fleet))
+            } else {
+                Some(FleetInfoCodec::encode(&fleet))
             }
-            Some(FleetInfoCodec::encode(&fleet))
         }
         "presetfleet.PresetFleetsInfo" => Some(PresetFleetCodec::encode(
             &preset_fleet_info_from_account(account_view.unwrap_or(&Value::Null)),

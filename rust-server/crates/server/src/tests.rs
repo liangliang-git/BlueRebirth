@@ -35,19 +35,20 @@ use super::{
     preset_fleet_info_from_account, process_game_login_frame_with_catalog_mut,
     process_game_login_frame_with_catalogs_typed_mut, receive_construction, record_battle_pass,
     renovate_equip_state, resolve_study_skill_id, return_shop_buy_response, scale_reward,
-    sea_difficulty_for_account, set_preset_fleet_from_account, set_sea_difficulty, settle_mop_up,
-    settle_mop_up_with_config, settle_support_state, ship_attributes_for_hero,
-    ship_attributes_for_template, shop_costs_from_value, shop_info_payload, start_construction,
-    start_study_state, start_support_state, story_memory_payload, study_info_payload,
-    study_skill_state, sync_achievement_points, task_completed, task_info_payload,
-    update_bathroom_state, update_building_assignments, update_mop_up_state,
-    validate_battle_attack, BattleCatalog, BattleCopy, BattleEnemy, BattleFleetReward,
-    BuildShipCatalog, BuildingCatalog, ChapterCatalog, CommanderLevelCatalog, EquipCatalog,
-    EquipLevelbreakRule, EquipNewTestCatalog, EquipNum, EquipRenovateRule, HeroBreakdownCatalog,
-    HeroLevelCatalog, HeroSkillUpgradeCatalog, MailTemplate, ServerConfig, ServerState,
-    ShipAdvanceCatalog, ShipBreakCatalog, ShipRemouldCatalog, ShipStat, ShipStatCatalog,
-    ShopCatalog, ShopCost, ShopGood, ShopReward, SupportCatalog, SupportFleetItem, TalentCatalog,
-    TalentNode, TaskCatalog, TaskDefinition, UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
+    sea_difficulty_for_account, set_fleet_on_typed_account, set_preset_fleet_from_account,
+    set_sea_difficulty, settle_mop_up, settle_mop_up_with_config, settle_support_state,
+    ship_attributes_for_hero, ship_attributes_for_template, shop_costs_from_value,
+    shop_info_payload, start_construction, start_study_state, start_support_state,
+    story_memory_payload, study_info_payload, study_skill_state, sync_achievement_points,
+    task_completed, task_info_payload, update_bathroom_state, update_building_assignments,
+    update_mop_up_state, validate_battle_attack, BattleCatalog, BattleCopy, BattleEnemy,
+    BattleFleetReward, BuildShipCatalog, BuildingCatalog, ChapterCatalog, CommanderLevelCatalog,
+    EquipCatalog, EquipLevelbreakRule, EquipNewTestCatalog, EquipNum, EquipRenovateRule,
+    HeroBreakdownCatalog, HeroLevelCatalog, HeroSkillUpgradeCatalog, MailTemplate, ServerConfig,
+    ServerState, ShipAdvanceCatalog, ShipBreakCatalog, ShipRemouldCatalog, ShipStat,
+    ShipStatCatalog, ShopCatalog, ShopCost, ShopGood, ShopReward, SupportCatalog, SupportFleetItem,
+    TalentCatalog, TalentNode, TaskCatalog, TaskDefinition, UserInfoCodec, DEFAULT_GUILD_ID,
+    GUILD_MEMBER,
 };
 use blueoath_domain::{FleetId, FleetRecord, HeroId, NewAccountFactory, ProfileId, TemplateId};
 use blueoath_protocol::{
@@ -137,6 +138,44 @@ fn typed_fleet_projection_reads_normalized_fleet_rows() {
     assert_eq!(fleet.tactics[0].hero_ids, vec![101, 102]);
     assert_eq!(fleet.tactics[0].strategy_id, 11);
     assert_eq!(fleet.tactics[0].formation_id, 7);
+}
+
+#[test]
+fn typed_fleet_mutation_validates_hero_ownership() {
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("typed-fleet-write").unwrap(), "Fleet");
+    let hero_id = HeroId::new(101).unwrap();
+    account.dock.heroes.insert(
+        hero_id,
+        blueoath_domain::HeroState {
+            id: hero_id,
+            template_id: blueoath_domain::TemplateId::new(1001).unwrap(),
+            level: 1,
+            exp: 0,
+            mood: 0,
+            affection: 0,
+            hp: 1,
+            locked: false,
+            equip_slots: Vec::new(),
+        },
+    );
+    let value = blueoath_protocol::FleetInfo {
+        tactics: vec![blueoath_protocol::FleetTactic {
+            mode_id: 2,
+            strategy_id: 3,
+            formation_id: 4,
+            hero_ids: vec![101],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    assert!(set_fleet_on_typed_account(&mut account, &value));
+    assert_eq!(account.fleet.fleets.len(), 1);
+    assert_eq!(
+        account.fleet.fleets[&FleetId::new(2).unwrap()].members,
+        vec![hero_id]
+    );
 }
 
 #[test]

@@ -779,6 +779,55 @@ pub(super) fn fleet_info_from_typed_account(account: &blueoath_domain::AccountSt
     }
 }
 
+pub(super) fn set_fleet_on_typed_account(
+    account: &mut blueoath_domain::AccountState,
+    fleet: &FleetInfo,
+) -> bool {
+    let mut fleets = std::collections::BTreeMap::new();
+    for tactic in &fleet.tactics {
+        let Ok(raw_fleet_id) = u64::try_from(tactic.mode_id) else {
+            return false;
+        };
+        let Ok(fleet_id) = blueoath_domain::FleetId::new(raw_fleet_id) else {
+            return false;
+        };
+        let Ok(formation_id) = u32::try_from(tactic.formation_id) else {
+            return false;
+        };
+        let Ok(tactic_id) = u32::try_from(tactic.strategy_id) else {
+            return false;
+        };
+        let mut members = Vec::new();
+        for hero_id in &tactic.hero_ids {
+            let Ok(hero_id) = u64::try_from(*hero_id) else {
+                return false;
+            };
+            let Ok(hero_id) = blueoath_domain::HeroId::new(hero_id) else {
+                return false;
+            };
+            if !account.dock.heroes.contains_key(&hero_id) {
+                return false;
+            }
+            members.push(hero_id);
+        }
+        if fleets
+            .insert(
+                fleet_id,
+                blueoath_domain::FleetRecord {
+                    formation_id,
+                    tactic_id,
+                    members,
+                },
+            )
+            .is_some()
+        {
+            return false;
+        }
+    }
+    account.fleet.fleets = fleets;
+    true
+}
+
 pub(super) fn decode_fleet_info(payload: &[u8]) -> FleetInfo {
     let mut index = 0;
     let mut fleet = FleetInfo::default();
