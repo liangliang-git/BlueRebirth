@@ -1,5 +1,7 @@
 use serde_json::json;
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
@@ -20,14 +22,10 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let account = &mut *context.account;
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
     let Some(account) = account.as_deref_mut() else {
-        *response_err = 1;
-        *response_err_msg = "account is unavailable".to_owned();
-        return Some(Vec::new());
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
 
     match method {
@@ -36,15 +34,13 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 "copyId": decode_varint_field(request_args, 1),
                 "time": current_unix_seconds(),
             });
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "copyextra.AddCopyRewardCount" => {
             let chapter_id = decode_varint_field(request_args, 1);
             let reward_time = decode_varint_field(request_args, 2).max(1);
             if chapter_id <= 0 {
-                *response_err = 1;
-                *response_err_msg = "copy reward count target is invalid".to_owned();
-                Some(Vec::new())
+                invalid("copy reward count target is invalid")
             } else {
                 let entries = account
                     .as_object_mut()
@@ -58,20 +54,20 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                     .unwrap_or_default();
                 let total = current.saturating_add(i64::from(reward_time));
                 entries[&key] = json!(total);
-                Some(copy_reward_times_payload(chapter_id, total))
+                reply(method, copy_reward_times_payload(chapter_id, total))
             }
         }
-        "copyextra.UpdateCopyExtraInfo" => Some(copy_extra_info_payload(account)),
+        "copyextra.UpdateCopyExtraInfo" => reply(method, copy_extra_info_payload(account)),
         "prefs.SavePrefs" => {
             account["prefsData"] = json!({
                 "data": decode_string_field(request_args, 1).unwrap_or_default(),
                 "time": current_unix_seconds(),
             });
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "statcount.GetStatCount" => {
             account["lastStatCountTime"] = json!(current_unix_seconds());
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "sign.Sign" => {
             let day = decode_varint_field(request_args, 1).max(1);
@@ -90,45 +86,44 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             {
                 days.push(json!(day));
             }
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "miniGame.StartMiniGame" => {
             account["miniGame"] = json!({
                 "args": request_args,
                 "time": current_unix_seconds(),
             });
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "alchemy.StartAlchemy" => {
             let formula_id = decode_varint_field(request_args, 1);
             let equip_ids = decode_repeated_varint_field(request_args, 2);
             if formula_id <= 0 || equip_ids.is_empty() {
-                *response_err = 1;
-                *response_err_msg = "alchemy request is invalid".to_owned();
+                invalid("alchemy request is invalid")
             } else {
                 account["alchemy"] = json!({
                     "formulaId": formula_id,
                     "equipIds": equip_ids,
                     "time": current_unix_seconds(),
                 });
+                HandlerResult::PushOnly
             }
-            Some(Vec::new())
         }
-        "exchange.GetExchangeInfo" => Some(Vec::new()),
+        "exchange.GetExchangeInfo" => HandlerResult::PushOnly,
         "exchange.Exchange" => {
             account["lastExchange"] = json!({
                 "args": request_args,
                 "time": current_unix_seconds(),
             });
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
-        "foodCompose.GetFoodComposeData" => Some(Vec::new()),
+        "foodCompose.GetFoodComposeData" => HandlerResult::PushOnly,
         "foodCompose.FoodCompose" => {
             account["lastFoodCompose"] = json!({
                 "args": request_args,
                 "time": current_unix_seconds(),
             });
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "battlepass.GetReward"
         | "battlepass.GetAllReward"
@@ -151,7 +146,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                     .expect("battle pass claims must be an array")
                     .push(json!(level));
             }
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "battlepass.RefreshRandomTask"
         | "activitybattlepass.RefreshRandomTask"
@@ -166,9 +161,9 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 "args": request_args,
                 "time": current_unix_seconds(),
             });
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
-        "magazine.Magazine" => Some(Vec::new()),
+        "magazine.Magazine" => HandlerResult::PushOnly,
         "magazine.AddHero"
         | "magazine.Vote"
         | "magazine.FetchMagazineReward"
@@ -178,7 +173,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 "args": request_args,
                 "time": current_unix_seconds(),
             });
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "interactionitem.GetItemReward"
         | "interactionitem.BuyChristmasFurniture"
@@ -192,7 +187,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 "args": request_args,
                 "time": current_unix_seconds(),
             });
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "bigactivity.GetBigActivityInfo"
         | "bigactivity.GetBigActivityRank"
@@ -242,11 +237,11 @@ pub(super) fn handle<'state, 'account, 'scratch>(
         | "worldevent.StageReward"
         | "worldeventrank.Rank" => {
             record_compat_route(account, method, request_args);
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         m if handles(m) => {
             record_compat_route(account, m, request_args);
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         m if matches!(
             GameMethod::parse(m).family(),
@@ -258,10 +253,18 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 "args": request_args,
                 "time": current_unix_seconds(),
             });
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
+}
+
+fn invalid(message: &'static str) -> HandlerResult {
+    HandlerResult::Error(GameError::InvalidRequest(message))
 }
 
 fn record_compat_route(account: &mut Value, method: &str, request_args: &[u8]) {
@@ -327,4 +330,20 @@ fn copy_extra_info_payload(account: &Value) -> Vec<u8> {
         append_branch(&mut output, branch);
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::response::HandlerResult;
+
+    use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
+    }
 }

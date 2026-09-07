@@ -405,7 +405,12 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            guild_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result = guild_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::Friend) => {
             let mut context = GameLoginRequestContext {
@@ -422,7 +427,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            friend_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result =
+                friend_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::Chat) => {
             let mut context = GameLoginRequestContext {
@@ -506,7 +517,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            guildbox_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result =
+                guildbox_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::InviteScore) => {
             let mut context = GameLoginRequestContext {
@@ -588,7 +605,12 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            misc_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result = misc_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if (method.is_family(MethodFamily::Exchange)
             || method.is_family(MethodFamily::FoodCompose)
@@ -613,7 +635,12 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            misc_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result = misc_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::TeachingServer) => {
             let mut context = GameLoginRequestContext {
@@ -798,7 +825,12 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            misc_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result = misc_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         "mail.GetMailList"
         | "mail.OpenMail"

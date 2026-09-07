@@ -1,50 +1,38 @@
 use serde_json::{json, Value};
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
-    let account = context.account.as_deref_mut()?;
+) -> HandlerResult {
+    let Some(account) = context.account.as_deref_mut() else {
+        return HandlerResult::Error(GameError::AccountUnavailable);
+    };
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     match method {
         "guildbox.SetAnonymous" => {
             let anonymous = decode_varint_field(request_args, 1).max(0);
             let state = guild_box_state_mut(account);
             state["anonymous"] = json!(anonymous);
-            Some(user_data_payload(state))
+            reply(method, user_data_payload(state))
         }
         "guildbox.PickShareBox" => {
             let box_id = decode_varint_u64_field(request_args, 1);
-            Some(pick_box_payload(
-                account,
-                "shareBoxes",
-                box_id,
-                response_err,
-                response_err_msg,
-            ))
+            pick_box_result(method, account, "shareBoxes", box_id)
         }
         "guildbox.PickTaskBox" => {
             let box_id = decode_varint_u64_field(request_args, 1);
-            Some(pick_box_payload(
-                account,
-                "taskBoxes",
-                box_id,
-                response_err,
-                response_err_msg,
-            ))
+            pick_box_result(method, account, "taskBoxes", box_id)
         }
         "guildbox.PickPointsBox" => {
             let state = guild_box_state_mut(account);
             let count = json_i64(state, "pointsBoxCount").unwrap_or_default();
             if count <= 0 {
-                *context.response_err = 1;
-                *context.response_err_msg = "guild points box is empty".to_owned();
-                return Some(Vec::new());
+                return invalid("guild points box is empty");
             }
             state["pointsBoxCount"] = json!(count - 1);
             let reward_id = catalog
@@ -71,7 +59,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             );
             append_method_push(context.pre_pushes, "user.UpdateUserInfo", refreshes.0);
             append_method_push(context.pre_pushes, "bag.UpdateBagData", refreshes.1);
-            Some(reward_list_payload(0, &rewards))
+            reply(method, reward_list_payload(0, &rewards))
         }
         "guildbox.PickAllTaskBox" => {
             let state = guild_box_state_mut(account);
@@ -80,15 +68,30 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                     item["isPick"] = json!(true);
                 }
             }
-            Some(reward_list_payload(0, &[]))
+            reply(method, reward_list_payload(0, &[]))
         }
-        "guildbox.GuildData" => Some(guild_data_payload(account)),
+        "guildbox.GuildData" => reply(method, guild_data_payload(account)),
         "guildbox.UserData" => {
             let state = guild_box_state_mut(account);
-            Some(user_data_payload(state))
+            reply(method, user_data_payload(state))
         }
-        "guildbox.UserAllList" => Some(all_list_payload(account)),
-        _ => None,
+        "guildbox.UserAllList" => reply(method, all_list_payload(account)),
+        _ => HandlerResult::Empty,
+    }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
+}
+
+fn invalid(message: &'static str) -> HandlerResult {
+    HandlerResult::Error(GameError::InvalidRequest(message))
+}
+
+fn pick_box_result(method: &str, account: &mut Value, key: &str, box_id: u64) -> HandlerResult {
+    match pick_box_payload(account, key, box_id) {
+        Ok(payload) => reply(method, payload),
+        Err(message) => invalid(message),
     }
 }
 
@@ -108,17 +111,9 @@ fn guild_box_state_mut(account: &mut Value) -> &mut Value {
         })
 }
 
-fn pick_box_payload(
-    account: &mut Value,
-    key: &str,
-    box_id: u64,
-    response_err: &mut i32,
-    response_err_msg: &mut String,
-) -> Vec<u8> {
+fn pick_box_payload(account: &mut Value, key: &str, box_id: u64) -> Result<Vec<u8>, &'static str> {
     if box_id == 0 {
-        *response_err = 1;
-        *response_err_msg = "guild box id is invalid".to_owned();
-        return Vec::new();
+        return Err("guild box id is invalid");
     }
     let state = guild_box_state_mut(account);
     let found = state
@@ -129,17 +124,13 @@ fn pick_box_payload(
         .find(|item| json_u64(item, "boxId") == Some(box_id));
     if let Some(item) = found {
         if json_bool(item, "isPick") {
-            *response_err = 1;
-            *response_err_msg = "guild box was already picked".to_owned();
-            return Vec::new();
+            return Err("guild box was already picked");
         }
         item["isPick"] = json!(true);
     } else {
-        *response_err = 1;
-        *response_err_msg = "guild box was not found".to_owned();
-        return Vec::new();
+        return Err("guild box was not found");
     }
-    reward_list_payload(box_id, &[])
+    Ok(reward_list_payload(box_id, &[]))
 }
 
 fn guild_data_payload(account: &mut Value) -> Vec<u8> {
@@ -215,7 +206,18 @@ fn reward_list_payload(box_id: u64, rewards: &[ShopReward]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use crate::common::response::HandlerResult;
+
     use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
+    }
 
     #[test]
     fn user_data_payload_uses_jp_anonymous_and_points_fields() {

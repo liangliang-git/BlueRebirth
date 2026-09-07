@@ -1,34 +1,40 @@
 use serde_json::{json, Value};
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let state = context.state;
     let account = &mut *context.account;
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
 
     match method {
-        "friend.GetFriendMainData" => Some(friend_main_payload(
-            state,
-            account.as_deref().unwrap_or(&Value::Null),
-        )),
-        "friend.GetFriendList" => Some(friend_list_payload(
-            state,
-            account.as_deref().unwrap_or(&Value::Null),
-            "friends",
-            1,
-        )),
-        "friend.GetRecommendList" => Some(friend_list_payload(
-            state,
-            account.as_deref().unwrap_or(&Value::Null),
-            "recommend",
-            0,
-        )),
+        "friend.GetFriendMainData" => reply(
+            method,
+            friend_main_payload(state, account.as_deref().unwrap_or(&Value::Null)),
+        ),
+        "friend.GetFriendList" => reply(
+            method,
+            friend_list_payload(
+                state,
+                account.as_deref().unwrap_or(&Value::Null),
+                "friends",
+                1,
+            ),
+        ),
+        "friend.GetRecommendList" => reply(
+            method,
+            friend_list_payload(
+                state,
+                account.as_deref().unwrap_or(&Value::Null),
+                "recommend",
+                0,
+            ),
+        ),
         "friend.SearchUser" => {
             let requested_uid = decode_varint_u64_field(request_args, 1);
             let requested_name = decode_string_field(request_args, 2).unwrap_or_default();
@@ -38,80 +44,75 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             let own_name = json_string(character, "name").unwrap_or_default();
             let matches = (requested_uid != 0 && requested_uid == own_uid)
                 || (!requested_name.is_empty() && requested_name == own_name);
-            Some(friend_common_list_payload(
-                state,
-                current,
-                matches.then_some(own_uid),
-                0,
-            ))
+            reply(
+                method,
+                friend_common_list_payload(state, current, matches.then_some(own_uid), 0),
+            )
         }
         "friend.Apply" => {
             let uid = decode_varint_u64_field(request_args, 1);
-            if let Some(account) = account.as_mut().map(|value| &mut **value) {
-                let own_uid = own_uid(account);
-                if uid == 0 || uid == own_uid {
-                    *response_err = 1;
-                    *response_err_msg = "friend application target is invalid".to_owned();
-                } else {
-                    add_friend_id(account, "applyList", uid);
-                }
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            let own_uid = own_uid(account);
+            if uid == 0 || uid == own_uid {
+                return invalid("friend application target is invalid");
             }
-            Some(Vec::new())
+            add_friend_id(account, "applyList", uid);
+            HandlerResult::PushOnly
         }
         "friend.Accept" => {
             let uid = decode_varint_u64_field(request_args, 1);
-            if let Some(account) = account.as_mut().map(|value| &mut **value) {
-                if uid == 0 || !remove_friend_id(account, "applyList", uid) {
-                    *response_err = 1;
-                    *response_err_msg = "friend application was not found".to_owned();
-                } else {
-                    add_friend_id(account, "friends", uid);
-                }
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            if uid == 0 || !remove_friend_id(account, "applyList", uid) {
+                return invalid("friend application was not found");
             }
-            Some(Vec::new())
+            add_friend_id(account, "friends", uid);
+            HandlerResult::PushOnly
         }
         "friend.Refuse" => {
             let uid = decode_varint_u64_field(request_args, 1);
-            if let Some(account) = account.as_mut().map(|value| &mut **value) {
-                if uid == 0 || !remove_friend_id(account, "applyList", uid) {
-                    *response_err = 1;
-                    *response_err_msg = "friend application was not found".to_owned();
-                }
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            if uid == 0 || !remove_friend_id(account, "applyList", uid) {
+                return invalid("friend application was not found");
             }
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "friend.DeleteFriend" => {
             let uid = decode_varint_u64_field(request_args, 1);
-            if let Some(account) = account.as_mut().map(|value| &mut **value) {
-                if uid == 0 || !remove_friend_id(account, "friends", uid) {
-                    *response_err = 1;
-                    *response_err_msg = "friend was not found".to_owned();
-                }
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            if uid == 0 || !remove_friend_id(account, "friends", uid) {
+                return invalid("friend was not found");
             }
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "friend.SetBlack" => {
             let uid = decode_varint_u64_field(request_args, 1);
-            if let Some(account) = account.as_mut().map(|value| &mut **value) {
-                if uid == 0 {
-                    *response_err = 1;
-                    *response_err_msg = "blacklist target is invalid".to_owned();
-                } else {
-                    remove_friend_id(account, "friends", uid);
-                    add_friend_id(account, "blackList", uid);
-                }
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            if uid == 0 {
+                return invalid("blacklist target is invalid");
             }
-            Some(Vec::new())
+            remove_friend_id(account, "friends", uid);
+            add_friend_id(account, "blackList", uid);
+            HandlerResult::PushOnly
         }
         "friend.DeleteBlack" => {
             let uid = decode_varint_u64_field(request_args, 1);
-            if let Some(account) = account.as_mut().map(|value| &mut **value) {
-                if uid == 0 || !remove_friend_id(account, "blackList", uid) {
-                    *response_err = 1;
-                    *response_err_msg = "blacklist entry was not found".to_owned();
-                }
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            if uid == 0 || !remove_friend_id(account, "blackList", uid) {
+                return invalid("blacklist entry was not found");
             }
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "friend.UpdateUserState" => {
             let mut output = Vec::new();
@@ -121,10 +122,18 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 decode_varint_field(request_args, 1).max(0) as u64,
             );
             append_varint_field(&mut output, 2, decode_varint_u64_field(request_args, 2));
-            Some(output)
+            reply(method, output)
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
+}
+
+fn invalid(message: &'static str) -> HandlerResult {
+    HandlerResult::Error(GameError::InvalidRequest(message))
 }
 
 fn friend_main_payload(state: &ServerState, account: &Value) -> Vec<u8> {
@@ -230,6 +239,22 @@ fn friend_ids(account: &Value, key: &str) -> Vec<u64> {
         .and_then(Value::as_array)
         .map(|ids| ids.iter().filter_map(Value::as_u64).collect())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::response::HandlerResult;
+
+    use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
+    }
 }
 
 fn add_friend_id(account: &mut Value, key: &str, uid: u64) {
