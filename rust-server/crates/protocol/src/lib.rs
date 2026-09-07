@@ -268,6 +268,115 @@ impl Decode for HeroAddExpRequest {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EquipMaterialRequest {
+    pub template_id: i32,
+    pub amount: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EquipEnhanceRequest {
+    pub equip_id: u64,
+    pub materials: Vec<EquipMaterialRequest>,
+}
+
+impl Decode for EquipEnhanceRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let equip_id = optional_u64(&fields, 1, "equipment enhance has duplicate equipment id")?;
+        if equip_id == 0 {
+            return Err(ProtocolError::Invalid(
+                "equipment enhance is missing equipment id",
+            ));
+        }
+        let mut reader = PbReader::new(payload);
+        let mut materials = Vec::new();
+        while let Some((field, wire)) = reader.next_field()? {
+            if field == 2 && wire == 2 {
+                if materials.len() >= 99 {
+                    return Err(ProtocolError::Invalid(
+                        "equipment enhance has too many materials",
+                    ));
+                }
+                let fields = decode_varint_fields(reader.read_bytes()?)?;
+                materials.push(EquipMaterialRequest {
+                    template_id: required_field(
+                        &fields,
+                        1,
+                        "equipment material is missing template id",
+                    )?,
+                    amount: required_field(&fields, 2, "equipment material is missing amount")?,
+                });
+            } else {
+                reader.skip(wire)?;
+            }
+        }
+        Ok(Self {
+            equip_id,
+            materials,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EquipDismantleRequest {
+    pub equip_ids: Vec<u64>,
+}
+
+impl Decode for EquipDismantleRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let values = fields.get(&1).map(Vec::as_slice).unwrap_or_default();
+        if values.is_empty() || values.len() > 99 {
+            return Err(ProtocolError::Invalid(
+                "equipment dismantle request is invalid",
+            ));
+        }
+        let mut equip_ids = Vec::with_capacity(values.len());
+        for value in values {
+            if *value == 0 || equip_ids.contains(value) {
+                return Err(ProtocolError::Invalid(
+                    "equipment dismantle ids are invalid",
+                ));
+            }
+            equip_ids.push(*value);
+        }
+        Ok(Self { equip_ids })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EquipRiseStarRequest {
+    pub equip_id: u64,
+    pub consume_ids: Vec<u64>,
+}
+
+impl Decode for EquipRiseStarRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let equip_id = optional_u64(&fields, 1, "equipment rise star has duplicate equipment id")?;
+        let values = fields.get(&2).map(Vec::as_slice).unwrap_or_default();
+        if equip_id == 0 || values.is_empty() || values.len() > 99 {
+            return Err(ProtocolError::Invalid(
+                "equipment rise star request is invalid",
+            ));
+        }
+        let mut consume_ids = Vec::with_capacity(values.len());
+        for value in values {
+            if *value == 0 || *value == equip_id || consume_ids.contains(value) {
+                return Err(ProtocolError::Invalid(
+                    "equipment rise star ids are invalid",
+                ));
+            }
+            consume_ids.push(*value);
+        }
+        Ok(Self {
+            equip_id,
+            consume_ids,
+        })
+    }
+}
+
 impl Decode for HeroChangeNameRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

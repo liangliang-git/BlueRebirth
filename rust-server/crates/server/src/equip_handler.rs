@@ -31,9 +31,14 @@ pub(super) fn handle_typed(
             let Some(catalog) = equip_catalog else {
                 return HandlerResult::Empty;
             };
-            let requested = decode_repeated_varint_field(request_args, 1)
+            let Ok(request) = EquipDismantleRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "equipment dismantle request is invalid",
+                ));
+            };
+            let requested = request
+                .equip_ids
                 .into_iter()
-                .filter_map(|id| u64::try_from(id).ok())
                 .filter_map(|id| blueoath_domain::EquipId::new(id).ok())
                 .collect::<std::collections::BTreeSet<_>>();
             if requested.is_empty() {
@@ -134,10 +139,15 @@ pub(super) fn handle_typed(
             let Some(catalog) = equip_catalog else {
                 return HandlerResult::Empty;
             };
-            let equip_id = decode_varint_u64_field(request_args, 1);
-            let consume_ids = decode_repeated_varint_field(request_args, 2)
+            let Ok(request) = EquipRiseStarRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "equipment rise star request is invalid",
+                ));
+            };
+            let equip_id = request.equip_id;
+            let consume_ids = request
+                .consume_ids
                 .into_iter()
-                .filter_map(|id| u64::try_from(id).ok())
                 .filter_map(|id| blueoath_domain::EquipId::new(id).ok())
                 .collect::<Vec<_>>();
             let Some(equip_id) = blueoath_domain::EquipId::new(equip_id).ok() else {
@@ -310,7 +320,17 @@ pub(super) fn handle_typed(
             let Some(catalog) = equip_catalog else {
                 return HandlerResult::Empty;
             };
-            let (equip_id, materials) = decode_equip_enhance_request(request_args);
+            let Ok(request) = EquipEnhanceRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "equipment enhancement request is invalid",
+                ));
+            };
+            let equip_id = request.equip_id;
+            let materials = request
+                .materials
+                .iter()
+                .map(|material| (material.template_id, material.amount))
+                .collect::<Vec<_>>();
             if materials.is_empty() {
                 return HandlerResult::Empty;
             }
