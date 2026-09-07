@@ -1813,3 +1813,83 @@ fn fashion_replace_reward_payload(account: &Value) -> Vec<u8> {
     }
     output
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_hero_relationships_use_domain_state() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("compat-typed").unwrap(),
+            "Captain",
+        );
+        account.inventory.items.insert(
+            blueoath_domain::TemplateId::new(OATH_RING_TEMPLATE as u64).unwrap(),
+            1,
+        );
+        let state = ServerState::new("compat-typed", "Captain", "test");
+        let mut pushes = Vec::new();
+        let mut marry = Vec::new();
+        append_varint_field(&mut marry, 1, 1);
+        append_varint_field(&mut marry, 2, 1);
+        assert!(matches!(
+            handle_typed(
+                &state,
+                &mut account,
+                "hero.Marry",
+                &marry,
+                None,
+                &mut pushes,
+            ),
+            HandlerResult::PushOnly
+        ));
+        assert_eq!(
+            account.activities.progress.get("compat:hero:1:marryType"),
+            Some(&1)
+        );
+        assert!(matches!(
+            handle_typed(
+                &state,
+                &mut account,
+                "hero.Marry",
+                &marry,
+                None,
+                &mut pushes,
+            ),
+            HandlerResult::Error(_)
+        ));
+
+        let item_id: i32 = 99_999;
+        account
+            .inventory
+            .items
+            .insert(blueoath_domain::TemplateId::new(item_id as u64).unwrap(), 2);
+        let affection_catalog = AffectionCatalog {
+            exp_by_item: [(item_id, 100)].into_iter().collect(),
+        };
+        let mut gift = Vec::new();
+        append_varint_field(&mut gift, 1, 1);
+        append_varint_field(&mut gift, 2, item_id as u64);
+        append_varint_field(&mut gift, 3, 2);
+        assert!(matches!(
+            handle_typed(
+                &state,
+                &mut account,
+                "hero.AddAffection",
+                &gift,
+                Some(&affection_catalog),
+                &mut pushes,
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account.dock.heroes.values().next().unwrap().affection,
+            500_200
+        );
+        assert!(!account
+            .inventory
+            .items
+            .contains_key(&blueoath_domain::TemplateId::new(item_id as u64).unwrap()));
+    }
+}
