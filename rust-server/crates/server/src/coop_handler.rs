@@ -54,11 +54,10 @@ const COPY_ID_FIELD: u8 = 2;
 const HERO_LIST_FIELD: u8 = 4;
 
 pub(super) fn handles_typed(method: &str) -> bool {
-    method.starts_with("matchsvr_")
-        || method.starts_with("matchsvr.")
-        || method.starts_with("room.")
-        || method.starts_with("battle.")
-        || canonical_typed_method(method).is_some()
+    matches!(
+        GameMethod::parse(method).family(),
+        MethodFamily::MatchServer | MethodFamily::Room | MethodFamily::Battle
+    ) || canonical_typed_method(method).is_some()
 }
 
 pub(super) fn handle_typed(
@@ -701,9 +700,10 @@ fn canonical_typed_method(method: &str) -> Option<&str> {
         | "battle.createBattleInfo"
         | "room.StartMatch"
         | "room.StopMatch" => Some(method),
-        _ if method.starts_with("matchsvr.")
-            || method.starts_with("room.")
-            || method.starts_with("battle.") =>
+        _ if matches!(
+            GameMethod::parse(method).family(),
+            MethodFamily::MatchServer | MethodFamily::Room | MethodFamily::Battle
+        ) =>
         {
             Some(method)
         }
