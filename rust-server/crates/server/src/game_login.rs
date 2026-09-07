@@ -1416,13 +1416,14 @@ where
             || method.is_family(MethodFamily::BuildNotes)
             || method.is_family(MethodFamily::Discuss) =>
         {
+            let mut building_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 let result = building_handler::handle_typed_with_multipliers(
                     typed,
                     request.method.as_str(),
                     request_args,
                     current_unix_seconds(),
-                    &mut pre_pushes,
+                    &mut building_effects,
                     building_handler::BuildingTypedCatalogs {
                         building: catalogs.buildings,
                         oil_multiplier: state.building_oil_multiplier,
@@ -1441,6 +1442,12 @@ where
                     "building request requires typed account",
                 ))
             };
+            apply_response_effects(
+                building_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }

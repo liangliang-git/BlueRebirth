@@ -1,5 +1,6 @@
 use super::catalog::GameLoginCatalogs;
 use super::common::error::GameError;
+use super::common::response::ResponseEffects;
 use super::game_login::pass_mini_game;
 use super::{
     add_bag_item, add_building_state, adjust_character_i64, advance_task_event,
@@ -376,7 +377,7 @@ fn typed_building_projection_reads_normalized_building_rows() {
 fn typed_building_mutations_update_normalized_state() {
     let mut account =
         NewAccountFactory::create(ProfileId::new("typed-building-write").unwrap(), "Base");
-    let mut pushes = Vec::new();
+    let mut effects = ResponseEffects::default();
     let mut add_args = Vec::new();
     append_varint_field(&mut add_args, 1, 77);
     append_varint_field(&mut add_args, 2, 9);
@@ -385,7 +386,7 @@ fn typed_building_mutations_update_normalized_state() {
         "building.AddBuilding",
         &add_args,
         123,
-        &mut pushes,
+        &mut effects,
         None,
     );
     assert!(matches!(
@@ -395,7 +396,6 @@ fn typed_building_mutations_update_normalized_state() {
     assert_eq!(account.buildings.levels.get(&3), Some(&1));
     assert_eq!(account.buildings.template_ids.get(&3), Some(&77));
     assert_eq!(account.buildings.land_indices.get(&3), Some(&9));
-    assert_eq!(pushes.len(), 1);
 
     let mut assignment_args = Vec::new();
     append_varint_field(&mut assignment_args, 1, 2);
@@ -405,7 +405,7 @@ fn typed_building_mutations_update_normalized_state() {
         "building.SetHero",
         &assignment_args,
         124,
-        &mut pushes,
+        &mut effects,
         None,
     );
     assert!(matches!(
@@ -424,7 +424,7 @@ fn typed_building_mutations_update_normalized_state() {
         "building.UpgradeBuilding",
         &level_args,
         124,
-        &mut pushes,
+        &mut effects,
         None,
     );
     assert!(matches!(
@@ -432,6 +432,7 @@ fn typed_building_mutations_update_normalized_state() {
         super::common::response::HandlerResult::PushOnly
     ));
     assert_eq!(account.buildings.levels.get(&3), Some(&2));
+    assert_eq!(effects.into_parts().0.len(), 3);
 }
 
 #[test]
@@ -462,7 +463,7 @@ fn typed_building_production_persists_and_collects_typed_reward() {
             item_amount: 2,
         },
     );
-    let mut pushes = Vec::new();
+    let mut effects = ResponseEffects::default();
     let mut produce_args = Vec::new();
     append_varint_field(&mut produce_args, 1, 2);
     append_varint_field(&mut produce_args, 2, 9);
@@ -472,7 +473,7 @@ fn typed_building_production_persists_and_collects_typed_reward() {
         "building.ProduceItem",
         &produce_args,
         100,
-        &mut pushes,
+        &mut effects,
         Some(&catalog),
     );
     assert!(matches!(
@@ -488,7 +489,7 @@ fn typed_building_production_persists_and_collects_typed_reward() {
         "building.ReceiveItem",
         &receive_args,
         220,
-        &mut pushes,
+        &mut effects,
         Some(&catalog),
     );
     assert!(matches!(
@@ -525,13 +526,13 @@ fn typed_construction_queue_starts_and_quick_finishes() {
     append_varint_field(&mut project, 2, 30);
     let mut args = Vec::new();
     append_message_field(&mut args, 1, &project);
-    let mut pushes = Vec::new();
+    let mut effects = ResponseEffects::default();
     let result = super::handle_typed_building(
         &mut account,
         "build.BuildingByFormula",
         &args,
         100,
-        &mut pushes,
+        &mut effects,
         None,
     );
     assert!(matches!(
@@ -551,7 +552,7 @@ fn typed_construction_queue_starts_and_quick_finishes() {
         "build.BuildQuicklyFinish",
         &finish_args,
         101,
-        &mut pushes,
+        &mut effects,
         None,
     );
     assert!(matches!(
@@ -568,7 +569,7 @@ fn typed_construction_queue_starts_and_quick_finishes() {
         "build.BuildReceive",
         &[],
         102,
-        &mut pushes,
+        &mut effects,
         None,
     );
     assert!(matches!(

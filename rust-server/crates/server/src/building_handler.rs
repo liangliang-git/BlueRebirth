@@ -1,5 +1,5 @@
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -15,7 +15,7 @@ pub(crate) fn handle_typed(
     method: &str,
     request_args: &[u8],
     now: u32,
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
     building_catalog: Option<&BuildingCatalog>,
 ) -> HandlerResult {
     handle_typed_with_multipliers(
@@ -23,7 +23,7 @@ pub(crate) fn handle_typed(
         method,
         request_args,
         now,
-        pre_pushes,
+        effects,
         BuildingTypedCatalogs {
             building: building_catalog,
             oil_multiplier: 1.0,
@@ -37,7 +37,7 @@ pub(super) fn handle_typed_with_multipliers(
     method: &str,
     request_args: &[u8],
     now: u32,
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
     catalogs: BuildingTypedCatalogs<'_>,
 ) -> HandlerResult {
     let building_catalog = catalogs.building;
@@ -61,7 +61,7 @@ pub(super) fn handle_typed_with_multipliers(
                     "building placement is invalid",
                 ));
             };
-            append_typed_building_refresh(pre_pushes, account, now);
+            append_typed_building_refresh(effects, account, now);
             let mut payload = Vec::new();
             append_varint_field(&mut payload, 1, building_id);
             HandlerResult::Reply(Response::raw(method, payload))
@@ -83,7 +83,7 @@ pub(super) fn handle_typed_with_multipliers(
                     "building level change is invalid",
                 ));
             }
-            append_typed_building_refresh(pre_pushes, account, now);
+            append_typed_building_refresh(effects, account, now);
             HandlerResult::PushOnly
         }
         "building.FinishBuilding" | "building.UseStrengthSpeedup" => {
@@ -99,7 +99,7 @@ pub(super) fn handle_typed_with_multipliers(
             if !account.buildings.levels.contains_key(&building_id) {
                 return HandlerResult::Error(GameError::InvalidRequest("building was not found"));
             }
-            append_typed_building_refresh(pre_pushes, account, now);
+            append_typed_building_refresh(effects, account, now);
             HandlerResult::PushOnly
         }
         "building.ProduceItem" | "building.ComposeItem" => {
@@ -116,7 +116,7 @@ pub(super) fn handle_typed_with_multipliers(
                     "building production request is invalid",
                 ));
             }
-            append_typed_building_refresh(pre_pushes, account, now);
+            append_typed_building_refresh(effects, account, now);
             HandlerResult::PushOnly
         }
         "building.ReceiveBuilding"
@@ -158,12 +158,11 @@ pub(super) fn handle_typed_with_multipliers(
             for reward in &rewards {
                 apply_typed_building_reward(account, reward);
             }
-            append_typed_building_refresh(pre_pushes, account, now);
-            append_method_push(
-                pre_pushes,
+            append_typed_building_refresh(effects, account, now);
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
+            ));
             HandlerResult::Reply(Response::raw(method, encode_rewards_list(&rewards)))
         }
         "build.BuildInfo" | "build.BuildsInfo" => HandlerResult::Reply(Response::raw(
@@ -181,16 +180,14 @@ pub(super) fn handle_typed_with_multipliers(
                     "construction request cannot start",
                 ));
             }
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "build.BuildsInfo",
                 typed_construction_info_payload(account, now),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
+            ));
             HandlerResult::PushOnly
         }
         "build.BuildQuicklyFinish" => {
@@ -204,16 +201,14 @@ pub(super) fn handle_typed_with_multipliers(
                     "construction quick-finish failed",
                 ));
             }
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "build.BuildsInfo",
                 typed_construction_info_payload(account, now),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
+            ));
             HandlerResult::PushOnly
         }
         "build.BuildReceive" => {
@@ -227,20 +222,18 @@ pub(super) fn handle_typed_with_multipliers(
                     "no completed construction",
                 ));
             };
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "hero.UpdateHeroBagData",
                 HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "build.BuildsInfo",
                 typed_construction_info_payload(account, now),
-            );
+            ));
             HandlerResult::Reply(Response::raw(method, encode_rewards_list(&rewards)))
         }
         "building.UpdateHeroAddition" => {
-            append_typed_building_refresh(pre_pushes, account, now);
+            append_typed_building_refresh(effects, account, now);
             HandlerResult::PushOnly
         }
         "building.SetHero" | "building.SetBuildingListHero" => {
@@ -264,7 +257,7 @@ pub(super) fn handle_typed_with_multipliers(
                     "building assignment is invalid",
                 ));
             }
-            append_typed_building_refresh(pre_pushes, account, now);
+            append_typed_building_refresh(effects, account, now);
             HandlerResult::PushOnly
         }
         "buildnotes.GetNotesList" | "buildnotes.GiveLike" => {
@@ -952,13 +945,12 @@ fn set_typed_building_assignments(
 }
 
 fn append_typed_building_refresh(
-    pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
     account: &blueoath_domain::AccountState,
     now: u32,
 ) {
-    append_method_push(
-        pushes,
+    effects.push_pre(Response::raw(
         "building.UpdateBuildingInfo",
         UserBuildingInfoCodec::encode(&building_info_from_typed_account(account, now)),
-    );
+    ));
 }
