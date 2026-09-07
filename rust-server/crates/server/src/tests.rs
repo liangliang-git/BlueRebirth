@@ -123,6 +123,7 @@ async fn typed_user_routes_update_account_state_without_json_account() {
 #[test]
 fn typed_fleet_projection_reads_normalized_fleet_rows() {
     let mut account = NewAccountFactory::create(ProfileId::new("typed-fleet").unwrap(), "Fleet");
+    account.fleet.fleets.clear();
     account.fleet.fleets.insert(
         FleetId::new(3).unwrap(),
         FleetRecord {
@@ -202,6 +203,9 @@ fn typed_bag_projection_reads_normalized_inventory_rows() {
 #[test]
 fn typed_building_projection_reads_normalized_building_rows() {
     let mut account = NewAccountFactory::create(ProfileId::new("typed-building").unwrap(), "Base");
+    account.buildings.levels.clear();
+    account.buildings.template_ids.clear();
+    account.buildings.land_indices.clear();
     account.buildings.levels.insert(9, 4);
     account.buildings.template_ids.insert(9, 41);
     account.buildings.land_indices.insert(9, 6);

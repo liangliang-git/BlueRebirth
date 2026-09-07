@@ -165,7 +165,10 @@ mod tests {
         .unwrap();
         ResourceService::debit(&mut account, CurrencyKind::Gold, 10).unwrap();
         assert_eq!(account.resources.amount(CurrencyKind::Gold).get(), 20);
-        assert_eq!(account.resources.amount(CurrencyKind::Diamond).get(), 2);
+        assert_eq!(
+            account.resources.amount(CurrencyKind::Diamond).get(),
+            10_002
+        );
     }
 
     #[test]
