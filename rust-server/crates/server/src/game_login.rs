@@ -140,7 +140,6 @@ where
         sync_typed_building_assignments(typed, legacy);
         sync_typed_preset_fleet_state(typed, legacy);
         sync_typed_daily_copy_state(typed, legacy, current_unix_seconds());
-        sync_typed_task_state(typed, legacy);
     }
     if std::env::var_os("BLUEOATH_TRACE_METHODS").is_some() {
         eprintln!(
@@ -385,7 +384,7 @@ where
             if let Some(account) = account.as_deref_mut() {
                 advance_task_event(account, task_catalog, 1, 1, current_unix_seconds());
                 if let Some(typed) = typed_account.as_deref_mut() {
-                    sync_typed_task_state(typed, account);
+                    advance_typed_task_event(typed, task_catalog, 1, 1);
                 }
                 if account.get("guild").is_some() {
                     guild_handler::push_guild_state(&mut post_pushes, account);
@@ -2133,6 +2132,9 @@ where
             );
             if battle_task_progress_enabled(battle_catalog, copy_id) {
                 advance_task_event(account, task_catalog, 2, 1, current_unix_seconds());
+                if let Some(typed) = typed_account.as_deref_mut() {
+                    advance_typed_task_event(typed, task_catalog, 2, 1);
+                }
             }
             // Client task/achievement goals encode exact clear targets in goal[1]. Keep
             // progression scoped to current copy instead of advancing every same-event row.
@@ -2145,6 +2147,9 @@ where
                     1,
                     current_unix_seconds(),
                 );
+                if let Some(typed) = typed_account.as_deref_mut() {
+                    advance_typed_task_event(typed, task_catalog, event_type, 1);
+                }
             }
             // Battle completion grants configured commander and ship experience. Apply
             // level-up rollover immediately so full XP no longer sticks at current level.
@@ -2192,6 +2197,9 @@ where
             };
             if let Some(event_type) = specialized_event {
                 advance_task_event(account, task_catalog, event_type, 1, current_unix_seconds());
+                if let Some(typed) = typed_account.as_deref_mut() {
+                    advance_typed_task_event(typed, task_catalog, event_type, 1);
+                }
             }
             let first_rewards = std::mem::take(&mut pass_rewards);
             if !first_rewards.is_empty() {
@@ -2310,13 +2318,6 @@ where
     if !typed_daily_copy_handled {
         if let (Some(typed), Some(legacy)) = (typed_account, account.as_deref()) {
             sync_typed_daily_copy_state(typed, legacy, current_unix_seconds());
-            if sync_typed_task_state(typed, legacy) {
-                append_method_push(
-                    &mut post_pushes,
-                    "task.TaskInfo",
-                    task_info_payload_from_typed_account(typed, task_catalog),
-                );
-            }
         }
     }
     for push in post_pushes {

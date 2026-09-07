@@ -182,51 +182,6 @@ pub(super) fn complete_typed_task(account: &mut blueoath_domain::AccountState, t
     account.tasks.claimed.insert(task_id);
 }
 
-/// Mirror legacy task records into normalized state until task handlers are fully typed.
-/// The mirror is request-scoped; normalized rows remain the persistence source of truth.
-pub(super) fn sync_typed_task_state(
-    account: &mut blueoath_domain::AccountState,
-    legacy: &Value,
-) -> bool {
-    let mut next_progress = std::collections::BTreeMap::new();
-    let mut next_types = std::collections::BTreeMap::new();
-    let mut next_completed = std::collections::BTreeSet::new();
-    let mut next_claimed = std::collections::BTreeSet::new();
-    if let Some(records) = legacy
-        .get("tasks")
-        .and_then(|tasks| tasks.get("records"))
-        .and_then(Value::as_array)
-    {
-        for record in records {
-            let task_id = value_i64_any(record, &["taskId", "task_id"]);
-            if task_id <= 0 {
-                continue;
-            }
-            let task_id = task_id as u64;
-            let task_type = value_i64_any(record, &["taskType", "task_type"]);
-            next_types.insert(task_id, task_type.max(0) as u32);
-            next_progress.insert(task_id, value_i64_any(record, &["count"]).max(0) as u64);
-            if value_i64_any(record, &["completed"]) != 0
-                || value_i64_any(record, &["finishTime", "finish_time"]) > 0
-            {
-                next_completed.insert(task_id);
-            }
-            if value_i64_any(record, &["rewardTime", "reward_time"]) > 0 {
-                next_claimed.insert(task_id);
-            }
-        }
-    }
-    let changed = account.tasks.progress != next_progress
-        || account.tasks.task_types != next_types
-        || account.tasks.completed != next_completed
-        || account.tasks.claimed != next_claimed;
-    account.tasks.progress = next_progress;
-    account.tasks.task_types = next_types;
-    account.tasks.completed = next_completed;
-    account.tasks.claimed = next_claimed;
-    changed
-}
-
 /// Advance normalized task counters from trusted server-side events.
 pub(super) fn advance_typed_task_event(
     account: &mut blueoath_domain::AccountState,
