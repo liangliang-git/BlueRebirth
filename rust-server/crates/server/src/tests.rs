@@ -47,10 +47,10 @@ use super::{
     BattleFleetReward, BuildShipCatalog, BuildingCatalog, BuildingConfig, ChapterCatalog,
     CommanderLevelCatalog, EquipCatalog, EquipLevelbreakRule, EquipNewTestCatalog, EquipNum,
     EquipRenovateRule, HeroBreakdownCatalog, HeroLevelCatalog, HeroSkillUpgradeCatalog,
-    MailTemplate, RecipeConfig, ServerConfig, ServerState, ShipAdvanceCatalog, ShipBreakCatalog,
-    ShipRemouldCatalog, ShipStat, ShipStatCatalog, ShopCatalog, ShopCost, ShopGood, ShopReward,
-    SupportCatalog, SupportFleetItem, TalentCatalog, TalentNode, TaskCatalog, TaskDefinition,
-    UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
+    MailTemplate, RecipeConfig, ServerConfig, ServerState, ShipAdvanceCatalog, ShipAdvanceConfig,
+    ShipBreakCatalog, ShipRemouldCatalog, ShipStat, ShipStatCatalog, ShopCatalog, ShopCost,
+    ShopGood, ShopReward, SupportCatalog, SupportFleetItem, TalentCatalog, TalentNode, TaskCatalog,
+    TaskDefinition, UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
 };
 use blueoath_domain::{FleetId, FleetRecord, HeroId, NewAccountFactory, ProfileId, TemplateId};
 use blueoath_protocol::{
@@ -3178,12 +3178,20 @@ fn change_equip_is_atomic_and_rejects_equipment_owned_by_another_hero() {
 #[test]
 fn hero_max_level_breakthrough_uses_client_advance_config() {
     let mut catalog = ShipAdvanceCatalog::default();
-    catalog
-        .by_level
-        .insert(1, json!({"initial_level": 80, "max_level": 85}));
-    catalog
-        .by_level
-        .insert(2, json!({"initial_level": 85, "max_level": 90}));
+    catalog.by_level.insert(
+        1,
+        ShipAdvanceConfig {
+            initial_level: 80,
+            max_level: 85,
+        },
+    );
+    catalog.by_level.insert(
+        2,
+        ShipAdvanceConfig {
+            initial_level: 85,
+            max_level: 90,
+        },
+    );
     let mut account = json!({"dock": {"heroes": [
         {"heroId": 10, "level": 80, "advLv": 0}
     ]}});

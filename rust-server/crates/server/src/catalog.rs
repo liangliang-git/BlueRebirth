@@ -795,7 +795,13 @@ pub(super) struct ShipBreakCatalog {
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShipAdvanceCatalog {
     /// 下一次 AdvLv -> config_ship_advance row。
-    pub(super) by_level: std::collections::BTreeMap<i32, Value>,
+    pub(super) by_level: std::collections::BTreeMap<i32, ShipAdvanceConfig>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct ShipAdvanceConfig {
+    pub(super) initial_level: i32,
+    pub(super) max_level: i32,
 }
 
 #[derive(Clone, Debug, Default)]

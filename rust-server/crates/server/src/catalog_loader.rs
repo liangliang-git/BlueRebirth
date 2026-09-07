@@ -1603,12 +1603,21 @@ pub(super) fn load_ship_advance_catalog(client_path: Option<&PathBuf>) -> ShipAd
     let Some(client_path) = client_path else {
         return ShipAdvanceCatalog::default();
     };
-    ShipAdvanceCatalog {
-        by_level: read_config_rows(&config_dir(client_path).join("config_ship_advance.db"))
-            .into_iter()
-            .filter(|(level, _)| *level > 0)
-            .collect(),
-    }
+    let by_level = read_config_rows(&config_dir(client_path).join("config_ship_advance.db"))
+        .into_iter()
+        .filter_map(|(level, value)| {
+            let initial_level = json_i32(&value, "initial_level")?;
+            let max_level = json_i32(&value, "max_level")?;
+            (level > 0).then_some((
+                level,
+                ShipAdvanceConfig {
+                    initial_level,
+                    max_level,
+                },
+            ))
+        })
+        .collect();
+    ShipAdvanceCatalog { by_level }
 }
 
 pub(super) fn load_ship_remould_catalog(client_path: Option<&PathBuf>) -> ShipRemouldCatalog {

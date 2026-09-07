@@ -573,8 +573,8 @@ pub(super) fn hero_advance_max_level_state(
             .by_level
             .get(&next_level)
             .ok_or("max-level breakthrough config is missing")?;
-        let initial_level = json_i32(config, "initial_level").unwrap_or_default();
-        let max_level = json_i32(config, "max_level").unwrap_or_default();
+        let initial_level = config.initial_level;
+        let max_level = config.max_level;
         if initial_level <= 0 || max_level <= initial_level {
             return Err("max-level breakthrough config is invalid");
         }
