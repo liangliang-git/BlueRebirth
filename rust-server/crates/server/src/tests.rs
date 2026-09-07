@@ -5,8 +5,8 @@ use super::{
     add_bag_item, add_building_state, adjust_character_i64, advance_task_event,
     advance_task_event_with_param, append_bytes_field, append_message_field, append_varint_field,
     apply_hero_breakdown_rewards, apply_mail_reward, apply_shop_good, apply_strategy_state,
-    apply_talent_change_typed, auto_select_enhancement_materials, bag_info_from_account,
-    bag_info_from_typed_account, bag_item_count, bathroom_info_payload,
+    apply_talent_change_typed, apply_typed_mail_reward, auto_select_enhancement_materials,
+    bag_info_from_account, bag_info_from_typed_account, bag_item_count, bathroom_info_payload,
     battle_attack_payload_with_damage, battle_copy_passed, battle_enemy_ids,
     battle_pass_payload_with_experience, battle_pass_payload_with_rewards,
     battle_position_fleet_id, battle_session_fleet_ids, battle_start_payload, bootstrap_response,
@@ -53,7 +53,9 @@ use super::{
     ShopCost, ShopGood, ShopReward, SupportCatalog, SupportFleetItem, TalentCatalog, TalentNode,
     TaskCatalog, TaskDefinition, UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
 };
-use blueoath_domain::{FleetId, FleetRecord, HeroId, NewAccountFactory, ProfileId, TemplateId};
+use blueoath_domain::{
+    CurrencyKind, FleetId, FleetRecord, HeroId, NewAccountFactory, ProfileId, TemplateId,
+};
 use blueoath_protocol::{
     CopyRecordListCodec, EquipListCodec, FashionInfo, FashionList, HeroBagCodec, PresetFleet,
     PresetFleetCodec, PresetFleetInfo, TMessageCodec, TRequest,
@@ -3871,6 +3873,31 @@ fn mail_claim_updates_currency_and_bag_and_encodes_repeatable_mail() {
     assert!(payload.windows(2).any(|window| window == [0x08, 0x02]));
     assert!(payload.windows(2).any(|window| window == [0x10, 0x00]));
     assert!(payload.windows(2).any(|window| window == [0x58, 0x00]));
+}
+
+#[test]
+fn typed_mail_reward_updates_domain_resources_and_inventory() {
+    let mut account = NewAccountFactory::create(ProfileId::new("typed-mail").unwrap(), "Captain");
+    let currency_mail = MailTemplate {
+        mid: 1,
+        goods_type: 5,
+        config_id: 1,
+        num: 25,
+        ..MailTemplate::default()
+    };
+    let reward = apply_typed_mail_reward(&mut account, &currency_mail).unwrap();
+    assert_eq!(reward.goods_type, 5);
+    assert_eq!(account.resources.amount(CurrencyKind::Gold).get(), 25);
+
+    let item_mail = MailTemplate {
+        mid: 2,
+        goods_type: 3,
+        config_id: 7001,
+        num: 2,
+        ..MailTemplate::default()
+    };
+    apply_typed_mail_reward(&mut account, &item_mail).unwrap();
+    assert_eq!(account.inventory.items[&TemplateId::new(7001).unwrap()], 2);
 }
 
 #[test]

@@ -12,6 +12,28 @@ pub(super) fn apply_mail_reward(account: &mut Value, mail: &MailTemplate) {
     }
 }
 
+pub(super) fn apply_typed_mail_reward(
+    account: &mut blueoath_domain::AccountState,
+    mail: &MailTemplate,
+) -> Option<ShopReward> {
+    let reward = ShopReward {
+        goods_type: mail.goods_type,
+        item_id: mail.config_id,
+        num: mail.num,
+        instance_id: 0,
+    };
+    let typed_reward = ShopReward {
+        goods_type: if mail.goods_type == 5 { 5 } else { 1 },
+        ..reward
+    };
+    if !task_state::can_grant_typed_task_reward(account, &typed_reward)
+        || !task_state::grant_typed_task_reward(account, &typed_reward)
+    {
+        return None;
+    }
+    Some(reward)
+}
+
 pub(super) fn encode_mail_list_response(
     mails: &[MailTemplate],
     now: u32,
