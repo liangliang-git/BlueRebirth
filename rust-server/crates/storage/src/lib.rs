@@ -1729,6 +1729,19 @@ impl ProfileStore {
                 .plot_rewards
                 .insert(positive_u64(row?, "guide plot reward id")?);
         }
+        let mut statement = connection.prepare(
+            "SELECT position, hero_id
+             FROM supply_heroes WHERE profile_id = ?1 ORDER BY position",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })? {
+            let (_position, hero_value) = row?;
+            account
+                .supply
+                .hero_ids
+                .push(positive_hero_id(hero_value, "supply hero id")?);
+        }
 
         if let Some(values) = connection
             .query_row(
@@ -2912,6 +2925,17 @@ impl ProfileStore {
                 ],
             )?;
         }
+        for (position, hero_id) in account.supply.hero_ids.iter().enumerate() {
+            transaction.execute(
+                "INSERT INTO supply_heroes(profile_id, position, hero_id)
+                 VALUES (?1, ?2, ?3)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(position, "supply hero position")?,
+                    typed_i64(hero_id.get(), "supply hero id")?,
+                ],
+            )?;
+        }
         for (key, value) in &account.activities.progress {
             let (activity_id, progress_kind) = key.split_once('\u{1f}').unwrap_or((key, "value"));
             transaction.execute(
@@ -3508,6 +3532,7 @@ fn clear_normalized_account(
         "tower_progress",
         "guide_plot_rewards",
         "guide_settings",
+        "supply_heroes",
         "fleet_members",
         "fleets",
         "hero_equip_slots",
@@ -3630,6 +3655,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0024_copy_star_rewards_typed_state.sql"),
     include_str!("../../../migrations/0025_fashion_typed_state.sql"),
     include_str!("../../../migrations/0026_guide_typed_state.sql"),
+    include_str!("../../../migrations/0027_supply_typed_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

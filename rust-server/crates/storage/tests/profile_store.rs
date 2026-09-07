@@ -252,7 +252,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 26);
+    assert_eq!(version, 27);
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
@@ -410,6 +410,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
         .settings
         .insert("tutorial".to_owned(), "closed".to_owned());
     account.guide.plot_rewards.insert(42);
+    account.supply.hero_ids = vec![hero_id];
     account.invite_score.have_got_ssr = 1;
     account.invite_score.have_got_fashion = 1;
     account.invite_score.have_first_battle_win = 1;
@@ -646,6 +647,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
         Some(&"closed".to_owned())
     );
     assert!(loaded.guide.plot_rewards.contains(&42));
+    assert_eq!(loaded.supply.hero_ids, vec![hero_id]);
     assert_eq!(loaded.invite_score.have_got_ssr, 1);
     assert_eq!(loaded.invite_score.have_got_fashion, 1);
     assert_eq!(loaded.invite_score.have_first_battle_win, 1);

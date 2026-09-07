@@ -460,6 +460,11 @@ pub struct GuideState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SupplyState {
+    pub hero_ids: Vec<HeroId>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdventureRoleState {
     pub role_id: u64,
     pub level: u64,
@@ -774,6 +779,8 @@ pub struct AccountState {
     pub activities: ActivityState,
     #[serde(default)]
     pub guide: GuideState,
+    #[serde(default)]
+    pub supply: SupplyState,
     #[serde(default)]
     pub adventure: AdventureState,
     #[serde(default)]

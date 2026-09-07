@@ -278,19 +278,27 @@ pub(super) fn handle_typed(
             ))
         }
         "supply.SupplySwitch" => {
-            account
-                .activities
-                .progress
-                .retain(|key, _| !key.starts_with("compat:supply:hero:"));
-            for hero_id in decode_repeated_varint_field(request_args, 1)
+            let hero_ids = decode_repeated_varint_field(request_args, 1)
                 .into_iter()
                 .filter(|id| *id > 0)
+                .map(|id| id as u64)
+                .filter_map(|id| blueoath_domain::HeroId::new(id).ok())
+                .collect::<Vec<_>>();
+            if hero_ids.is_empty()
+                || hero_ids
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+                    != hero_ids.len()
+                || hero_ids
+                    .iter()
+                    .any(|hero_id| !account.dock.heroes.contains_key(hero_id))
             {
-                account
-                    .activities
-                    .progress
-                    .insert(format!("compat:supply:hero:{hero_id}"), 1);
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "supply hero list is invalid",
+                ));
             }
+            account.supply.hero_ids = hero_ids;
             append_method_push(
                 pre_pushes,
                 "user.UpdateUserInfo",
@@ -2009,7 +2017,6 @@ mod tests {
 
         let mut supply_switch = Vec::new();
         append_varint_field(&mut supply_switch, 1, 1);
-        append_varint_field(&mut supply_switch, 1, 2);
         assert!(matches!(
             handle_typed(
                 &mut account,
@@ -2020,10 +2027,10 @@ mod tests {
             ),
             HandlerResult::PushOnly
         ));
-        assert!(account
-            .activities
-            .progress
-            .contains_key("compat:supply:hero:1"));
+        assert_eq!(
+            account.supply.hero_ids,
+            vec![blueoath_domain::HeroId::new(1).unwrap()]
+        );
 
         assert!(matches!(
             handle_typed(&mut account, &state, "jopen.FetchHero", &[], &mut pushes,),
