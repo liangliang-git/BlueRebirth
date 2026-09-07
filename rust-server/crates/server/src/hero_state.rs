@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 
 use super::*;
 
+#[cfg(test)]
 pub(super) fn hero_intensify_state(
     account: &mut Value,
     catalog: &ShipIntensifyCatalog,

@@ -147,6 +147,7 @@ pub(super) fn start_study_state(
     true
 }
 
+#[cfg(test)]
 pub(super) fn finish_study_state(
     account: &mut Value,
     hero_id: u64,
@@ -156,6 +157,7 @@ pub(super) fn finish_study_state(
     finish_study_state_inner(account, hero_id, skill_id, now, false)
 }
 
+#[cfg(test)]
 pub(super) fn finish_study_state_force(
     account: &mut Value,
     hero_id: u64,
@@ -165,6 +167,7 @@ pub(super) fn finish_study_state_force(
     finish_study_state_inner(account, hero_id, skill_id, now, true)
 }
 
+#[cfg(test)]
 pub(super) fn finish_study_state_inner(
     account: &mut Value,
     hero_id: u64,
