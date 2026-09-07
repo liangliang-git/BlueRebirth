@@ -107,6 +107,7 @@ where
         fashion: fashion_catalog,
         equip: equip_catalog,
         hero_level: hero_level_catalog,
+        hero_breakdown: hero_breakdown_catalog,
         shop: shop_catalog,
         mails: mail_catalog,
         handbook_behaviours,
@@ -244,9 +245,12 @@ where
                     request.method.as_str(),
                     request_args,
                     &mut pre_pushes,
-                    hero_level_catalog,
-                    task_catalog,
-                    state.ship_exp_multiplier,
+                    hero_handler::HeroTypedCatalogs {
+                        hero_level: hero_level_catalog,
+                        tasks: task_catalog,
+                        breakdown: hero_breakdown_catalog,
+                        ship_exp_multiplier: state.ship_exp_multiplier,
+                    },
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result

@@ -4,15 +4,38 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
+pub(super) struct HeroTypedCatalogs<'a> {
+    pub(super) hero_level: Option<&'a HeroLevelCatalog>,
+    pub(super) tasks: Option<&'a TaskCatalog>,
+    pub(super) breakdown: Option<&'a HeroBreakdownCatalog>,
+    pub(super) ship_exp_multiplier: f64,
+}
+
+#[cfg(test)]
+impl HeroTypedCatalogs<'static> {
+    pub(super) const fn empty() -> Self {
+        Self {
+            hero_level: None,
+            tasks: None,
+            breakdown: None,
+            ship_exp_multiplier: 1.0,
+        }
+    }
+}
+
 pub(super) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
     pre_pushes: &mut Vec<Vec<u8>>,
-    hero_level_catalog: Option<&HeroLevelCatalog>,
-    task_catalog: Option<&TaskCatalog>,
-    ship_exp_multiplier: f64,
+    catalogs: HeroTypedCatalogs<'_>,
 ) -> HandlerResult {
+    let HeroTypedCatalogs {
+        hero_level: hero_level_catalog,
+        tasks: task_catalog,
+        breakdown: hero_breakdown_catalog,
+        ship_exp_multiplier,
+    } = catalogs;
     match method {
         "hero.GetHeroInfo" | "hero.GetHeroInfoByHeroIdArray" => {
             HandlerResult::Reply(Response::raw(
@@ -63,6 +86,170 @@ pub(super) fn handle_typed(
                 HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
             );
             HandlerResult::PushOnly
+        }
+        "hero.RetireHero" => {
+            let Some(hero_breakdown_catalog) = hero_breakdown_catalog else {
+                return HandlerResult::Empty;
+            };
+            let raw_ids = decode_repeated_i32_field(request_args, 1);
+            let is_dis_equip = decode_varint_u64_field(request_args, 2) != 0;
+            if raw_ids.is_empty() || raw_ids.len() > 99 || raw_ids.iter().any(|id| *id <= 0) {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "hero retire request is invalid",
+                ));
+            }
+            let mut requested = std::collections::BTreeSet::new();
+            for raw_id in raw_ids {
+                let Some(hero_id) =
+                    blueoath_domain::HeroId::new(u64::try_from(raw_id).unwrap_or_default()).ok()
+                else {
+                    return HandlerResult::Error(GameError::InvalidRequest("hero id is invalid"));
+                };
+                if !requested.insert(hero_id) {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "hero retire request has duplicate hero",
+                    ));
+                }
+            }
+            if requested.iter().any(|hero_id| {
+                account.character.secretary_id == Some(*hero_id)
+                    || account
+                        .fleet
+                        .fleets
+                        .values()
+                        .any(|fleet| fleet.members.contains(hero_id))
+                    || account
+                        .buildings
+                        .hero_assignments
+                        .values()
+                        .any(|hero_ids| hero_ids.contains(hero_id))
+            }) {
+                return HandlerResult::Error(GameError::InvalidRequest("hero is in use"));
+            }
+            let retired = requested
+                .iter()
+                .filter_map(|hero_id| account.dock.heroes.get(hero_id).cloned())
+                .collect::<Vec<_>>();
+            if retired.is_empty() {
+                return HandlerResult::Error(GameError::InvalidRequest("hero was not found"));
+            }
+            let retired_ids = retired
+                .iter()
+                .map(|hero| hero.id)
+                .collect::<std::collections::BTreeSet<_>>();
+            let retired_templates = retired
+                .iter()
+                .filter_map(|hero| i32::try_from(hero.template_id.get()).ok())
+                .collect::<Vec<_>>();
+            account
+                .dock
+                .heroes
+                .retain(|hero_id, _| !retired_ids.contains(hero_id));
+            if is_dis_equip {
+                account.dock.equipments.retain(|_, equipment| {
+                    !equipment
+                        .hero_id
+                        .is_some_and(|hero_id| retired_ids.contains(&hero_id))
+                });
+            } else {
+                for equipment in account.dock.equipments.values_mut() {
+                    if equipment
+                        .hero_id
+                        .is_some_and(|hero_id| retired_ids.contains(&hero_id))
+                    {
+                        equipment.hero_id = None;
+                    }
+                }
+            }
+            for fleet in account.fleet.fleets.values_mut() {
+                fleet
+                    .members
+                    .retain(|hero_id| !retired_ids.contains(hero_id));
+            }
+            for hero_ids in account.buildings.hero_assignments.values_mut() {
+                hero_ids.retain(|hero_id| !retired_ids.contains(hero_id));
+            }
+            account
+                .buildings
+                .hero_assignments
+                .retain(|_, hero_ids| !hero_ids.is_empty());
+            if account
+                .character
+                .secretary_id
+                .is_some_and(|hero_id| retired_ids.contains(&hero_id))
+            {
+                account.character.secretary_id = account.dock.heroes.keys().next().copied();
+            }
+            let mut rewards = Vec::new();
+            for template_id in retired_templates {
+                for &(goods_type, item_id, amount) in hero_breakdown_catalog
+                    .rewards_by_template
+                    .get(&template_id)
+                    .into_iter()
+                    .flatten()
+                {
+                    if amount <= 0 {
+                        continue;
+                    }
+                    if goods_type == 5 {
+                        let kind = match item_id {
+                            1 => Some(blueoath_domain::CurrencyKind::Gold),
+                            2 => Some(blueoath_domain::CurrencyKind::Diamond),
+                            5 => Some(blueoath_domain::CurrencyKind::Supply),
+                            30 => Some(blueoath_domain::CurrencyKind::PvePoint),
+                            _ => None,
+                        };
+                        if let Some(kind) = kind {
+                            let _ = account
+                                .resources
+                                .credit(kind, u64::try_from(amount).unwrap_or_default());
+                        }
+                    } else if let Ok(template_id) =
+                        blueoath_domain::TemplateId::new(u64::try_from(item_id).unwrap_or_default())
+                    {
+                        let entry = account.inventory.items.entry(template_id).or_default();
+                        *entry = entry.saturating_add(u64::try_from(amount).unwrap_or_default());
+                    }
+                    rewards.push(ShopReward {
+                        goods_type,
+                        item_id,
+                        num: amount,
+                        instance_id: 0,
+                    });
+                }
+            }
+            advance_typed_task_event(account, task_catalog, 11, 1);
+            let deleted = retired_ids
+                .iter()
+                .map(|hero_id| HeroGrid {
+                    hero_id: u32::try_from(hero_id.get()).unwrap_or(u32::MAX),
+                    ..HeroGrid::default()
+                })
+                .collect::<Vec<_>>();
+            append_method_push(
+                pre_pushes,
+                "hero.UpdateHeroBagData",
+                HeroBagCodec::encode(&HeroBag {
+                    heroes: deleted,
+                    bag_size: 200,
+                }),
+            );
+            append_method_push(
+                pre_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "equip.UpdateEquipBagData",
+                EquipListCodec::encode(&equip_list_from_typed_account(account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "task.TaskInfo",
+                task_info_payload_from_typed_account(account, task_catalog),
+            );
+            HandlerResult::Reply(Response::raw(method, encode_retire_hero_response(&rewards)))
         }
         "hero.AddExp" => {
             let Some(hero_level_catalog) = hero_level_catalog else {
@@ -911,9 +1098,7 @@ mod tests {
             "hero.GetHeroInfo",
             &[],
             &mut Vec::new(),
-            None,
-            None,
-            1.0,
+            HeroTypedCatalogs::empty(),
         );
         let HandlerResult::Reply(response) = result else {
             panic!("typed hero info must reply");
@@ -941,9 +1126,7 @@ mod tests {
             "hero.LockHero",
             &args,
             &mut pushes,
-            None,
-            None,
-            1.0,
+            HeroTypedCatalogs::empty(),
         );
 
         assert!(matches!(result, HandlerResult::PushOnly));
@@ -967,9 +1150,7 @@ mod tests {
             "hero.ChangeName",
             &args,
             &mut pushes,
-            None,
-            None,
-            1.0,
+            HeroTypedCatalogs::empty(),
         );
 
         assert!(matches!(result, HandlerResult::PushOnly));
@@ -1006,14 +1187,77 @@ mod tests {
             "hero.AddExp",
             &args,
             &mut pushes,
-            Some(&catalog),
-            None,
-            1.0,
+            HeroTypedCatalogs {
+                hero_level: Some(&catalog),
+                tasks: None,
+                breakdown: None,
+                ship_exp_multiplier: 1.0,
+            },
         );
 
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert_eq!(account.inventory.items.get(&item_id), Some(&(before - 1)));
         assert_eq!(account.dock.heroes.values().next().unwrap().level, 2);
         assert_eq!(pushes.len(), 3);
+    }
+
+    #[test]
+    fn typed_hero_retire_removes_owned_hero_and_grants_breakdown_rewards() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("hero-retire-typed").unwrap(),
+            "Captain",
+        );
+        account.character.secretary_id = None;
+        let item_id = blueoath_domain::TemplateId::new(10_182).unwrap();
+        let before_items = account
+            .inventory
+            .items
+            .get(&item_id)
+            .copied()
+            .unwrap_or_default();
+        let before_gold = account
+            .resources
+            .amount(blueoath_domain::CurrencyKind::Gold)
+            .get();
+        let mut catalog = HeroBreakdownCatalog::default();
+        catalog
+            .rewards_by_template
+            .insert(10_210_511, vec![(1, 10_182, 2), (5, 1, 3)]);
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, 1);
+        append_varint_field(&mut args, 2, 1);
+        let mut pushes = Vec::new();
+
+        let result = handle_typed(
+            &mut account,
+            "hero.RetireHero",
+            &args,
+            &mut pushes,
+            HeroTypedCatalogs {
+                hero_level: None,
+                tasks: None,
+                breakdown: Some(&catalog),
+                ship_exp_multiplier: 1.0,
+            },
+        );
+
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert!(!account
+            .dock
+            .heroes
+            .contains_key(&blueoath_domain::HeroId::new(1).unwrap()));
+        assert!(account.dock.equipments.is_empty());
+        assert_eq!(
+            account.inventory.items.get(&item_id),
+            Some(&(before_items + 2))
+        );
+        assert_eq!(
+            account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Gold)
+                .get(),
+            before_gold + 3
+        );
+        assert_eq!(pushes.len(), 4);
     }
 }
