@@ -4,6 +4,16 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
+pub(super) fn handle_typed(account: &blueoath_domain::AccountState, method: &str) -> HandlerResult {
+    match method {
+        "equip.UpdateEquipBagData" => HandlerResult::Reply(Response::raw(
+            method,
+            EquipListCodec::encode(&equip_list_from_typed_account(account)),
+        )),
+        _ => HandlerResult::Empty,
+    }
+}
+
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
@@ -778,4 +788,34 @@ pub(crate) fn mark_equip_activity_reward(account: &mut Value, equip_id: u64) -> 
     }
     info["isReward"] = json!(1);
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_equip_list_reads_normalized_equipment() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("equip-typed").unwrap(),
+            "Captain",
+        );
+        let equip_id = blueoath_domain::EquipId::new(4).unwrap();
+        account.dock.equipments.insert(
+            equip_id,
+            blueoath_domain::EquipmentState {
+                id: equip_id,
+                template_id: blueoath_domain::TemplateId::new(300).unwrap(),
+                enhance_level: 2,
+                star: 3,
+                enhance_exp: 5,
+                hero_id: None,
+            },
+        );
+        let HandlerResult::Reply(response) = handle_typed(&account, "equip.UpdateEquipBagData")
+        else {
+            panic!("typed equipment route must reply");
+        };
+        assert!(response.payload.len() > 2);
+    }
 }
