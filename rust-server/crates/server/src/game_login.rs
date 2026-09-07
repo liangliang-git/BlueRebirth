@@ -345,7 +345,10 @@ where
                 append_method_push(
                     &mut post_pushes,
                     "task.TaskInfo",
-                    task_info_payload(account, task_catalog),
+                    typed_account
+                        .as_deref()
+                        .map(|typed| task_info_payload_from_typed_account(typed, task_catalog))
+                        .unwrap_or_else(|| task_info_payload(account, task_catalog)),
                 );
             }
             Some(UserLoginCodec::encode_response("ok", "", 0))
@@ -1689,7 +1692,12 @@ where
                 // TaskInfo: explicit teaching-stage row + daily count. Repeated task groups
                 // may be empty when this Rust profile has no task catalog; persisted teaching
                 // reward ids are retained so the client does not re-offer claimed rewards.
-                ("task.TaskInfo", task_info_payload(account, task_catalog)),
+                (
+                    "task.TaskInfo",
+                    typed_account_view
+                        .map(|typed| task_info_payload_from_typed_account(typed, task_catalog))
+                        .unwrap_or_else(|| task_info_payload(account, task_catalog)),
+                ),
             ] {
                 let push = TMessageCodec::encode_response(&TResponse {
                     method: method.to_owned(),
@@ -1993,7 +2001,12 @@ where
             NetSocketFrameCodec::write(stream, 0, &user_push).await?;
             let task_push = TMessageCodec::encode_response(&TResponse {
                 method: "task.TaskInfo".to_owned(),
-                ret: Some(task_info_payload(account, task_catalog)),
+                ret: Some(
+                    typed_account
+                        .as_deref()
+                        .map(|typed| task_info_payload_from_typed_account(typed, task_catalog))
+                        .unwrap_or_else(|| task_info_payload(account, task_catalog)),
+                ),
                 time: now,
                 ..TResponse::default()
             });

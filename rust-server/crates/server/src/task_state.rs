@@ -468,6 +468,118 @@ pub(super) fn task_info_payload(account: &Value, catalog: Option<&TaskCatalog>) 
     output
 }
 
+pub(super) fn task_info_payload_from_typed_account(
+    account: &blueoath_domain::AccountState,
+    catalog: Option<&TaskCatalog>,
+) -> Vec<u8> {
+    let mut output = Vec::new();
+    let Some(catalog) = catalog.filter(|catalog| !catalog.definitions.is_empty()) else {
+        output.extend_from_slice(&[0x62, 0x02, 0x08, 0x11, 0x10, 0x01, 0x68, 0x00]);
+        return output;
+    };
+    let claimed = |definition: &TaskDefinition| {
+        account
+            .tasks
+            .completed
+            .contains(&(definition.id.max(0) as u64))
+    };
+    let progress_for = |definition: &TaskDefinition| {
+        account
+            .tasks
+            .progress
+            .get(&(definition.id.max(0) as u64))
+            .copied()
+            .unwrap_or_default()
+            .min(definition.goal.max(0) as u64)
+    };
+    let level = account.character.level as i64;
+    let mut selected = catalog
+        .definitions
+        .iter()
+        .filter(|definition| {
+            matches!(definition.task_type, 1 | 2 | 3 | 4 | 5 | 8 | 9)
+                && definition.abandoned == 0
+                && (definition.level_min <= 0 || level >= i64::from(definition.level_min))
+                && (definition.level_max <= 0 || level <= i64::from(definition.level_max))
+                && (matches!(definition.task_type, 2 | 3 | 8 | 9)
+                    || definition.previous_task_id <= 0
+                    || claimed(definition)
+                    || catalog.definitions.iter().any(|candidate| {
+                        candidate.task_type == definition.task_type
+                            && candidate.id == definition.previous_task_id
+                            && claimed(candidate)
+                    }))
+        })
+        .collect::<Vec<_>>();
+    selected.sort_by_key(|definition| (definition.task_type, definition.id));
+    let tag_for = |task_type| match task_type {
+        1 => 0x0A,
+        2 => 0x12,
+        3 => 0x1A,
+        4 => 0x3A,
+        5 => 0x22,
+        8 => 0x4A,
+        9 => 0x52,
+        _ => 0,
+    };
+    for task_type in [1, 2, 3, 4, 5, 8, 9] {
+        let type_defs = selected
+            .iter()
+            .copied()
+            .filter(|definition| definition.task_type == task_type)
+            .collect::<Vec<_>>();
+        let mut event_types = type_defs
+            .iter()
+            .map(|definition| definition.event_type)
+            .collect::<Vec<_>>();
+        event_types.sort_unstable();
+        event_types.dedup();
+        for event_type in event_types {
+            let event_defs = type_defs
+                .iter()
+                .copied()
+                .filter(|definition| definition.event_type == event_type)
+                .collect::<Vec<_>>();
+            let mut event_info = Vec::new();
+            append_varint_field(&mut event_info, 1, event_type.max(0) as u64);
+            let max_goal = event_defs
+                .iter()
+                .map(|definition| definition.goal)
+                .max()
+                .unwrap_or(0);
+            let progress = event_defs
+                .iter()
+                .map(|definition| progress_for(definition))
+                .max()
+                .unwrap_or_default()
+                .min(max_goal.max(0) as u64);
+            append_varint_field(&mut event_info, 2, progress);
+            for definition in event_defs {
+                let mut task = Vec::new();
+                append_varint_field(&mut task, 1, definition.id.max(0) as u64);
+                let count = progress_for(definition);
+                let completed = claimed(definition);
+                append_varint_field(&mut task, 2, u64::from(completed));
+                append_varint_field(&mut task, 3, u64::from(completed));
+                append_varint_field(&mut task, 4, count);
+                append_varint_field(&mut task, 7, 0);
+                append_varint_field(&mut task, 8, 0);
+                append_message_field(&mut event_info, 3, &task);
+            }
+            if let Some(tag) = (tag_for(task_type) != 0).then_some(tag_for(task_type)) {
+                append_message_field(&mut output, tag >> 3, &event_info);
+            }
+        }
+    }
+    for definition in selected.iter().filter(|definition| {
+        definition.task_type == 5 && definition.medal_id > 0 && claimed(definition)
+    }) {
+        append_varint_field(&mut output, 5, definition.medal_id as u64);
+    }
+    output.extend_from_slice(&[0x62, 0x02, 0x08, 0x11, 0x10, 0x01, 0x68, 0x00]);
+    output
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ShopReward {
     pub(super) goods_type: i32,

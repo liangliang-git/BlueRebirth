@@ -40,15 +40,15 @@ use super::{
     ship_attributes_for_hero, ship_attributes_for_template, shop_costs_from_value,
     shop_info_payload, start_construction, start_study_state, start_support_state,
     story_memory_payload, study_info_payload, study_skill_state, sync_achievement_points,
-    task_completed, task_info_payload, update_bathroom_state, update_building_assignments,
-    update_mop_up_state, validate_battle_attack, BattleCatalog, BattleCopy, BattleEnemy,
-    BattleFleetReward, BuildShipCatalog, BuildingCatalog, ChapterCatalog, CommanderLevelCatalog,
-    EquipCatalog, EquipLevelbreakRule, EquipNewTestCatalog, EquipNum, EquipRenovateRule,
-    HeroBreakdownCatalog, HeroLevelCatalog, HeroSkillUpgradeCatalog, MailTemplate, ServerConfig,
-    ServerState, ShipAdvanceCatalog, ShipBreakCatalog, ShipRemouldCatalog, ShipStat,
-    ShipStatCatalog, ShopCatalog, ShopCost, ShopGood, ShopReward, SupportCatalog, SupportFleetItem,
-    TalentCatalog, TalentNode, TaskCatalog, TaskDefinition, UserInfoCodec, DEFAULT_GUILD_ID,
-    GUILD_MEMBER,
+    task_completed, task_info_payload, task_info_payload_from_typed_account, update_bathroom_state,
+    update_building_assignments, update_mop_up_state, validate_battle_attack, BattleCatalog,
+    BattleCopy, BattleEnemy, BattleFleetReward, BuildShipCatalog, BuildingCatalog, ChapterCatalog,
+    CommanderLevelCatalog, EquipCatalog, EquipLevelbreakRule, EquipNewTestCatalog, EquipNum,
+    EquipRenovateRule, HeroBreakdownCatalog, HeroLevelCatalog, HeroSkillUpgradeCatalog,
+    MailTemplate, ServerConfig, ServerState, ShipAdvanceCatalog, ShipBreakCatalog,
+    ShipRemouldCatalog, ShipStat, ShipStatCatalog, ShopCatalog, ShopCost, ShopGood, ShopReward,
+    SupportCatalog, SupportFleetItem, TalentCatalog, TalentNode, TaskCatalog, TaskDefinition,
+    UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
 };
 use blueoath_domain::{FleetId, FleetRecord, HeroId, NewAccountFactory, ProfileId, TemplateId};
 use blueoath_protocol::{
@@ -3884,6 +3884,35 @@ fn trusted_task_event_advances_progress_and_completes() {
     ));
     assert_eq!(account["tasks"]["records"][0]["completed"], 1);
     assert!(task_completed(&account, 2, 20, 2));
+}
+
+#[test]
+fn typed_task_projection_matches_wire_shape_for_progress_and_completion() {
+    let mut typed = NewAccountFactory::create(ProfileId::new("typed-task").unwrap(), "Task");
+    typed.tasks.progress.insert(20, 1);
+    typed.tasks.completed.insert(20);
+    let catalog = TaskCatalog {
+        definitions: vec![TaskDefinition {
+            task_type: 2,
+            id: 20,
+            event_type: 401,
+            goal: 2,
+            ..TaskDefinition::default()
+        }],
+        ..TaskCatalog::default()
+    };
+    let legacy = json!({
+        "character": {"level": 1},
+        "tasks": {"records": [{
+            "taskType": 2, "taskId": 20, "count": 1,
+            "rewardTime": 1, "finishTime": 1
+        }]}
+    });
+
+    assert_eq!(
+        task_info_payload_from_typed_account(&typed, Some(&catalog)),
+        task_info_payload(&legacy, Some(&catalog))
+    );
 }
 
 #[test]
