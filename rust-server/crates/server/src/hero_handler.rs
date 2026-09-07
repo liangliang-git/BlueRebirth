@@ -89,13 +89,13 @@ pub(super) fn handle_typed(
             let Some(hero_breakdown_catalog) = hero_breakdown_catalog else {
                 return HandlerResult::Empty;
             };
-            let raw_ids = decode_repeated_i32_field(request_args, 1);
-            let is_dis_equip = decode_varint_u64_field(request_args, 2) != 0;
-            if raw_ids.is_empty() || raw_ids.len() > 99 || raw_ids.iter().any(|id| *id <= 0) {
+            let Ok(request) = HeroRetireRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "hero retire request is invalid",
                 ));
-            }
+            };
+            let raw_ids = request.hero_ids;
+            let is_dis_equip = request.dismantle_equipment;
             let mut requested = std::collections::BTreeSet::new();
             for raw_id in raw_ids {
                 let Some(hero_id) =

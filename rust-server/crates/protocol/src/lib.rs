@@ -944,6 +944,36 @@ pub struct HeroLockRequest {
     pub locked: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroRetireRequest {
+    pub hero_ids: Vec<i32>,
+    pub dismantle_equipment: bool,
+}
+
+impl Decode for HeroRetireRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let hero_ids = fields
+            .get(&1)
+            .into_iter()
+            .flatten()
+            .map(|value| to_i32(*value, "hero retire id is out of range"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let dismantle_equipment =
+            optional_i32(&fields, 2, "hero retire has duplicate dismantle flag")? != 0;
+        if hero_ids.is_empty()
+            || hero_ids.len() > 99
+            || hero_ids.iter().any(|hero_id| *hero_id <= 0)
+        {
+            return Err(ProtocolError::Invalid("hero retire request is invalid"));
+        }
+        Ok(Self {
+            hero_ids,
+            dismantle_equipment,
+        })
+    }
+}
+
 impl Decode for HeroLockRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
