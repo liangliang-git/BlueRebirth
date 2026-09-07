@@ -82,6 +82,201 @@ pub(super) fn handle_typed(
             );
             HandlerResult::PushOnly
         }
+        "supportfleet.SupportFleetInfo" => {
+            HandlerResult::Reply(Response::raw(method, typed_support_info_payload(account)))
+        }
+        "supportfleet.StartSupport" => {
+            let support_id = decode_varint_field(request_args, 1);
+            let hero_ids = decode_repeated_varint_field(request_args, 2)
+                .into_iter()
+                .filter(|id| *id > 0)
+                .map(|id| id as u64)
+                .collect::<Vec<_>>();
+            if support_id <= 0
+                || hero_ids.is_empty()
+                || hero_ids
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+                    != hero_ids.len()
+                || hero_ids.iter().any(|id| {
+                    blueoath_domain::HeroId::new(*id)
+                        .ok()
+                        .is_none_or(|hero_id| !account.dock.heroes.contains_key(&hero_id))
+                })
+                || (SUPPORT_CATALOG
+                    .get()
+                    .is_some_and(|catalog| !catalog.items.is_empty())
+                    && !SUPPORT_CATALOG
+                        .get()
+                        .is_some_and(|catalog| catalog.items.contains_key(&support_id)))
+            {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "support request is invalid",
+                ));
+            }
+            let id = typed_support_entries(account)
+                .into_iter()
+                .map(|entry| entry.id)
+                .max()
+                .unwrap_or_default()
+                .saturating_add(1);
+            let prefix = format!("compat:support:{id}");
+            account
+                .activities
+                .progress
+                .insert(format!("{prefix}:supportId"), support_id as u64);
+            account.activities.progress.insert(
+                format!("{prefix}:startTime"),
+                u64::from(current_unix_seconds()),
+            );
+            for hero_id in hero_ids {
+                account
+                    .activities
+                    .progress
+                    .insert(format!("{prefix}:hero:{hero_id}"), 1);
+            }
+            append_method_push(
+                pre_pushes,
+                "supportfleet.SupportFleetInfo",
+                typed_support_info_payload(account),
+            );
+            HandlerResult::Reply(Response::raw(method, Vec::new()))
+        }
+        "supportfleet.CompleteSupport" | "supportfleet.CancelSupport" => {
+            let id = decode_varint_field(request_args, 1);
+            let completion_type = decode_varint_field(request_args, 2);
+            let Some(entry) = typed_support_entries(account)
+                .into_iter()
+                .find(|entry| entry.id == id)
+            else {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "support entry is not ready or invalid",
+                ));
+            };
+            if !matches!(completion_type, 1..=3) {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "support completion type is invalid",
+                ));
+            }
+            let catalog = SUPPORT_CATALOG.get().cloned().unwrap_or_default();
+            let config = catalog
+                .items
+                .get(&entry.support_id)
+                .cloned()
+                .unwrap_or_default();
+            let now = current_unix_seconds();
+            let elapsed = u64::from(now.saturating_sub(entry.start_time));
+            if completion_type == 1 && elapsed < config.duration_seconds.max(0) as u64 {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "support entry is not ready or invalid",
+                ));
+            }
+            let big_success = completion_type != 3
+                && config.big_success_ratio > 0
+                && (u64::from(now).saturating_add(id.max(0) as u64) % 10_000)
+                    < u64::try_from(config.big_success_ratio).unwrap_or_default();
+            let base_rewards = if big_success && !config.big_success_base_rewards.is_empty() {
+                config.big_success_base_rewards.clone()
+            } else {
+                config.base_rewards.clone()
+            };
+            let mut random_rewards = Vec::new();
+            if completion_type != 3 {
+                let drop_id = if big_success {
+                    config.big_success_extra_drop_id
+                } else {
+                    config.extra_drop_id
+                };
+                if let Some(reward) = catalog
+                    .drop_rewards
+                    .get(&drop_id)
+                    .and_then(|rewards| rewards.first())
+                {
+                    random_rewards.push(*reward);
+                }
+            }
+            let rewards = base_rewards
+                .iter()
+                .chain(random_rewards.iter())
+                .copied()
+                .collect::<Vec<_>>();
+            if rewards.iter().any(|(goods_type, item_id, amount)| {
+                !typed_support_reward_supported(*goods_type, *item_id, *amount)
+            }) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "support reward is unsupported",
+                ));
+            }
+            if completion_type == 2 {
+                if let Some((goods_type, item_id, amount)) =
+                    config.fast_consumption.or(config.consumption)
+                {
+                    if !typed_support_cost_available(account, goods_type, item_id, amount) {
+                        return HandlerResult::Error(GameError::InsufficientResource(
+                            blueoath_domain::CurrencyKind::Gold,
+                        ));
+                    }
+                }
+            }
+            if completion_type == 2 {
+                if let Some((goods_type, item_id, amount)) =
+                    config.fast_consumption.or(config.consumption)
+                {
+                    let _ = typed_support_consume(account, goods_type, item_id, amount);
+                }
+            }
+            for (goods_type, item_id, amount) in &rewards {
+                typed_support_grant(account, &entry.hero_ids, *goods_type, *item_id, *amount);
+            }
+            typed_support_remove(account, id);
+            append_method_push(
+                pre_pushes,
+                "supportfleet.SupportFleetInfo",
+                typed_support_info_payload(account),
+            );
+            if !rewards.is_empty() {
+                append_method_push(
+                    pre_pushes,
+                    "user.UpdateUserInfo",
+                    UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+                );
+                append_method_push(
+                    pre_pushes,
+                    "bag.UpdateBagData",
+                    BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+                );
+                append_method_push(
+                    pre_pushes,
+                    "hero.UpdateHeroBagData",
+                    HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+                );
+            }
+            let settlement = SupportSettlement {
+                reward_type: if completion_type == 3 {
+                    0
+                } else if big_success {
+                    2
+                } else {
+                    1
+                },
+                hero_ids: entry.hero_ids,
+                base_rewards: if completion_type == 3 {
+                    Vec::new()
+                } else {
+                    base_rewards
+                },
+                random_rewards: if completion_type == 3 {
+                    Vec::new()
+                } else {
+                    random_rewards
+                },
+            };
+            HandlerResult::Reply(Response::raw(
+                method,
+                encode_support_settlement(&settlement),
+            ))
+        }
         "jopen.GetJopen" => {
             HandlerResult::Reply(Response::raw(method, typed_jopen_payload(account)))
         }
@@ -1112,6 +1307,190 @@ fn typed_jopen_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
     output
 }
 
+#[derive(Debug, Clone)]
+struct TypedSupportEntry {
+    id: i32,
+    support_id: i32,
+    start_time: u32,
+    hero_ids: Vec<u64>,
+}
+
+fn typed_support_entries(account: &blueoath_domain::AccountState) -> Vec<TypedSupportEntry> {
+    let mut ids = std::collections::BTreeSet::new();
+    for key in account.activities.progress.keys() {
+        let Some(rest) = key.strip_prefix("compat:support:") else {
+            continue;
+        };
+        let Some(id) = rest
+            .strip_suffix(":supportId")
+            .and_then(|value| value.parse::<i32>().ok())
+            .filter(|id| *id > 0)
+        else {
+            continue;
+        };
+        ids.insert(id);
+    }
+    ids.into_iter()
+        .filter_map(|id| {
+            let prefix = format!("compat:support:{id}");
+            let support_id = account
+                .activities
+                .progress
+                .get(&format!("{prefix}:supportId"))
+                .copied()
+                .and_then(|value| i32::try_from(value).ok())?;
+            let start_time = account
+                .activities
+                .progress
+                .get(&format!("{prefix}:startTime"))
+                .copied()
+                .and_then(|value| u32::try_from(value).ok())
+                .unwrap_or_default();
+            let hero_prefix = format!("{prefix}:hero:");
+            let hero_ids = account
+                .activities
+                .progress
+                .keys()
+                .filter_map(|key| {
+                    key.strip_prefix(&hero_prefix)
+                        .and_then(|value| value.parse::<u64>().ok())
+                })
+                .collect::<Vec<_>>();
+            Some(TypedSupportEntry {
+                id,
+                support_id,
+                start_time,
+                hero_ids,
+            })
+        })
+        .collect()
+}
+
+fn typed_support_info_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let mut output = Vec::new();
+    for entry in typed_support_entries(account) {
+        let mut item = Vec::new();
+        append_varint_field(&mut item, 1, entry.id.max(0) as u64);
+        append_varint_field(&mut item, 2, entry.support_id.max(0) as u64);
+        append_varint_field(&mut item, 3, u64::from(entry.start_time));
+        for hero_id in entry.hero_ids {
+            append_varint_field(&mut item, 4, hero_id);
+        }
+        append_message_field(&mut output, 1, &item);
+    }
+    output
+}
+
+fn typed_support_remove(account: &mut blueoath_domain::AccountState, id: i32) {
+    let prefix = format!("compat:support:{id}:");
+    account
+        .activities
+        .progress
+        .retain(|key, _| !key.starts_with(&prefix));
+}
+
+fn typed_support_currency(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
+    Some(match item_id {
+        1 => blueoath_domain::CurrencyKind::Gold,
+        2 => blueoath_domain::CurrencyKind::Diamond,
+        5 => blueoath_domain::CurrencyKind::Supply,
+        30 => blueoath_domain::CurrencyKind::PvePoint,
+        _ => return None,
+    })
+}
+
+fn typed_support_cost_available(
+    account: &blueoath_domain::AccountState,
+    goods_type: i32,
+    item_id: i32,
+    amount: i32,
+) -> bool {
+    let Ok(amount) = u64::try_from(amount) else {
+        return false;
+    };
+    if goods_type == 5 {
+        return typed_support_currency(item_id)
+            .is_some_and(|kind| account.resources.amount(kind).get() >= amount);
+    }
+    matches!(goods_type, 1 | 6)
+        && blueoath_domain::TemplateId::new(item_id.max(0) as u64)
+            .ok()
+            .is_some_and(|template| {
+                account
+                    .inventory
+                    .items
+                    .get(&template)
+                    .copied()
+                    .unwrap_or_default()
+                    >= amount
+            })
+}
+
+fn typed_support_consume(
+    account: &mut blueoath_domain::AccountState,
+    goods_type: i32,
+    item_id: i32,
+    amount: i32,
+) -> bool {
+    let Ok(amount) = u64::try_from(amount) else {
+        return false;
+    };
+    if goods_type == 5 {
+        return typed_support_currency(item_id)
+            .is_some_and(|kind| account.resources.debit(kind, amount).is_ok());
+    }
+    let Some(template) = blueoath_domain::TemplateId::new(item_id.max(0) as u64).ok() else {
+        return false;
+    };
+    let Some(current) = account.inventory.items.get_mut(&template) else {
+        return false;
+    };
+    if *current < amount {
+        return false;
+    }
+    *current -= amount;
+    if *current == 0 {
+        account.inventory.items.remove(&template);
+    }
+    matches!(goods_type, 1 | 6)
+}
+
+fn typed_support_reward_supported(goods_type: i32, item_id: i32, amount: i32) -> bool {
+    amount > 0
+        && item_id > 0
+        && ((goods_type == 5 && (item_id == 6 || typed_support_currency(item_id).is_some()))
+            || matches!(goods_type, 1 | 6))
+}
+
+fn typed_support_grant(
+    account: &mut blueoath_domain::AccountState,
+    hero_ids: &[u64],
+    goods_type: i32,
+    item_id: i32,
+    amount: i32,
+) {
+    let amount = u64::try_from(amount).unwrap_or_default();
+    if goods_type == 5 && item_id == 6 {
+        for hero_id in hero_ids {
+            if let Some(hero) = blueoath_domain::HeroId::new(*hero_id)
+                .ok()
+                .and_then(|id| account.dock.heroes.get_mut(&id))
+            {
+                hero.exp = hero.exp.saturating_add(amount);
+            }
+        }
+    } else if goods_type == 5 {
+        if let Some(kind) = typed_support_currency(item_id) {
+            let _ = account.resources.credit(kind, amount);
+        }
+    } else if matches!(goods_type, 1 | 6) {
+        if let Ok(template) = blueoath_domain::TemplateId::new(item_id as u64) {
+            let entry = account.inventory.items.entry(template).or_default();
+            *entry = entry.saturating_add(amount);
+        }
+    }
+}
+
 fn typed_strategy_info_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
     let mut entries = account
         .activities
@@ -1547,6 +1926,39 @@ mod tests {
             HandlerResult::PushOnly
         ));
         assert_eq!(account.fleet.fleets.values().next().unwrap().tactic_id, 7);
+
+        let support_id = SUPPORT_CATALOG
+            .get()
+            .and_then(|catalog| catalog.items.keys().next().copied())
+            .unwrap_or(7_001);
+        let mut support_start = Vec::new();
+        append_varint_field(&mut support_start, 1, support_id as u64);
+        append_varint_field(&mut support_start, 2, 1);
+        assert!(matches!(
+            handle_typed(
+                &mut account,
+                &state,
+                "supportfleet.StartSupport",
+                &support_start,
+                &mut pushes,
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(typed_support_entries(&account).len(), 1);
+        let mut support_cancel = Vec::new();
+        append_varint_field(&mut support_cancel, 1, 1);
+        append_varint_field(&mut support_cancel, 2, 3);
+        assert!(matches!(
+            handle_typed(
+                &mut account,
+                &state,
+                "supportfleet.CancelSupport",
+                &support_cancel,
+                &mut pushes,
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert!(typed_support_entries(&account).is_empty());
 
         assert!(matches!(
             handle_typed(&mut account, &state, "jopen.FetchHero", &[], &mut pushes,),
