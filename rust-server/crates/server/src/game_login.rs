@@ -10,9 +10,9 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use super::catalog::*;
 use super::common::error::GameError;
 use super::common::request::RequestContext;
-use super::common::response::HandlerResult;
 #[cfg(not(test))]
 use super::common::response::Response;
+use super::common::response::{HandlerResult, ResponseEffects};
 use super::router::{GameMethod, KnownMethod, MethodFamily};
 use super::wire::*;
 use super::*;
@@ -253,6 +253,21 @@ where
         talent_tree_payload_typed(account, &talent_catalog),
     );
     Ok(())
+}
+
+fn apply_response_effects(
+    effects: ResponseEffects,
+    pre_pushes: &mut Vec<Vec<u8>>,
+    post_pushes: &mut Vec<Vec<u8>>,
+    handler_error: &mut Option<GameError>,
+) {
+    let (pre, post, error) = effects.into_parts();
+    let now = current_unix_seconds();
+    pre_pushes.extend(pre.into_iter().map(|response| response.encode_push(now)));
+    post_pushes.extend(post.into_iter().map(|response| response.encode_push(now)));
+    if let Some(error) = error {
+        *handler_error = Some(error);
+    }
 }
 
 pub(super) async fn process_game_login_frame_payload_with_catalogs_typed_mut<S>(
@@ -1448,6 +1463,7 @@ where
             || method.is_family(MethodFamily::Task)
             || method.is_family(MethodFamily::Bathroom) =>
         {
+            let mut progression_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 if method.is_family(MethodFamily::Bathroom) {
                     progression_handler::handle_bathroom_typed(
@@ -1456,7 +1472,7 @@ where
                         request_args,
                         current_unix_seconds(),
                         state.mood_recovery_multiplier,
-                        &mut post_pushes,
+                        &mut progression_effects,
                     )
                 } else if method.is_family(MethodFamily::Study) {
                     progression_handler::handle_study_typed(
@@ -1464,7 +1480,7 @@ where
                         request.method.as_str(),
                         request_args,
                         current_unix_seconds(),
-                        &mut post_pushes,
+                        &mut progression_effects,
                     )
                 } else {
                     task_handler::handle_typed(
@@ -1490,7 +1506,7 @@ where
                         request_args,
                         current_unix_seconds(),
                         state.mood_recovery_multiplier,
-                        &mut post_pushes,
+                        &mut progression_effects,
                     )
                 } else {
                     HandlerResult::Error(GameError::InvalidRequest(
@@ -1498,6 +1514,12 @@ where
                     ))
                 }
             };
+            apply_response_effects(
+                progression_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }

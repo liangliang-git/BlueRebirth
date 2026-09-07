@@ -1,5 +1,5 @@
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 use blueoath_domain::{AccountState, BathroomHeroState};
 
@@ -9,7 +9,7 @@ pub(super) fn handle_bathroom_typed(
     request_args: &[u8],
     now: u32,
     mood_recovery_multiplier: f64,
-    post_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let Ok(request) = BathroomRequest::decode(request_args) else {
         return HandlerResult::Error(GameError::InvalidRequest("bathroom request is invalid"));
@@ -58,11 +58,10 @@ pub(super) fn handle_bathroom_typed(
                     now,
                 );
             }
-            append_method_push(
-                post_pushes,
+            effects.push_post(Response::raw(
                 "hero.UpdateHeroBagData",
                 HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-            );
+            ));
             bathroom_end_payload(
                 requested_hero_id,
                 before.map(|hero| hero.bath_time).unwrap_or_default() as i64,
@@ -134,11 +133,10 @@ pub(super) fn handle_bathroom_typed(
         _ => return HandlerResult::Empty,
     };
 
-    append_method_push(
-        post_pushes,
+    effects.push_post(Response::raw(
         "bathroom.BathroomInfo",
         bathroom_info_payload_from_typed(account),
-    );
+    ));
     HandlerResult::Reply(Response::raw(method, response))
 }
 
@@ -147,7 +145,7 @@ pub(super) fn handle_study_typed(
     method: &str,
     request_args: &[u8],
     now: u32,
-    post_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     match method {
         "study.GetStudyInfo" => HandlerResult::Reply(Response::raw(
@@ -190,16 +188,14 @@ pub(super) fn handle_study_typed(
                     begin_time: u64::from(now),
                     end_time: u64::from(now.saturating_add(60)),
                 });
-            append_method_push(
-                post_pushes,
+            effects.push_post(Response::raw(
                 "study.GetStudyInfo",
                 study_info_payload_from_typed(account, now),
-            );
-            append_method_push(
-                post_pushes,
+            ));
+            effects.push_post(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
+            ));
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "study.CancelStudyPSkill" => {
@@ -220,11 +216,10 @@ pub(super) fn handle_study_typed(
                 ));
             };
             account.study.progress.remove(index);
-            append_method_push(
-                post_pushes,
+            effects.push_post(Response::raw(
                 "study.GetStudyInfo",
                 study_info_payload_from_typed(account, now),
-            );
+            ));
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "study.EndStudyPSkill" => {
@@ -237,16 +232,14 @@ pub(super) fn handle_study_typed(
             let skill_id = request.skill_id;
             match finish_study_typed(account, hero_id, skill_id, now, false) {
                 Ok(payload) => {
-                    append_method_push(
-                        post_pushes,
+                    effects.push_post(Response::raw(
                         "hero.UpdateHeroBagData",
                         HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-                    );
-                    append_method_push(
-                        post_pushes,
+                    ));
+                    effects.push_post(Response::raw(
                         "study.GetStudyInfo",
                         study_info_payload_from_typed(account, now),
-                    );
+                    ));
                     HandlerResult::Reply(Response::raw(method, payload))
                 }
                 Err(error) => HandlerResult::Error(error),
@@ -284,16 +277,14 @@ pub(super) fn handle_study_typed(
             }
             match finish_study_typed(account, hero_id, skill_id, now, true) {
                 Ok(payload) => {
-                    append_method_push(
-                        post_pushes,
+                    effects.push_post(Response::raw(
                         "hero.UpdateHeroBagData",
                         HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-                    );
-                    append_method_push(
-                        post_pushes,
+                    ));
+                    effects.push_post(Response::raw(
                         "study.GetStudyInfo",
                         study_info_payload_from_typed(account, now),
-                    );
+                    ));
                     HandlerResult::Reply(Response::raw(method, payload))
                 }
                 Err(error) => HandlerResult::Error(error),
@@ -475,14 +466,14 @@ mod typed_tests {
         let mut start = Vec::new();
         append_varint_field(&mut start, 1, 9);
         append_varint_field(&mut start, 2, 3);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
         let result = handle_bathroom_typed(
             &mut account,
             "bathroom.BathStart",
             &start,
             100,
             1.0,
-            &mut pushes,
+            &mut effects,
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert_eq!(account.bathroom.heroes[0].position, 3);
@@ -495,12 +486,14 @@ mod typed_tests {
             &end,
             100,
             1.0,
-            &mut pushes,
+            &mut effects,
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert!(account.bathroom.heroes.is_empty());
         assert_eq!(account.dock.heroes[&hero_id].mood, 300_000);
+        let (_, pushes, error) = effects.into_parts();
         assert_eq!(pushes.len(), 3);
+        assert!(error.is_none());
     }
 
     #[test]
@@ -530,13 +523,13 @@ mod typed_tests {
         append_varint_field(&mut start, 1, 9);
         append_varint_field(&mut start, 2, 41);
         append_varint_field(&mut start, 3, 7001);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
         let result = handle_study_typed(
             &mut account,
             "study.StartStudyPSkill",
             &start,
             100,
-            &mut pushes,
+            &mut effects,
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert_eq!(typed_item_count(&account, 7001), 0);
@@ -544,8 +537,13 @@ mod typed_tests {
         let mut end = Vec::new();
         append_varint_field(&mut end, 1, 9);
         append_varint_field(&mut end, 2, 41);
-        let result =
-            handle_study_typed(&mut account, "study.EndStudyPSkill", &end, 200, &mut pushes);
+        let result = handle_study_typed(
+            &mut account,
+            "study.EndStudyPSkill",
+            &end,
+            200,
+            &mut effects,
+        );
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert!(account.study.progress.is_empty());
         assert_eq!(account.dock.heroes[&hero_id].pskills.get(&41), Some(&1));
