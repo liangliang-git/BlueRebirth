@@ -1043,22 +1043,58 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
             .into_iter()
             .collect::<std::collections::BTreeMap<_, _>>()
     };
-    GameplayCatalog {
-        rewards_by_id: load_reward_definitions(&dir),
-        battlepass_levels: rows("config_battlepass_level.db"),
-        battlepass_tasks: rows("config_battlepass_task.db"),
-        battlepass_activity_levels: rows("config_battlepass_level_activity.db"),
-        battlepass_activity_tasks: rows("config_battlepass_task_activity.db"),
-        battlepass_param: read_config_rows(&dir.join("config_battlepass_param.db"))
+    let battlepass_levels = |name: &str| {
+        rows(name)
+            .into_iter()
+            .map(|(id, value)| {
+                (
+                    id,
+                    BattlePassLevelConfig {
+                        free_level_reward: json_i32(&value, "free_level_reward")
+                            .unwrap_or_default(),
+                        pay_level_reward: json_i32(&value, "pay_level_reward").unwrap_or_default(),
+                    },
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let battlepass_tasks = |name: &str| {
+        rows(name)
+            .into_iter()
+            .map(|(id, value)| {
+                (
+                    id,
+                    BattlePassTaskConfig {
+                        experience: json_i32(&value, "battlepass_exp").unwrap_or_default(),
+                    },
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let battlepass_param = |name: &str| {
+        read_config_rows(&dir.join(name))
             .into_iter()
             .next()
-            .map(|(_, value)| value),
-        battlepass_activity_param: read_config_rows(
-            &dir.join("config_battlepass_param_activity.db"),
-        )
-        .into_iter()
-        .next()
-        .map(|(_, value)| value),
+            .map(|(_, value)| BattlePassParamConfig {
+                buy_level_price: value
+                    .get("buy_level_price")
+                    .and_then(Value::as_array)
+                    .and_then(|values| {
+                        Some((
+                            i32::try_from(values.first()?.as_i64()?).ok()?,
+                            i32::try_from(values.get(1)?.as_i64()?).ok()?,
+                        ))
+                    }),
+            })
+    };
+    GameplayCatalog {
+        rewards_by_id: load_reward_definitions(&dir),
+        battlepass_levels: battlepass_levels("config_battlepass_level.db"),
+        battlepass_tasks: battlepass_tasks("config_battlepass_task.db"),
+        battlepass_activity_levels: battlepass_levels("config_battlepass_level_activity.db"),
+        battlepass_activity_tasks: battlepass_tasks("config_battlepass_task_activity.db"),
+        battlepass_param: battlepass_param("config_battlepass_param.db"),
+        battlepass_activity_param: battlepass_param("config_battlepass_param_activity.db"),
         activity: rows("config_activity.db"),
         parameters: rows("config_parameter.db"),
         activity_extract: rows("config_activity_extract.db"),

@@ -600,14 +600,30 @@ pub(super) struct RechargeCatalog {
 /// fields they consume against the client protobuf descriptors.
 #[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
+pub(super) struct BattlePassLevelConfig {
+    pub(super) free_level_reward: i32,
+    pub(super) pay_level_reward: i32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct BattlePassTaskConfig {
+    pub(super) experience: i32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct BattlePassParamConfig {
+    pub(super) buy_level_price: Option<(i32, i32)>,
+}
+
+#[derive(Clone, Debug, Default)]
 pub(super) struct GameplayCatalog {
     pub(super) rewards_by_id: std::collections::BTreeMap<i32, Vec<ShopReward>>,
-    pub(super) battlepass_levels: std::collections::BTreeMap<i32, Value>,
-    pub(super) battlepass_tasks: std::collections::BTreeMap<i32, Value>,
-    pub(super) battlepass_activity_levels: std::collections::BTreeMap<i32, Value>,
-    pub(super) battlepass_activity_tasks: std::collections::BTreeMap<i32, Value>,
-    pub(super) battlepass_param: Option<Value>,
-    pub(super) battlepass_activity_param: Option<Value>,
+    pub(super) battlepass_levels: std::collections::BTreeMap<i32, BattlePassLevelConfig>,
+    pub(super) battlepass_tasks: std::collections::BTreeMap<i32, BattlePassTaskConfig>,
+    pub(super) battlepass_activity_levels: std::collections::BTreeMap<i32, BattlePassLevelConfig>,
+    pub(super) battlepass_activity_tasks: std::collections::BTreeMap<i32, BattlePassTaskConfig>,
+    pub(super) battlepass_param: Option<BattlePassParamConfig>,
+    pub(super) battlepass_activity_param: Option<BattlePassParamConfig>,
     pub(super) activity: std::collections::BTreeMap<i32, Value>,
     pub(super) parameters: std::collections::BTreeMap<i32, Value>,
     pub(super) activity_extract: std::collections::BTreeMap<i32, Value>,

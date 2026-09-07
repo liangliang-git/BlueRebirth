@@ -55,9 +55,9 @@ pub(super) fn handle_typed_battlepass(
                     continue;
                 }
                 let reward_id = if pass_type >= 2 {
-                    json_i32(config, "pay_level_reward").unwrap_or_default()
+                    config.pay_level_reward
                 } else {
-                    json_i32(config, "free_level_reward").unwrap_or_default()
+                    config.free_level_reward
                 };
                 let rewards = catalog
                     .rewards_by_id
@@ -127,14 +127,7 @@ pub(super) fn handle_typed_battlepass(
             } else {
                 catalog.battlepass_param.as_ref()
             }
-            .and_then(|value| value.get("buy_level_price"))
-            .and_then(Value::as_array)
-            .and_then(|values| {
-                Some((
-                    i32::try_from(values.first()?.as_i64()?).ok()?,
-                    i32::try_from(values.get(1)?.as_i64()?).ok()?,
-                ))
-            });
+            .and_then(|config| config.buy_level_price);
             if let Some((currency_id, price_per_level)) = price {
                 let cost = price_per_level.saturating_mul(levels);
                 if !can_consume_typed(account, 5, currency_id, cost) {
@@ -160,11 +153,9 @@ pub(super) fn handle_typed_battlepass(
             let pass = typed_battlepass_mut(account, activity);
             if pass.claimed_tasks.insert(task_id) {
                 if let Some(config) = tasks.get(&(task_id as i32)) {
-                    pass.pass_exp = pass.pass_exp.saturating_add(
-                        json_i32(config, "battlepass_exp")
-                            .unwrap_or_default()
-                            .max(0) as u64,
-                    );
+                    pass.pass_exp = pass
+                        .pass_exp
+                        .saturating_add(config.experience.max(0) as u64);
                 }
             }
             pass.last_task_id = task_id;
