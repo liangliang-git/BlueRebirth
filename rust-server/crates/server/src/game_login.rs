@@ -719,20 +719,9 @@ where
             let result = if let Some(typed) = typed_account.as_mut() {
                 adventure_handler::handle_typed(typed, request.method.as_str())
             } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                adventure_handler::handle(&mut context, request.method.as_str(), request_args)
+                HandlerResult::Error(GameError::InvalidRequest(
+                    "adventure requires typed account",
+                ))
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
