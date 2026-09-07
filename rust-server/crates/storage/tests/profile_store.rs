@@ -1,4 +1,7 @@
-use blueoath_domain::{AccountRepository, AccountState, ProfileId, ProfileState};
+use blueoath_domain::{
+    AccountRepository, AccountState, BattleSession, ChapterId, CopyId, EquipId, EquipmentState,
+    FleetId, FleetRecord, HeroId, HeroState, ProfileId, ProfileState, TemplateId,
+};
 use blueoath_storage::{ProfileStore, StorageError};
 use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -169,7 +172,7 @@ fn opening_store_is_idempotent_and_records_schema_version() {
 fn typed_repository_transaction_commits_domain_mutation() {
     let (store, root) = store();
     let profile_id = ProfileId::new("typed").unwrap();
-    let account = AccountState {
+    let mut account = AccountState {
         profile: Some(ProfileState {
             id: profile_id.clone(),
             name: "Typed Captain".to_owned(),
@@ -178,6 +181,57 @@ fn typed_repository_transaction_commits_domain_mutation() {
         resources: Default::default(),
         ..AccountState::default()
     };
+    let hero_id = HeroId::new(10).unwrap();
+    let equip_id = EquipId::new(20).unwrap();
+    account.dock.heroes.insert(
+        hero_id,
+        HeroState {
+            id: hero_id,
+            template_id: TemplateId::new(100).unwrap(),
+            level: 2,
+            exp: 3,
+            mood: 90,
+            affection: 4,
+            hp: 80,
+            locked: true,
+            equip_slots: vec![Some(equip_id)],
+        },
+    );
+    account.dock.equipments.insert(
+        equip_id,
+        EquipmentState {
+            id: equip_id,
+            template_id: TemplateId::new(200).unwrap(),
+            enhance_level: 1,
+            star: 2,
+            enhance_exp: 5,
+            hero_id: Some(hero_id),
+        },
+    );
+    account.fleet.fleets.insert(
+        FleetId::new(1).unwrap(),
+        FleetRecord {
+            formation_id: 2,
+            tactic_id: 3,
+            members: vec![hero_id],
+        },
+    );
+    account.tasks.progress.insert(7, 8);
+    account.tasks.completed.insert(7);
+    account.daily_copy.reset_day = 42;
+    account
+        .daily_copy
+        .challenge_times
+        .insert(ChapterId::new(3).unwrap(), 4);
+    account.buildings.levels.insert(11, 6);
+    account.battle.active = Some(BattleSession {
+        chapter_id: ChapterId::new(3).unwrap(),
+        copy_id: CopyId::new(300).unwrap(),
+        current_fleet: 1,
+        started_at: 100,
+        expires_at: 200,
+        revision: 1,
+    });
     AccountRepository::create(&store, &account).unwrap();
     AccountRepository::transact(&store, &profile_id, |account| {
         account
@@ -195,6 +249,23 @@ fn typed_repository_transaction_commits_domain_mutation() {
             .amount(blueoath_domain::CurrencyKind::Gold)
             .get(),
         25
+    );
+    assert_eq!(
+        loaded.dock.heroes[&hero_id].equip_slots,
+        vec![Some(equip_id)]
+    );
+    assert_eq!(loaded.dock.equipments[&equip_id].hero_id, Some(hero_id));
+    assert_eq!(
+        loaded.fleet.fleets[&FleetId::new(1).unwrap()].members,
+        vec![hero_id]
+    );
+    assert_eq!(loaded.tasks.progress.get(&7), Some(&8));
+    assert!(loaded.tasks.completed.contains(&7));
+    assert_eq!(loaded.daily_copy.reset_day, 42);
+    assert_eq!(loaded.buildings.levels.get(&11), Some(&6));
+    assert_eq!(
+        loaded.battle.active.as_ref().map(|session| session.copy_id),
+        Some(CopyId::new(300).unwrap())
     );
     let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
     let legacy_rows: i64 = connection

@@ -1,7 +1,7 @@
 use blueoath_domain::{
-    AccountRepository, AccountState, CharacterState, CurrencyKind, EquipId, EquipmentState,
-    FleetId, FleetRecord, HeroId, HeroState, NewAccountFactory, ProfileId, ProfileState,
-    RepositoryError, TemplateId,
+    AccountRepository, AccountState, ChapterId, CharacterState, CopyId, CurrencyKind, EquipId,
+    EquipmentState, FleetId, FleetRecord, HeroId, HeroState, NewAccountFactory, ProfileId,
+    ProfileState, RepositoryError, TemplateId,
 };
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -248,6 +248,38 @@ impl ProfileStore {
         }
 
         let mut statement = connection.prepare(
+            "SELECT hero_id, slot_index, equip_id
+             FROM hero_equip_slots WHERE profile_id = ?1 ORDER BY hero_id, slot_index",
+        )?;
+        let slots = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (hero_value, slot_value, equip_value) in slots {
+            let hero_id = positive_hero_id(hero_value, "equipment slot hero id")?;
+            let slot_index = usize::try_from(slot_value).map_err(|_| {
+                StorageError::InvalidTypedAccount("equipment slot index is invalid".to_owned())
+            })?;
+            let equip_id = equip_value
+                .map(|value| positive_equip_id(value, "equipment slot equipment id"))
+                .transpose()?;
+            let Some(hero) = account.dock.heroes.get_mut(&hero_id) else {
+                return Err(StorageError::InvalidTypedAccount(
+                    "equipment slot references missing hero".to_owned(),
+                ));
+            };
+            if hero.equip_slots.len() <= slot_index {
+                hero.equip_slots.resize(slot_index + 1, None);
+            }
+            hero.equip_slots[slot_index] = equip_id;
+        }
+
+        let mut statement = connection.prepare(
             "SELECT fleet_id, formation_id, tactic_id
              FROM fleets WHERE profile_id = ?1 ORDER BY fleet_id",
         )?;
@@ -295,6 +327,122 @@ impl ProfileStore {
                     fleet.members.resize(position + 1, hero_id);
                 }
                 fleet.members[position] = hero_id;
+            }
+        }
+
+        let mut statement = connection.prepare(
+            "SELECT task_id, progress, completed
+             FROM tasks WHERE profile_id = ?1 ORDER BY task_id",
+        )?;
+        let tasks = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (task_id, progress, completed) in tasks {
+            let task_id = u64::try_from(task_id)
+                .map_err(|_| StorageError::InvalidTypedAccount("task id is invalid".to_owned()))?;
+            account
+                .tasks
+                .progress
+                .insert(task_id, non_negative_u64(progress, "task progress")?);
+            if completed != 0 {
+                account.tasks.completed.insert(task_id);
+            }
+        }
+
+        let mut statement = connection.prepare(
+            "SELECT reset_day, chapter_id, challenge_times
+             FROM daily_copy_progress WHERE profile_id = ?1 ORDER BY chapter_id",
+        )?;
+        let daily_rows = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (reset_day, chapter_value, challenge_times) in daily_rows {
+            account.daily_copy.reset_day = non_negative_u32(reset_day, "daily reset day")?;
+            let chapter_id = ChapterId::new(positive_u64(chapter_value, "daily chapter id")?)
+                .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
+            account.daily_copy.challenge_times.insert(
+                chapter_id,
+                non_negative_u32(challenge_times, "daily challenge times")?,
+            );
+        }
+
+        let mut statement = connection.prepare(
+            "SELECT building_id, level
+             FROM buildings WHERE profile_id = ?1 ORDER BY building_id",
+        )?;
+        let buildings = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (building_id, level) in buildings {
+            account.buildings.levels.insert(
+                u64::try_from(building_id).map_err(|_| {
+                    StorageError::InvalidTypedAccount("building id is invalid".to_owned())
+                })?,
+                non_negative_u32(level, "building level")?,
+            );
+        }
+
+        if let Some((chapter_value, copy_value, current_fleet, started_at, expires_at, revision)) =
+            connection
+                .query_row(
+                    "SELECT chapter_id, copy_id, current_fleet, started_at, expires_at, revision
+                     FROM battle_sessions WHERE profile_id = ?1",
+                    params![profile_id.as_str()],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, i64>(5)?,
+                        ))
+                    },
+                )
+                .optional()?
+        {
+            let chapter_id = ChapterId::new(positive_u64(chapter_value, "battle chapter id")?)
+                .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
+            let copy_id = CopyId::new(positive_u64(copy_value, "battle copy id")?)
+                .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
+            account.battle.active = Some(blueoath_domain::BattleSession {
+                chapter_id,
+                copy_id,
+                current_fleet: non_negative_u32(current_fleet, "battle current fleet")?,
+                started_at: non_negative_u64(started_at, "battle start")?,
+                expires_at: non_negative_u64(expires_at, "battle expiry")?,
+                revision: non_negative_u64(revision, "battle revision")?,
+            });
+        }
+
+        let mut statement = connection.prepare(
+            "SELECT copy_id, first_passed
+             FROM copy_progress WHERE profile_id = ?1 ORDER BY copy_id",
+        )?;
+        let passed_copies = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (copy_value, first_passed) in passed_copies {
+            if first_passed != 0 {
+                let copy_id = CopyId::new(positive_u64(copy_value, "passed copy id")?)
+                    .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
+                account.battle.passed_copies.insert(copy_id);
             }
         }
         account
@@ -591,7 +739,7 @@ impl ProfileStore {
                 "INSERT INTO daily_copy_progress(
                     profile_id, reset_day, chapter_id, group_id, challenge_times,
                     success_times, select_ex, extra_group
-                 ) VALUES (?1, ?2, ?3, 0, ?4, 0, 0, 0)",
+                 ) VALUES (?1, ?2, ?3, 1, ?4, 0, 0, 0)",
                 params![
                     profile.id.as_str(),
                     typed_i64(account.daily_copy.reset_day, "daily reset day")?,
