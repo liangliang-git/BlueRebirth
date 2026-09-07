@@ -1,9 +1,11 @@
 #![allow(dead_code)]
 
+#[cfg(test)]
 use serde_json::{json, Value};
 
 use super::*;
 
+#[cfg(test)]
 pub(super) fn auto_select_enhancement_materials(
     account: &Value,
     catalog: Option<&EquipCatalog>,
@@ -63,6 +65,7 @@ pub(super) fn encode_equip_enhance_response(equip_id: u64, level: i32, exp: i32)
     output
 }
 
+#[cfg(test)]
 pub(super) fn encode_study_skill_response(hero_id: u64, skill_id: i32) -> Vec<u8> {
     let mut output = Vec::new();
     append_varint_field(&mut output, 1, hero_id);
@@ -70,6 +73,7 @@ pub(super) fn encode_study_skill_response(hero_id: u64, skill_id: i32) -> Vec<u8
     output
 }
 
+#[cfg(test)]
 pub(super) fn enhance_equip_state(
     account: &mut Value,
     catalog: Option<&EquipCatalog>,
@@ -204,6 +208,7 @@ pub(super) fn enhance_equip_state(
     Some((level, exp.min(i64::from(i32::MAX)) as i32))
 }
 
+#[cfg(test)]
 pub(super) fn enhance_bind_equip_state(
     account: &mut Value,
     catalog: Option<&EquipCatalog>,
@@ -273,6 +278,7 @@ pub(super) fn enhance_bind_equip_state(
     Some((next_level, 0))
 }
 
+#[cfg(test)]
 pub(super) fn renovate_equip_state(
     account: &mut Value,
     catalog: Option<&EquipCatalog>,
@@ -393,6 +399,7 @@ pub(super) fn renovate_equip_state(
     true
 }
 
+#[cfg(test)]
 pub(super) fn dismantle_equip_state(
     account: &mut Value,
     catalog: Option<&EquipCatalog>,
@@ -473,6 +480,7 @@ pub(super) fn dismantle_equip_state(
     (rewards, remove_ids)
 }
 
+#[cfg(test)]
 pub(super) fn set_equip_hero_id(account: &mut Value, equip_id: u64, hero_id: u64) {
     if equip_id == 0 {
         return;
