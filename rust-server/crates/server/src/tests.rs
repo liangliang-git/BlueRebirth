@@ -3848,8 +3848,11 @@ fn hero_exp_request_decodes_nested_items_and_consumption_is_bounded() {
 
 #[tokio::test]
 async fn hero_add_exp_route_persists_level_and_emits_refreshes() {
-    let mut account = default_account_snapshot("alice", "Alice", 123);
-    account["bag"]["items"] = json!([{"templateId": 150001, "num": 3}]);
+    let mut typed_account = NewAccountFactory::create(ProfileId::new("alice").unwrap(), "Alice");
+    typed_account
+        .inventory
+        .items
+        .insert(TemplateId::new(150001).unwrap(), 3);
     let catalog = HeroLevelCatalog {
         exp_per_item: [(150001, 100)].into_iter().collect(),
         exp_needed: [(1, 200)].into_iter().collect(),
@@ -3871,22 +3874,16 @@ async fn hero_add_exp_route_persists_level_and_emits_refreshes() {
         .await
         .unwrap();
     let state = ServerState::new("alice", "Alice", "1.4.0");
-    assert!(process_game_login_frame_with_catalog_mut(
+    let catalogs = GameLoginCatalogs {
+        hero_level: Some(&catalog),
+        ..GameLoginCatalogs::empty()
+    };
+    assert!(process_game_login_frame_with_catalogs_typed_mut(
         &mut server,
         &state,
-        Some(&mut account),
         None,
-        None,
-        Some(&catalog),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        Some(&mut typed_account),
+        &catalogs,
     )
     .await
     .unwrap());
@@ -3910,6 +3907,16 @@ async fn hero_add_exp_route_persists_level_and_emits_refreshes() {
             .method,
         "bag.UpdateBagData"
     );
+    let task_push = NetSocketFrameCodec::read(&mut client)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        TMessageCodec::decode_response(&task_push.payload)
+            .unwrap()
+            .method,
+        "task.TaskInfo"
+    );
     let response = NetSocketFrameCodec::read(&mut client)
         .await
         .unwrap()
@@ -3917,9 +3924,20 @@ async fn hero_add_exp_route_persists_level_and_emits_refreshes() {
     let response = TMessageCodec::decode_response(&response.payload).unwrap();
     assert_eq!(response.method, "hero.AddExp");
     assert_eq!(response.callback_handler, 7);
-    assert_eq!(account["dock"]["heroes"][0]["level"], 2);
-    assert_eq!(account["dock"]["heroes"][0]["exp"], 0);
-    assert_eq!(account["bag"]["items"][0]["num"], 1);
+    let hero = typed_account
+        .dock
+        .heroes
+        .get(&blueoath_domain::HeroId::new(1).unwrap())
+        .unwrap();
+    assert_eq!(hero.level, 2);
+    assert_eq!(hero.exp, 0);
+    assert_eq!(
+        typed_account
+            .inventory
+            .items
+            .get(&TemplateId::new(150001).unwrap()),
+        Some(&1)
+    );
 }
 
 #[tokio::test]

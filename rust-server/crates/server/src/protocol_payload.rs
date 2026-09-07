@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use blueoath_protocol::Decode;
 
 use super::*;

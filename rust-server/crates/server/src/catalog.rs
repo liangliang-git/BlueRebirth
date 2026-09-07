@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use serde_json::Value;
 
 pub(super) static SUPPORT_CATALOG: std::sync::OnceLock<SupportCatalog> = std::sync::OnceLock::new();

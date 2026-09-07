@@ -301,7 +301,7 @@ where
         }
         _ if method.is_family(MethodFamily::Hero) => {
             let result = if let Some(typed) = typed_account.as_mut() {
-                let result = hero_handler::handle_typed(
+                hero_handler::handle_typed(
                     typed,
                     request.method.as_str(),
                     request_args,
@@ -312,42 +312,9 @@ where
                         breakdown: hero_breakdown_catalog,
                         ship_exp_multiplier: state.ship_exp_multiplier,
                     },
-                );
-                if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
-                    result
-                } else if typed_account.is_some() {
-                    HandlerResult::Error(GameError::InvalidRequest("hero request is not supported"))
-                } else {
-                    let mut context = GameLoginRequestContext {
-                        state,
-                        account: &mut account,
-                        catalogs: *catalogs,
-                        pre_pushes: &mut pre_pushes,
-                        post_pushes: &mut post_pushes,
-                        handler_error: &mut handler_error,
-                        pass_details: &mut pass_details,
-                        pass_rewards: &mut pass_rewards,
-                        pass_hero_ids: &mut pass_hero_ids,
-                        pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                        pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                    };
-                    hero_handler::handle(&mut context, request.method.as_str(), request_args)
-                }
+                )
             } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                hero_handler::handle(&mut context, request.method.as_str(), request_args)
+                HandlerResult::Error(GameError::InvalidRequest("hero requires typed account"))
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
