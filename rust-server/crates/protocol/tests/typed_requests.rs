@@ -2,12 +2,12 @@ use blueoath_protocol::{
     BuildShipRequest, BuildShipRewardRequest, ChangeNameRequest, ChangeWorldChannelRequest,
     CopyAttackRequest, CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
     DailyCopySelectExRequest, Decode, FriendSearchRequest, FriendTargetRequest,
-    GetBarrageByIdRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, InviteRecordVersionRequest,
-    InviteStateTypeRequest, OutpostBuildingRequest, OutpostSetHeroRequest, ProtocolError,
-    SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest,
-    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, ShipTaskCurrentShipRequest,
-    ShipTaskRewardRequest, SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest,
-    TeachingUserRequest,
+    GetBarrageByIdRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildTaskDonateRequest,
+    GuildTaskIdRequest, GuildTaskMemberRequest, InviteRecordVersionRequest, InviteStateTypeRequest,
+    OutpostBuildingRequest, OutpostSetHeroRequest, ProtocolError, SeaDifficultyRequest,
+    SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
+    SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest,
+    SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
 };
 
 #[test]
@@ -292,6 +292,27 @@ fn decodes_typed_chat_requests_with_length_limits() {
         ShipTaskCurrentShipRequest {
             ship_tid: 12,
             hero_template_id: 30091,
+        }
+    );
+}
+
+#[test]
+fn decodes_typed_guild_task_requests() {
+    assert_eq!(GuildTaskIdRequest::decode(&[0x08, 7]).unwrap().task_id, 7);
+    assert_eq!(
+        GuildTaskMemberRequest::decode(&[0x10, 8]).unwrap().task_id,
+        8
+    );
+
+    let donation = [0x10, 8, 0x1a, 6, 0x08, 1, 0x10, 2, 0x18, 3, 0x20, 9];
+    let request = GuildTaskDonateRequest::decode(&donation).unwrap();
+    assert_eq!((request.task_id, request.contribute), (8, 9));
+    assert_eq!(
+        request.items[0],
+        blueoath_protocol::GuildTaskDonationItem {
+            goods_type: 1,
+            item_id: 2,
+            amount: 3,
         }
     );
 }

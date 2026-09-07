@@ -63,6 +63,22 @@ pub fn decode_varint_fields(payload: &[u8]) -> Result<BTreeMap<u32, Vec<u64>>, P
     Ok(fields)
 }
 
+fn decode_repeated_message_fields(
+    payload: &[u8],
+    target_field: u32,
+) -> Result<Vec<Vec<u8>>, ProtocolError> {
+    let mut reader = PbReader::new(payload);
+    let mut messages = Vec::new();
+    while let Some((field, wire)) = reader.next_field()? {
+        if field == target_field && wire == 2 {
+            messages.push(reader.read_bytes()?.to_vec());
+        } else {
+            reader.skip(wire)?;
+        }
+    }
+    Ok(messages)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CopyStartRequest {
     pub copy_id: i32,
@@ -1841,6 +1857,89 @@ impl Decode for ShipTaskCurrentShipRequest {
                 .map_err(|_| ProtocolError::Invalid("ship task ship id is invalid"))?,
             hero_template_id: u64::try_from(hero_template_id)
                 .map_err(|_| ProtocolError::Invalid("ship task hero template is invalid"))?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuildTaskIdRequest {
+    pub task_id: i32,
+}
+
+impl Decode for GuildTaskIdRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let task_id = required_field(&fields, 1, "guild task is missing task id")?;
+        if task_id <= 0 {
+            return Err(ProtocolError::Invalid("guild task id is invalid"));
+        }
+        Ok(Self { task_id })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuildTaskMemberRequest {
+    pub task_id: i32,
+}
+
+impl Decode for GuildTaskMemberRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let task_id = required_field(&fields, 2, "guild task is missing task id")?;
+        if task_id <= 0 {
+            return Err(ProtocolError::Invalid("guild task id is invalid"));
+        }
+        Ok(Self { task_id })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuildTaskDonationItem {
+    pub goods_type: i32,
+    pub item_id: i32,
+    pub amount: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuildTaskDonateRequest {
+    pub task_id: i32,
+    pub contribute: i32,
+    pub items: Vec<GuildTaskDonationItem>,
+}
+
+impl Decode for GuildTaskDonateRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let task_id = required_field(&fields, 2, "guild task is missing task id")?;
+        let contribute = required_field(&fields, 4, "guild task is missing contribution")?;
+        if task_id <= 0 || contribute <= 0 {
+            return Err(ProtocolError::Invalid("guild task donation is invalid"));
+        }
+
+        let mut items = Vec::new();
+        for payload in decode_repeated_message_fields(payload, 3)? {
+            let fields = decode_varint_fields(&payload)?;
+            let goods_type = required_field(&fields, 1, "guild donation is missing goods type")?;
+            let item_id = required_field(&fields, 2, "guild donation is missing item id")?;
+            let amount = required_field(&fields, 3, "guild donation is missing amount")?;
+            if goods_type <= 0 || item_id <= 0 || amount <= 0 {
+                return Err(ProtocolError::Invalid(
+                    "guild task donation item is invalid",
+                ));
+            }
+            items.push(GuildTaskDonationItem {
+                goods_type,
+                item_id,
+                amount,
+            });
+        }
+        if items.is_empty() {
+            return Err(ProtocolError::Invalid("guild task donation has no items"));
+        }
+        Ok(Self {
+            task_id,
+            contribute,
+            items,
         })
     }
 }

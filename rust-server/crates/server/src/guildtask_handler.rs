@@ -16,21 +16,16 @@ pub(super) fn handle_typed(
     request_args: &[u8],
     pre_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
-    let task_id = match method {
-        "guildtask.GuildTaskAccept" | "guildtask.GuildTaskFinish" | "guildtask.Donate" => {
-            decode_varint_field(request_args, 2)
-        }
-        _ => decode_varint_field(request_args, 1),
-    };
     match method {
         "guildtask.UpdateGuildTaskData" => reply(method, guild_task_data_payload_typed(account)),
         "guildtask.UpdateGuildTaskUserData" => {
             reply(method, guild_task_user_payload_typed(account))
         }
-        "guildtask.AcceptTask" | "guildtask.GuildTaskAccept" => {
-            if task_id <= 0 {
-                return invalid("guild task id is invalid");
-            }
+        "guildtask.AcceptTask" => {
+            let Ok(request) = GuildTaskIdRequest::decode(request_args) else {
+                return invalid("guild task request is invalid");
+            };
+            let task_id = request.task_id;
             account
                 .activities
                 .progress
@@ -41,21 +36,32 @@ pub(super) fn handle_typed(
                 .insert("guildTask:lastTaskId".to_owned(), task_id as u64);
             HandlerResult::PushOnly
         }
-        "guildtask.GuildTaskFinish" => {
-            if task_id <= 0 {
-                return invalid("guild task id is invalid");
-            }
+        "guildtask.GuildTaskAccept" | "guildtask.GuildTaskFinish" => {
+            let Ok(request) = GuildTaskMemberRequest::decode(request_args) else {
+                return invalid("guild task request is invalid");
+            };
+            let task_id = request.task_id;
+            let progress_key = if method == "guildtask.GuildTaskAccept" {
+                "guildTask:accepted:"
+            } else {
+                "guildTask:finished:"
+            };
             account
                 .activities
                 .progress
-                .insert(format!("guildTask:finished:{task_id}"), 1);
+                .insert(format!("{progress_key}{task_id}"), 1);
             account
                 .activities
                 .progress
                 .insert("guildTask:lastTaskId".to_owned(), task_id as u64);
             HandlerResult::PushOnly
         }
-        "guildtask.Donate" => handle_typed_donate(account, request_args, task_id, pre_pushes),
+        "guildtask.Donate" => {
+            let Ok(request) = GuildTaskDonateRequest::decode(request_args) else {
+                return invalid("guild task donation is invalid");
+            };
+            handle_typed_donate(account, request, pre_pushes)
+        }
         "guildtask.DrawTaskReward" | "guildtask.ConstantRewardPoolGetReward" => {
             HandlerResult::Error(GameError::InvalidRequest(
                 "guild task reward requires typed reward catalog",
@@ -69,41 +75,29 @@ pub(super) fn handle_typed(
 
 fn handle_typed_donate(
     account: &mut blueoath_domain::AccountState,
-    request_args: &[u8],
-    task_id: i32,
+    request: GuildTaskDonateRequest,
     pre_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
-    let contribute = decode_varint_field(request_args, 4);
-    let items = decode_repeated_message_field(request_args, 3)
-        .into_iter()
-        .filter_map(|item| {
-            let goods_type = decode_varint_field(&item, 1);
-            let item_id = decode_varint_field(&item, 2);
-            let amount = decode_varint_field(&item, 3);
-            (goods_type > 0 && item_id > 0 && amount > 0).then_some((goods_type, item_id, amount))
-        })
-        .collect::<Vec<_>>();
-    if task_id <= 0 || contribute <= 0 || items.is_empty() {
-        return invalid("guild task donation is invalid");
-    }
-    if items.iter().any(|(goods_type, item_id, amount)| {
-        !typed_donation_available(account, *goods_type, *item_id, *amount)
-    }) {
+    if request
+        .items
+        .iter()
+        .any(|item| !typed_donation_available(account, item.goods_type, item.item_id, item.amount))
+    {
         return invalid("guild task donation items are insufficient");
     }
-    for (goods_type, item_id, amount) in items {
-        typed_donation_consume(account, goods_type, item_id, amount);
+    for item in request.items {
+        typed_donation_consume(account, item.goods_type, item.item_id, item.amount);
     }
     let progress = account
         .activities
         .progress
         .entry("guildTask:contribute".to_owned())
         .or_default();
-    *progress = progress.saturating_add(u64::try_from(contribute).unwrap_or_default());
+    *progress = progress.saturating_add(u64::try_from(request.contribute).unwrap_or_default());
     account
         .activities
         .progress
-        .insert("guildTask:lastTaskId".to_owned(), task_id as u64);
+        .insert("guildTask:lastTaskId".to_owned(), request.task_id as u64);
     pre_pushes.push(BagInfoCodec::encode(&bag_info_from_typed_account(account)));
     HandlerResult::PushOnly
 }
