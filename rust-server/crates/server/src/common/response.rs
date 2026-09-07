@@ -57,13 +57,14 @@ pub enum HandlerResult {
     Reply(Response),
     PushOnly,
     Empty,
+    Error(GameError),
 }
 
 impl HandlerResult {
     pub fn into_payload(self) -> Option<Vec<u8>> {
         match self {
             Self::Reply(response) => Some(response.payload),
-            Self::PushOnly | Self::Empty => None,
+            Self::PushOnly | Self::Empty | Self::Error(_) => None,
         }
     }
 }

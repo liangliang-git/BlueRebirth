@@ -9,7 +9,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     request_args: &[u8],
 ) -> HandlerResult {
     let Some(account) = context.account.as_deref_mut() else {
-        return HandlerResult::Empty;
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
     let now = current_unix_seconds();
     let uid = account
@@ -23,9 +23,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             let channel = match ChangeWorldChannelRequest::decode(request_args) {
                 Ok(request) => request.channel,
                 Err(_) => {
-                    *context.response_err = 1;
-                    *context.response_err_msg = "chat channel is invalid".to_owned();
-                    return reply(method, Vec::new());
+                    return HandlerResult::Error(GameError::InvalidRequest("chat channel"));
                 }
             };
             let chat = chat_state_mut(account);
@@ -36,9 +34,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             let request = match SendMessageRequest::decode(request_args) {
                 Ok(request) => request,
                 Err(_) => {
-                    *context.response_err = 1;
-                    *context.response_err_msg = "chat message request is invalid".to_owned();
-                    return reply(method, Vec::new());
+                    return HandlerResult::Error(GameError::InvalidRequest("chat message"));
                 }
             };
             let message = request.message;
@@ -75,9 +71,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             let request = match SendBarrageRequest::decode(request_args) {
                 Ok(request) => request,
                 Err(_) => {
-                    *context.response_err = 1;
-                    *context.response_err_msg = "barrage request is invalid".to_owned();
-                    return reply(method, Vec::new());
+                    return HandlerResult::Error(GameError::InvalidRequest("barrage"));
                 }
             };
             let SendBarrageRequest {

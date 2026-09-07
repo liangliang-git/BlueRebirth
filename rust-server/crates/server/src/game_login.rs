@@ -6,6 +6,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use super::catalog::*;
 use super::common::error::GameError;
 use super::common::request::RequestContext;
+use super::common::response::HandlerResult;
 use super::router::{GameMethod, MethodFamily};
 use super::wire::*;
 use super::*;
@@ -438,7 +439,12 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            chat_handler::handle(&mut context, request.method.as_str(), request_args).into_payload()
+            let result = chat_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::Adventure) => {
             let mut context = GameLoginRequestContext {
