@@ -13,16 +13,26 @@ pub(super) fn handle_typed(
 ) -> HandlerResult {
     match method {
         "guildbox.SetAnonymous" => {
-            account.guild_box.anonymous = decode_varint_field(request_args, 1) != 0;
+            let request = match GuildBoxAnonymousRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => return invalid("guild box anonymous is invalid"),
+            };
+            account.guild_box.anonymous = request.anonymous;
             reply(method, typed_user_data_payload(account))
         }
         "guildbox.PickShareBox" => {
-            let box_id = decode_varint_u64_field(request_args, 1);
-            pick_typed_box(method, &mut account.guild_box.share_boxes, box_id)
+            let request = match GuildBoxIdRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => return invalid("guild box id is invalid"),
+            };
+            pick_typed_box(method, &mut account.guild_box.share_boxes, request.box_id)
         }
         "guildbox.PickTaskBox" => {
-            let box_id = decode_varint_u64_field(request_args, 1);
-            pick_typed_box(method, &mut account.guild_box.task_boxes, box_id)
+            let request = match GuildBoxIdRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => return invalid("guild box id is invalid"),
+            };
+            pick_typed_box(method, &mut account.guild_box.task_boxes, request.box_id)
         }
         "guildbox.PickPointsBox" => {
             if account.guild_box.points_box_count == 0 {

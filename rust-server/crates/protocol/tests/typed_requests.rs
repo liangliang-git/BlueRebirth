@@ -2,9 +2,10 @@ use blueoath_protocol::{
     BuildShipRequest, BuildShipRewardRequest, ChangeNameRequest, ChangeWorldChannelRequest,
     CopyAttackRequest, CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
     DailyCopySelectExRequest, Decode, FriendSearchRequest, FriendTargetRequest,
-    GetBarrageByIdRequest, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
-    SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
-    SetSecretaryRequest, TaskAllRewardRequest, TaskRewardRequest,
+    GetBarrageByIdRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, ProtocolError,
+    SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest,
+    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, TaskAllRewardRequest,
+    TaskRewardRequest,
 };
 
 #[test]
@@ -246,6 +247,14 @@ fn decodes_typed_chat_requests_with_length_limits() {
             milestone: 10,
         }
     );
+    assert_eq!(
+        GuildBoxIdRequest::decode(&[0x08, 77]).unwrap(),
+        GuildBoxIdRequest { box_id: 77 }
+    );
+    assert_eq!(
+        GuildBoxAnonymousRequest::decode(&[0x08, 1]).unwrap(),
+        GuildBoxAnonymousRequest { anonymous: true }
+    );
 }
 
 #[test]
@@ -265,5 +274,9 @@ fn rejects_invalid_typed_chat_requests() {
     assert!(matches!(
         BuildShipRewardRequest::decode(&[0x08, 0, 0x10, 1]),
         Err(ProtocolError::Invalid("build reward request is invalid"))
+    ));
+    assert!(matches!(
+        GuildBoxAnonymousRequest::decode(&[0x08, 2]),
+        Err(ProtocolError::Invalid("guild box anonymous is invalid"))
     ));
 }

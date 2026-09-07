@@ -1649,6 +1649,43 @@ impl Decode for BuildShipRewardRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuildBoxIdRequest {
+    pub box_id: u64,
+}
+
+impl Decode for GuildBoxIdRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let box_id = required_field(&fields, 1, "guild box is missing id")?;
+        if box_id == 0 {
+            return Err(ProtocolError::Invalid("guild box id is invalid"));
+        }
+        Ok(Self {
+            box_id: u64::try_from(box_id)
+                .map_err(|_| ProtocolError::Invalid("guild box id is invalid"))?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuildBoxAnonymousRequest {
+    pub anonymous: bool,
+}
+
+impl Decode for GuildBoxAnonymousRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let anonymous = optional_i32(&fields, 1, "guild box anonymous has duplicate value")?;
+        if !matches!(anonymous, 0 | 1) {
+            return Err(ProtocolError::Invalid("guild box anonymous is invalid"));
+        }
+        Ok(Self {
+            anonymous: anonymous != 0,
+        })
+    }
+}
+
 impl Decode for SeaDifficultyRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
