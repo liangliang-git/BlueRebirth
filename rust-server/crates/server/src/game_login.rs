@@ -253,6 +253,8 @@ where
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result
+                } else if typed_account.is_some() {
+                    HandlerResult::Error(GameError::InvalidRequest("hero request is not supported"))
                 } else {
                     let mut context = GameLoginRequestContext {
                         state,
@@ -497,6 +499,8 @@ where
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result
+                } else if typed_account.is_some() {
+                    HandlerResult::Error(GameError::InvalidRequest("base request is not supported"))
                 } else {
                     let mut context = GameLoginRequestContext {
                         state,
@@ -565,6 +569,10 @@ where
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result
+                } else if typed_account.is_some() {
+                    HandlerResult::Error(GameError::InvalidRequest(
+                        "friend request is not supported",
+                    ))
                 } else {
                     let mut context = GameLoginRequestContext {
                         state,
@@ -653,20 +661,29 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::Boss) => {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            let result = if let Some(typed) = typed_account.as_ref() {
+                let result = boss_handler::handle_typed(state, typed, request.method.as_str());
+                if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
+                    result
+                } else {
+                    HandlerResult::Error(GameError::InvalidRequest("boss request is not supported"))
+                }
+            } else {
+                let mut context = GameLoginRequestContext {
+                    state,
+                    account: &mut account,
+                    catalogs: *catalogs,
+                    pre_pushes: &mut pre_pushes,
+                    post_pushes: &mut post_pushes,
+                    handler_error: &mut handler_error,
+                    pass_details: &mut pass_details,
+                    pass_rewards: &mut pass_rewards,
+                    pass_hero_ids: &mut pass_hero_ids,
+                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                };
+                boss_handler::handle(&mut context, request.method.as_str(), request_args)
             };
-            let result = boss_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -736,21 +753,36 @@ where
             result.into_payload()
         }
         _ if activity_extra_handler::handles(request.method.as_str()) => {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            let result = if let Some(typed) = typed_account.as_ref() {
+                let result = activity_extra_handler::handle_typed(
+                    state,
+                    typed,
+                    request.method.as_str(),
+                    request_args,
+                );
+                if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
+                    result
+                } else {
+                    HandlerResult::Error(GameError::InvalidRequest(
+                        "activity request is not supported",
+                    ))
+                }
+            } else {
+                let mut context = GameLoginRequestContext {
+                    state,
+                    account: &mut account,
+                    catalogs: *catalogs,
+                    pre_pushes: &mut pre_pushes,
+                    post_pushes: &mut post_pushes,
+                    handler_error: &mut handler_error,
+                    pass_details: &mut pass_details,
+                    pass_rewards: &mut pass_rewards,
+                    pass_hero_ids: &mut pass_hero_ids,
+                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                };
+                activity_extra_handler::handle(&mut context, request.method.as_str(), request_args)
             };
-            let result =
-                activity_extra_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -1084,6 +1116,10 @@ where
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result
+                } else if typed_account.is_some() {
+                    HandlerResult::Error(GameError::InvalidRequest(
+                        "commerce request is not supported",
+                    ))
                 } else {
                     let mut context = GameLoginRequestContext {
                         state,
@@ -1137,6 +1173,10 @@ where
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result
+                } else if typed_account.is_some() {
+                    HandlerResult::Error(GameError::InvalidRequest(
+                        "equip request is not supported",
+                    ))
                 } else {
                     let mut context = GameLoginRequestContext {
                         state,
@@ -1194,6 +1234,10 @@ where
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result
+                } else if typed_account.is_some() {
+                    HandlerResult::Error(GameError::InvalidRequest(
+                        "building request is not supported",
+                    ))
                 } else {
                     let mut context = GameLoginRequestContext {
                         state,
@@ -1300,6 +1344,12 @@ where
                     handler_error = Some(error.clone());
                 }
                 result.into_payload()
+            } else if typed_account.is_some() {
+                let error = HandlerResult::Error(GameError::InvalidRequest(
+                    "task request is not supported",
+                ));
+                handler_error = Some(GameError::InvalidRequest("task request is not supported"));
+                error.into_payload()
             } else {
                 let mut context = GameLoginRequestContext {
                     state,
@@ -1372,6 +1422,10 @@ where
                 if matches!(result, HandlerResult::PushOnly | HandlerResult::Error(_)) {
                     typed_daily_copy_handled = true;
                     result
+                } else if typed_account.is_some() {
+                    HandlerResult::Error(GameError::InvalidRequest(
+                        "daily copy request is not supported",
+                    ))
                 } else {
                     let mut context = GameLoginRequestContext {
                         state,
@@ -1446,6 +1500,10 @@ where
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     typed_handled = true;
                     result
+                } else if typed_account.is_some() {
+                    HandlerResult::Error(GameError::InvalidRequest(
+                        "battle request is not supported",
+                    ))
                 } else {
                     let mut context = GameLoginRequestContext {
                         state,

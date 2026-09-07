@@ -1025,7 +1025,7 @@ pub(super) fn other_user_payload(
     output
 }
 
-fn other_user_payload_typed(
+pub(super) fn other_user_payload_typed(
     state: &ServerState,
     current: &blueoath_domain::AccountState,
     requested_uid: u64,

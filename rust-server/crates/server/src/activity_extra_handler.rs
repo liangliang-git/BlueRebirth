@@ -11,6 +11,169 @@ pub(super) fn handles(method: &str) -> bool {
     )
 }
 
+pub(super) fn handle_typed(
+    server_state: &ServerState,
+    account: &blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    match method {
+        "bigactivity.GetBigActivityInfo" => {
+            HandlerResult::Reply(Response::raw(method, typed_big_activity_payload(account)))
+        }
+        "bigactivity.GetBigActivityRank" | "bigactivity.GetBigActivityRankEx" => {
+            let start = decode_varint_field(request_args, 1).max(1);
+            HandlerResult::Reply(Response::raw(
+                method,
+                typed_big_activity_rank_payload(server_state, account, start),
+            ))
+        }
+        "guildbigactivity.UserData" => {
+            HandlerResult::Reply(Response::raw(method, typed_guild_activity_payload(account)))
+        }
+        "guildbigactivity.GuildRateData" => {
+            HandlerResult::Reply(Response::raw(method, typed_guild_rate_payload(account)))
+        }
+        "guildbigactivityrank.GetGuildRankList" => {
+            HandlerResult::Reply(Response::raw(method, typed_guild_rank_payload(account)))
+        }
+        _ => HandlerResult::Empty,
+    }
+}
+
+fn typed_activity_value(account: &blueoath_domain::AccountState, key: &str) -> u64 {
+    account
+        .activities
+        .progress
+        .get(key)
+        .copied()
+        .unwrap_or_default()
+}
+
+fn typed_big_activity_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let merits = typed_activity_value(account, "bigActivity\u{1f}merits");
+    let mut output = Vec::new();
+    append_varint_field(&mut output, 1, merits);
+    append_varint_field(&mut output, 4, merits);
+    output
+}
+
+fn typed_big_activity_rank_payload(
+    server_state: &ServerState,
+    current: &blueoath_domain::AccountState,
+    start: i32,
+) -> Vec<u8> {
+    let mut entries = server_state
+        .social_store
+        .as_ref()
+        .and_then(|store| store.list_typed_accounts().ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|account| {
+            (
+                account.character.uid,
+                typed_activity_value(&account, "bigActivity\u{1f}merits"),
+                account.character.name,
+            )
+        })
+        .collect::<Vec<_>>();
+    let current_merits = typed_activity_value(current, "bigActivity\u{1f}merits");
+    if let Some(existing) = entries
+        .iter_mut()
+        .find(|(uid, _, _)| *uid == current.character.uid)
+    {
+        existing.1 = current_merits;
+        existing.2 = current.character.name.clone();
+    } else {
+        entries.push((
+            current.character.uid,
+            current_merits,
+            current.character.name.clone(),
+        ));
+    }
+    entries.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    let offset = usize::try_from(start.saturating_sub(1)).unwrap_or_default();
+    let mut output = Vec::new();
+    for (index, (uid, merits, name)) in entries.iter().skip(offset).take(50).enumerate() {
+        append_message_field(
+            &mut output,
+            1,
+            &big_activity_rank_row(
+                *uid,
+                name,
+                *merits,
+                offset.saturating_add(index).saturating_add(1),
+            ),
+        );
+    }
+    let current_rank = entries
+        .iter()
+        .position(|(uid, _, _)| *uid == current.character.uid)
+        .map(|rank| rank.saturating_add(1))
+        .unwrap_or(1);
+    append_message_field(
+        &mut output,
+        2,
+        &big_activity_rank_row(
+            current.character.uid,
+            &current.character.name,
+            current_merits,
+            current_rank,
+        ),
+    );
+    output
+}
+
+fn typed_guild_activity_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let points = account
+        .activities
+        .progress
+        .iter()
+        .filter(|(key, _)| key.starts_with("guildBigActivity\u{1f}points:"))
+        .map(|(_, value)| *value)
+        .sum::<u64>();
+    let mut output = Vec::new();
+    append_varint_field(&mut output, 1, points);
+    append_varint_field(&mut output, 2, 0);
+    append_varint_field(&mut output, 3, 0);
+    output
+}
+
+fn typed_guild_rate_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let points = account
+        .activities
+        .progress
+        .iter()
+        .filter(|(key, _)| key.starts_with("guildBigActivity\u{1f}points:"))
+        .map(|(_, value)| *value)
+        .sum::<u64>();
+    let mut output = Vec::new();
+    append_varint_field(&mut output, 1, points);
+    append_varint_field(&mut output, 2, points.saturating_add(1));
+    append_varint_field(&mut output, 3, 100);
+    append_varint_field(&mut output, 4, 100);
+    output
+}
+
+fn typed_guild_rank_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let points = account
+        .activities
+        .progress
+        .iter()
+        .filter(|(key, _)| key.starts_with("guildBigActivity\u{1f}points:"))
+        .map(|(_, value)| *value)
+        .sum::<u64>();
+    let mut rank = Vec::new();
+    append_varint_field(&mut rank, 1, 0);
+    append_bytes_field(&mut rank, 2, b"BlueOath");
+    append_varint_field(&mut rank, 4, 1);
+    append_varint_field(&mut rank, 5, points);
+    let mut output = Vec::new();
+    append_message_field(&mut output, 1, &rank);
+    append_message_field(&mut output, 2, &rank);
+    output
+}
+
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
