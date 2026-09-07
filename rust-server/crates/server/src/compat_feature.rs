@@ -43,6 +43,7 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "hero.Marry"
             | "hero.AddAffection"
             | "illustrate.VowDecTime"
+            | "illustrate.IllustrateNew"
             | "repair.RepairHero"
     )
 }
@@ -103,6 +104,27 @@ pub(super) fn handle_typed(
         append_varint_field(&mut output, 1, 0);
         append_varint_field(&mut output, 2, 0);
         return HandlerResult::Reply(Response::raw(method, output));
+    }
+    if method == "illustrate.IllustrateNew" {
+        let ids = decode_repeated_varint_field(request_args, 1)
+            .into_iter()
+            .filter(|id| *id > 0)
+            .collect::<Vec<_>>();
+        if ids.is_empty() {
+            return HandlerResult::Error(GameError::InvalidRequest("illustrate id list is empty"));
+        }
+        let mut response = Vec::new();
+        let mut entries = Vec::new();
+        for id in ids {
+            account
+                .activities
+                .progress
+                .entry(format!("compat:illustrate:{id}:seen"))
+                .or_insert(1);
+            entries.push((id, Vec::new()));
+        }
+        response.extend(illustrate_info_payload_for_entries(&entries));
+        return HandlerResult::Reply(Response::raw(method, response));
     }
     if method == "hero.Marry" {
         let hero_id = decode_varint_u64_field(request_args, 1);
@@ -1971,5 +1993,23 @@ mod tests {
             .inventory
             .items
             .contains_key(&blueoath_domain::TemplateId::new(cooldown_id as u64).unwrap()));
+
+        let mut illustrate = Vec::new();
+        append_varint_field(&mut illustrate, 1, 7);
+        assert!(matches!(
+            handle_typed(
+                &state,
+                &mut account,
+                "illustrate.IllustrateNew",
+                &illustrate,
+                None,
+                &mut pushes,
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account.activities.progress.get("compat:illustrate:7:seen"),
+            Some(&1)
+        );
     }
 }
