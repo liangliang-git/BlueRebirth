@@ -1,7 +1,7 @@
 use blueoath_domain::{
     AccountRepository, AccountState, ChapterId, CharacterState, ChatBarrageState, ChatMessageState,
     CopyId, CurrencyKind, EquipId, EquipmentState, FleetId, FleetRecord, HeroId, HeroState,
-    NewAccountFactory, ProfileId, ProfileState, RepositoryError, TemplateId,
+    NewAccountFactory, PresetFleetState, ProfileId, ProfileState, RepositoryError, TemplateId,
 };
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -411,6 +411,103 @@ impl ProfileStore {
                 }
                 fleet.members[position] = hero_id;
             }
+        }
+
+        account.fleet.preset_name_num = connection
+            .query_row(
+                "SELECT name_num FROM preset_fleet_meta WHERE profile_id = ?1",
+                params![profile_id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .map(|value| non_negative_u32(value, "preset fleet name number"))
+            .transpose()?
+            .unwrap_or_default();
+        account.fleet.preset_red_dot = connection
+            .query_row(
+                "SELECT red_dot FROM preset_fleet_meta WHERE profile_id = ?1",
+                params![profile_id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .map(|value| non_negative_u32(value, "preset fleet red dot"))
+            .transpose()?
+            .unwrap_or_default();
+        let mut statement = connection.prepare(
+            "SELECT slot, name, mode_id, strategy_id
+             FROM preset_fleets WHERE profile_id = ?1 ORDER BY slot",
+        )?;
+        let presets = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (slot, name, mode_id, strategy_id) in presets {
+            let mode_id = non_negative_u32(mode_id, "preset fleet mode")?;
+            let strategy_id = non_negative_u32(strategy_id, "preset fleet strategy")?;
+            let slot = usize::try_from(slot).map_err(|_| {
+                StorageError::InvalidTypedAccount("preset fleet slot is invalid".to_owned())
+            })?;
+            if account.fleet.presets.len() <= slot {
+                account
+                    .fleet
+                    .presets
+                    .resize(slot + 1, PresetFleetState::default());
+            }
+            account.fleet.presets[slot] = PresetFleetState {
+                name,
+                hero_ids: Vec::new(),
+                ex_hero_ids: Vec::new(),
+                mode_id,
+                strategy_id,
+            };
+        }
+        let mut statement = connection.prepare(
+            "SELECT slot, position, hero_id, is_ex
+             FROM preset_fleet_members
+             WHERE profile_id = ?1 ORDER BY slot, is_ex, position",
+        )?;
+        let preset_members = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (slot, position, hero_id, is_ex) in preset_members {
+            let slot = usize::try_from(slot).map_err(|_| {
+                StorageError::InvalidTypedAccount("preset fleet slot is invalid".to_owned())
+            })?;
+            let position = usize::try_from(position).map_err(|_| {
+                StorageError::InvalidTypedAccount("preset fleet position is invalid".to_owned())
+            })?;
+            let hero_id = positive_hero_id(hero_id, "preset fleet hero id")?;
+            let Some(preset) = account.fleet.presets.get_mut(slot) else {
+                return Err(StorageError::InvalidTypedAccount(
+                    "preset fleet member references missing preset".to_owned(),
+                ));
+            };
+            let members = if is_ex == 0 {
+                &mut preset.hero_ids
+            } else {
+                &mut preset.ex_hero_ids
+            };
+            if members.len() <= position {
+                members.resize(
+                    position + 1,
+                    HeroId::new(1)
+                        .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?,
+                );
+            }
+            members[position] = hero_id;
         }
 
         let mut statement = connection.prepare(
@@ -910,6 +1007,45 @@ impl ProfileStore {
                 )?;
             }
         }
+        transaction.execute(
+            "INSERT INTO preset_fleet_meta(profile_id, name_num, red_dot)
+             VALUES (?1, ?2, ?3)",
+            params![
+                profile.id.as_str(),
+                typed_i64(account.fleet.preset_name_num, "preset fleet name number")?,
+                typed_i64(account.fleet.preset_red_dot, "preset fleet red dot")?,
+            ],
+        )?;
+        for (slot, preset) in account.fleet.presets.iter().enumerate() {
+            transaction.execute(
+                "INSERT INTO preset_fleets(
+                    profile_id, slot, name, mode_id, strategy_id
+                 ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(slot, "preset fleet slot")?,
+                    preset.name,
+                    typed_i64(preset.mode_id, "preset fleet mode")?,
+                    typed_i64(preset.strategy_id, "preset fleet strategy")?,
+                ],
+            )?;
+            for (is_ex, members) in [(0_i64, &preset.hero_ids), (1_i64, &preset.ex_hero_ids)] {
+                for (position, hero_id) in members.iter().enumerate() {
+                    transaction.execute(
+                        "INSERT INTO preset_fleet_members(
+                            profile_id, slot, position, hero_id, is_ex
+                         ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            profile.id.as_str(),
+                            typed_i64(slot, "preset fleet slot")?,
+                            typed_i64(position, "preset fleet position")?,
+                            typed_i64(hero_id.get(), "preset fleet hero id")?,
+                            is_ex,
+                        ],
+                    )?;
+                }
+            }
+        }
         for (task_id, progress) in &account.tasks.progress {
             transaction.execute(
                 "INSERT INTO tasks(profile_id, task_id, task_type, progress, completed, reset_day)
@@ -1206,6 +1342,9 @@ fn clear_normalized_account(
 ) -> Result<(), StorageError> {
     for table in [
         "task_claims",
+        "preset_fleet_members",
+        "preset_fleets",
+        "preset_fleet_meta",
         "construction_jobs",
         "buildings",
         "daily_copy_progress",
@@ -1815,6 +1954,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0008_character_profile_fields.sql"),
     include_str!("../../../migrations/0009_chat_state.sql"),
     include_str!("../../../migrations/0010_building_template_id.sql"),
+    include_str!("../../../migrations/0011_preset_fleets.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

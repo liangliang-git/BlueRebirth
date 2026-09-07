@@ -32,15 +32,16 @@ use super::{
     load_ship_intensify_catalog, load_ship_stat_catalog, load_shop_catalog, load_task_catalog,
     mark_battle_fleet_passed, mop_up_pass_rets, mop_up_payload, mop_up_payload_with_pass_rets,
     normalize_daily_copy_state, normalize_task_state, prepare_local_request,
-    preset_fleet_info_from_account, process_game_login_frame_with_catalog_mut,
-    process_game_login_frame_with_catalogs_typed_mut, receive_construction, record_battle_pass,
-    renovate_equip_state, resolve_study_skill_id, return_shop_buy_response, scale_reward,
-    sea_difficulty_for_account, set_fleet_on_typed_account, set_preset_fleet_from_account,
-    set_sea_difficulty, settle_mop_up, settle_mop_up_with_config, settle_support_state,
-    ship_attributes_for_hero, ship_attributes_for_template, shop_costs_from_value,
-    shop_info_payload, start_construction, start_study_state, start_support_state,
-    story_memory_payload, study_info_payload, study_skill_state, sync_achievement_points,
-    sync_typed_battle_state, sync_typed_daily_copy_state, task_completed, task_info_payload,
+    preset_fleet_info_from_account, preset_fleet_info_from_typed_account,
+    process_game_login_frame_with_catalog_mut, process_game_login_frame_with_catalogs_typed_mut,
+    receive_construction, record_battle_pass, renovate_equip_state, resolve_study_skill_id,
+    return_shop_buy_response, scale_reward, sea_difficulty_for_account, set_fleet_on_typed_account,
+    set_preset_fleet_from_account, set_preset_fleet_on_typed_account, set_sea_difficulty,
+    settle_mop_up, settle_mop_up_with_config, settle_support_state, ship_attributes_for_hero,
+    ship_attributes_for_template, shop_costs_from_value, shop_info_payload, start_construction,
+    start_study_state, start_support_state, story_memory_payload, study_info_payload,
+    study_skill_state, sync_achievement_points, sync_typed_battle_state,
+    sync_typed_daily_copy_state, sync_typed_preset_fleet_state, task_completed, task_info_payload,
     task_info_payload_from_typed_account, update_bathroom_state, update_building_assignments,
     update_mop_up_state, validate_battle_attack, BattleCatalog, BattleCopy, BattleEnemy,
     BattleFleetReward, BuildShipCatalog, BuildingCatalog, ChapterCatalog, CommanderLevelCatalog,
@@ -267,6 +268,57 @@ fn typed_fleet_mutation_validates_hero_ownership() {
     assert_eq!(
         account.fleet.fleets[&FleetId::new(2).unwrap()].members,
         vec![hero_id]
+    );
+}
+
+#[test]
+fn typed_preset_fleet_round_trips_and_rejects_unowned_heroes() {
+    let mut account = NewAccountFactory::create(ProfileId::new("typed-preset").unwrap(), "Preset");
+    let value = PresetFleetInfo {
+        fleets: vec![PresetFleet {
+            name: "Typed preset".to_owned(),
+            hero_ids: vec![1],
+            ex_hero_ids: Vec::new(),
+            mode_id: 3,
+            strategy_id: 17,
+        }],
+        name_num: 4,
+        red_dot: 1,
+    };
+    assert!(set_preset_fleet_on_typed_account(&mut account, &value));
+    assert_eq!(preset_fleet_info_from_typed_account(&account), value);
+
+    let mut invalid = value.clone();
+    invalid.fleets[0].hero_ids = vec![9999];
+    assert!(!set_preset_fleet_on_typed_account(&mut account, &invalid));
+
+    let legacy = json!({
+        "presetFleet": {
+            "presetfleet": [{
+                "Name": "Legacy preset",
+                "heroList": [1],
+                "exHeroList": [],
+                "modeId": 2,
+                "strategyId": 8
+            }],
+            "NameNum": 6,
+            "redDot": 0
+        }
+    });
+    assert!(sync_typed_preset_fleet_state(&mut account, &legacy));
+    assert_eq!(
+        preset_fleet_info_from_typed_account(&account),
+        PresetFleetInfo {
+            fleets: vec![PresetFleet {
+                name: "Legacy preset".to_owned(),
+                hero_ids: vec![1],
+                ex_hero_ids: Vec::new(),
+                mode_id: 2,
+                strategy_id: 8,
+            }],
+            name_num: 6,
+            red_dot: 0,
+        }
     );
 }
 

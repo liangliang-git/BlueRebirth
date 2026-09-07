@@ -205,6 +205,12 @@ pub struct EquipmentState {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FleetState {
     pub fleets: BTreeMap<FleetId, FleetRecord>,
+    #[serde(default)]
+    pub presets: Vec<PresetFleetState>,
+    #[serde(default)]
+    pub preset_name_num: u32,
+    #[serde(default)]
+    pub preset_red_dot: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,6 +218,15 @@ pub struct FleetRecord {
     pub formation_id: u32,
     pub tactic_id: u32,
     pub members: Vec<HeroId>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PresetFleetState {
+    pub name: String,
+    pub hero_ids: Vec<HeroId>,
+    pub ex_hero_ids: Vec<HeroId>,
+    pub mode_id: u32,
+    pub strategy_id: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

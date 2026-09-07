@@ -1259,6 +1259,122 @@ pub(super) fn set_preset_fleet_from_account(account: &mut Value, value: &PresetF
     );
 }
 
+pub(super) fn preset_fleet_info_from_typed_account(
+    account: &blueoath_domain::AccountState,
+) -> PresetFleetInfo {
+    PresetFleetInfo {
+        fleets: account
+            .fleet
+            .presets
+            .iter()
+            .map(|preset| PresetFleet {
+                name: preset.name.clone(),
+                hero_ids: preset
+                    .hero_ids
+                    .iter()
+                    .filter_map(|id| i32::try_from(id.get()).ok())
+                    .collect(),
+                ex_hero_ids: preset
+                    .ex_hero_ids
+                    .iter()
+                    .filter_map(|id| i32::try_from(id.get()).ok())
+                    .collect(),
+                mode_id: i32::try_from(preset.mode_id).unwrap_or(i32::MAX),
+                strategy_id: i32::try_from(preset.strategy_id).unwrap_or(i32::MAX),
+            })
+            .collect(),
+        name_num: i32::try_from(account.fleet.preset_name_num).unwrap_or(i32::MAX),
+        red_dot: i32::try_from(account.fleet.preset_red_dot).unwrap_or(i32::MAX),
+    }
+}
+
+pub(super) fn set_preset_fleet_on_typed_account(
+    account: &mut blueoath_domain::AccountState,
+    value: &PresetFleetInfo,
+) -> bool {
+    if value.fleets.len() > 100 || value.name_num < 0 || value.red_dot < 0 {
+        return false;
+    }
+    let mut presets = Vec::with_capacity(value.fleets.len());
+    for fleet in &value.fleets {
+        let Some(hero_ids) = fleet
+            .hero_ids
+            .iter()
+            .map(|id| {
+                u64::try_from(*id)
+                    .ok()
+                    .and_then(|id| blueoath_domain::HeroId::new(id).ok())
+                    .filter(|id| account.dock.heroes.contains_key(id))
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            return false;
+        };
+        let Some(ex_hero_ids) = fleet
+            .ex_hero_ids
+            .iter()
+            .map(|id| {
+                u64::try_from(*id)
+                    .ok()
+                    .and_then(|id| blueoath_domain::HeroId::new(id).ok())
+                    .filter(|id| account.dock.heroes.contains_key(id))
+            })
+            .collect::<Option<Vec<_>>>()
+        else {
+            return false;
+        };
+        presets.push(blueoath_domain::PresetFleetState {
+            name: fleet.name.clone(),
+            hero_ids,
+            ex_hero_ids,
+            mode_id: u32::try_from(fleet.mode_id).unwrap_or_default(),
+            strategy_id: u32::try_from(fleet.strategy_id).unwrap_or_default(),
+        });
+    }
+    account.fleet.presets = presets;
+    account.fleet.preset_name_num = value.name_num as u32;
+    account.fleet.preset_red_dot = value.red_dot as u32;
+    true
+}
+
+pub(super) fn sync_typed_preset_fleet_state(
+    account: &mut blueoath_domain::AccountState,
+    legacy: &Value,
+) -> bool {
+    let value = preset_fleet_info_from_account(legacy);
+    let mut presets = Vec::with_capacity(value.fleets.len());
+    for fleet in value.fleets {
+        let hero_ids = fleet
+            .hero_ids
+            .into_iter()
+            .filter_map(|id| u64::try_from(id).ok())
+            .filter_map(|id| blueoath_domain::HeroId::new(id).ok())
+            .collect();
+        let ex_hero_ids = fleet
+            .ex_hero_ids
+            .into_iter()
+            .filter_map(|id| u64::try_from(id).ok())
+            .filter_map(|id| blueoath_domain::HeroId::new(id).ok())
+            .collect();
+        presets.push(blueoath_domain::PresetFleetState {
+            name: fleet.name,
+            hero_ids,
+            ex_hero_ids,
+            mode_id: u32::try_from(fleet.mode_id.max(0)).unwrap_or_default(),
+            strategy_id: u32::try_from(fleet.strategy_id.max(0)).unwrap_or_default(),
+        });
+    }
+    let name_num = u32::try_from(value.name_num.max(0)).unwrap_or_default();
+    let red_dot = u32::try_from(value.red_dot.max(0)).unwrap_or_default();
+    let changed = account.fleet.presets != presets
+        || account.fleet.preset_name_num != name_num
+        || account.fleet.preset_red_dot != red_dot;
+    account.fleet.presets = presets;
+    account.fleet.preset_name_num = name_num;
+    account.fleet.preset_red_dot = red_dot;
+    changed
+}
+
 pub(super) fn json_i32_array(value: &Value, key: &str) -> Vec<i32> {
     value
         .get(key)

@@ -1,7 +1,7 @@
 use blueoath_domain::{
     AccountRepository, AccountState, BattleSession, ChapterId, ChatBarrageState, ChatMessageState,
-    CopyId, EquipId, EquipmentState, FleetId, FleetRecord, HeroId, HeroState, ProfileId,
-    ProfileState, TemplateId,
+    CopyId, EquipId, EquipmentState, FleetId, FleetRecord, HeroId, HeroState, PresetFleetState,
+    ProfileId, ProfileState, TemplateId,
 };
 use blueoath_storage::{ProfileStore, StorageError, StoredProfileState, StoredShip};
 use serde_json::json;
@@ -177,7 +177,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     assert_eq!(state_json_columns, 0);
     for column in ["class_id", "create_time", "message"] {
         let count: i64 = connection
@@ -358,6 +358,15 @@ fn typed_repository_transaction_commits_domain_mutation() {
             members: vec![hero_id],
         },
     );
+    account.fleet.preset_name_num = 4;
+    account.fleet.preset_red_dot = 1;
+    account.fleet.presets.push(PresetFleetState {
+        name: "Stored preset".to_owned(),
+        hero_ids: vec![hero_id],
+        ex_hero_ids: Vec::new(),
+        mode_id: 3,
+        strategy_id: 17,
+    });
     account.tasks.progress.insert(7, 8);
     account.tasks.task_types.insert(7, 5);
     account.tasks.completed.insert(7);
@@ -416,6 +425,10 @@ fn typed_repository_transaction_commits_domain_mutation() {
         loaded.fleet.fleets[&FleetId::new(1).unwrap()].members,
         vec![hero_id]
     );
+    assert_eq!(loaded.fleet.preset_name_num, 4);
+    assert_eq!(loaded.fleet.preset_red_dot, 1);
+    assert_eq!(loaded.fleet.presets[0].name, "Stored preset");
+    assert_eq!(loaded.fleet.presets[0].hero_ids, vec![hero_id]);
     assert_eq!(loaded.tasks.progress.get(&7), Some(&8));
     assert_eq!(loaded.tasks.task_types.get(&7), Some(&5));
     assert!(loaded.tasks.completed.contains(&7));

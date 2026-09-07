@@ -132,6 +132,7 @@ where
     let request = RequestContext::from(TMessageCodec::decode_request(&frame.payload)?);
     let request_args = request.args.as_slice();
     if let (Some(typed), Some(legacy)) = (typed_account.as_deref_mut(), account_view) {
+        sync_typed_preset_fleet_state(typed, legacy);
         sync_typed_daily_copy_state(typed, legacy, current_unix_seconds());
         sync_typed_task_state(typed, legacy);
     }
@@ -310,11 +311,32 @@ where
             }
         }
         "presetfleet.PresetFleetsInfo" => Some(PresetFleetCodec::encode(
-            &preset_fleet_info_from_account(account_view.unwrap_or(&Value::Null)),
+            &typed_account
+                .as_deref()
+                .map(preset_fleet_info_from_typed_account)
+                .unwrap_or_else(|| {
+                    preset_fleet_info_from_account(account_view.unwrap_or(&Value::Null))
+                }),
         )),
         "presetfleet.SetPresetFleets" => match PresetFleetCodec::decode(request_args) {
             Ok(preset) if preset.fleets.len() <= 100 => {
-                if let Some(account) = account.as_deref_mut() {
+                if let Some(typed) = typed_account.as_mut() {
+                    if !set_preset_fleet_on_typed_account(typed, &preset) {
+                        handler_error = Some(GameError::InvalidRequest(
+                            "preset fleet contains invalid or unowned hero",
+                        ));
+                        Some(Vec::new())
+                    } else {
+                        let payload =
+                            PresetFleetCodec::encode(&preset_fleet_info_from_typed_account(typed));
+                        append_method_push(
+                            &mut post_pushes,
+                            "presetfleet.PresetFleetsInfo",
+                            payload.clone(),
+                        );
+                        Some(payload)
+                    }
+                } else if let Some(account) = account.as_deref_mut() {
                     set_preset_fleet_from_account(account, &preset);
                     let payload =
                         PresetFleetCodec::encode(&preset_fleet_info_from_account(account));
@@ -1821,9 +1843,11 @@ where
             NetSocketFrameCodec::write(stream, 0, &push).await?;
             let push = TMessageCodec::encode_response(&TResponse {
                 method: "presetfleet.PresetFleetsInfo".to_owned(),
-                ret: Some(PresetFleetCodec::encode(&preset_fleet_info_from_account(
-                    account,
-                ))),
+                ret: Some(PresetFleetCodec::encode(
+                    &typed_account_view
+                        .map(preset_fleet_info_from_typed_account)
+                        .unwrap_or_else(|| preset_fleet_info_from_account(account)),
+                )),
                 time: current_unix_seconds(),
                 ..TResponse::default()
             });
