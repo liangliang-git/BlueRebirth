@@ -159,6 +159,80 @@ pub(super) fn handle_typed_with_catalog(
                 Err(error) => HandlerResult::Error(error),
             }
         }
+        "copy.PassMiniGame" => {
+            let copy_id = decode_varint_field(request_args, 1);
+            if copy_id <= 0 || decode_varint_field(request_args, 19) == 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "mini-game pass request is invalid",
+                ));
+            }
+            if battle_catalog.is_some_and(|catalog| !catalog.copies.contains_key(&copy_id)) {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "mini-game copy is not configured",
+                ));
+            }
+            let Ok(copy_id_typed) = blueoath_domain::CopyId::new(copy_id as u64) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "mini-game copy id is invalid",
+                ));
+            };
+            let first_pass = account.battle.passed_copies.insert(copy_id_typed);
+            let rewards = battle_catalog
+                .and_then(|catalog| catalog.copy_first_rewards.get(&copy_id))
+                .into_iter()
+                .flatten()
+                .map(|(goods_type, item_id, num)| ShopReward {
+                    goods_type: *goods_type,
+                    item_id: *item_id,
+                    num: *num,
+                    instance_id: 0,
+                })
+                .collect::<Vec<_>>();
+            if first_pass
+                && (!rewards.is_empty() && !can_grant_typed_task_rewards(account, &rewards))
+            {
+                account.battle.passed_copies.remove(&copy_id_typed);
+                return HandlerResult::Error(GameError::InvalidState(
+                    "mini-game reward is unsupported",
+                ));
+            }
+            if first_pass {
+                for reward in &rewards {
+                    let _ = grant_typed_task_reward(account, reward);
+                }
+            }
+            let hero_ids = account
+                .fleet
+                .fleets
+                .values()
+                .next()
+                .map(|fleet| fleet.members.clone())
+                .unwrap_or_default();
+            account
+                .battle
+                .records
+                .push(blueoath_domain::CopyRecordState {
+                    copy_id: copy_id_typed,
+                    hero_ids,
+                    pass_time: u64::try_from(decode_varint_field(request_args, 12).max(1))
+                        .unwrap_or(1),
+                    secret_id: 0,
+                    strategy_id: 0,
+                    power: 0,
+                    record_time: u64::from(current_unix_seconds()),
+                    ex_buffs: Vec::new(),
+                });
+            HandlerResult::Reply(Response::raw(
+                method,
+                battle_pass_payload_with_rewards(
+                    copy_id,
+                    first_pass,
+                    3,
+                    decode_varint_field(request_args, 12),
+                    if first_pass { &rewards } else { &[] },
+                ),
+            ))
+        }
         "copy.GetRecord" => {
             let Ok(request) = CopyRecordRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
@@ -1533,6 +1607,33 @@ mod tests {
             HandlerResult::Reply(_)
         ));
         assert!(account.battle.active.is_none());
+        assert!(account
+            .battle
+            .passed_copies
+            .contains(&CopyId::new(9).unwrap()));
+        assert_eq!(account.battle.records.len(), 1);
+    }
+
+    #[test]
+    fn typed_mini_game_pass_updates_battle_state() {
+        let mut account = NewAccountFactory::create(ProfileId::new("mini-game").unwrap(), "Battle");
+        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
+        account
+            .fleet
+            .fleets
+            .entry(FleetId::new(1).unwrap())
+            .or_default()
+            .members
+            .push(hero_id);
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, 9);
+        append_varint_field(&mut request, 12, 15);
+        append_varint_field(&mut request, 19, 1);
+
+        assert!(matches!(
+            handle_typed(&mut account, "copy.PassMiniGame", &request),
+            HandlerResult::Reply(_)
+        ));
         assert!(account
             .battle
             .passed_copies

@@ -2566,6 +2566,9 @@ fn legacy_only_method(method: &str) -> bool {
     if coop_handler::handles_typed(method) {
         return false;
     }
+    if method == "copy.PassMiniGame" {
+        return false;
+    }
     if matches!(
         method,
         "copy.AttackBase"
