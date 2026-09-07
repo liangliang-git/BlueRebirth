@@ -517,26 +517,26 @@ mod tests {
             current_unix_millis()
         ));
         let store = blueoath_storage::ProfileStore::open(&root).unwrap();
-        store
-            .legacy_json_accounts()
-            .save(
-                "lower",
-                &json!({
-                    "character": {"uid": 1, "name": "Lower"},
-                    "bigActivity": {"merits": 10}
-                }),
-            )
-            .unwrap();
-        store
-            .legacy_json_accounts()
-            .save(
-                "higher",
-                &json!({
-                    "character": {"uid": 2, "name": "Higher"},
-                    "bigActivity": {"merits": 30}
-                }),
-            )
-            .unwrap();
+        let mut lower = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("lower").unwrap(),
+            "Lower",
+        );
+        lower.character.uid = 1;
+        lower
+            .activities
+            .progress
+            .insert("bigActivity\u{1f}merits".to_owned(), 10);
+        store.save_typed_account(&mut lower).unwrap();
+        let mut higher = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("higher").unwrap(),
+            "Higher",
+        );
+        higher.character.uid = 2;
+        higher
+            .activities
+            .progress
+            .insert("bigActivity\u{1f}merits".to_owned(), 30);
+        store.save_typed_account(&mut higher).unwrap();
         let mut server_state = ServerState::new("local", "Local", "1.4.0");
         server_state.social_store = Some(store.clone());
         let current = json!({

@@ -729,6 +729,36 @@ impl Decode for UserSupplyRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UserOtherInfoRequest {
+    pub requested_uid: u64,
+}
+
+impl Decode for UserOtherInfoRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            requested_uid: optional_u64(&fields, 1, "other user request has duplicate uid")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TeacherRankRequest {
+    pub begin: i32,
+    pub offset: i32,
+}
+
+impl Decode for TeacherRankRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            begin: optional_i32(&fields, 1, "teacher rank has duplicate begin")?,
+            offset: optional_i32(&fields, 2, "teacher rank has duplicate offset")?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FriendTargetRequest {
     pub uid: u64,

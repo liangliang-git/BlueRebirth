@@ -56,9 +56,9 @@ mod study_state;
 mod task_state;
 mod wire;
 
-use account_defaults::{
-    default_account_snapshot, user_info_from_account, user_info_from_typed_account,
-};
+#[cfg(test)]
+pub(crate) use account_defaults::default_account_snapshot;
+use account_defaults::{user_info_from_account, user_info_from_typed_account};
 use account_state::*;
 use battle_state::*;
 pub use blueoath_game::{BattleService, ProgressService, ResourceService, RewardService};
@@ -104,14 +104,19 @@ pub use runtime::run;
 pub(crate) use runtime::{current_unix_millis, normalize_task_state};
 
 const SEA_DIFFICULTY_UNLOCK_LEVEL: i32 = 60;
+#[cfg(test)]
 const INITIAL_SUPPLY: i64 = 10_000;
 // Client mood values use fixed-point units with a scale of 10,000.
 const MOOD_MIN: i32 = 0;
 const MOOD_MAX: i32 = 1_500_000;
 const MOOD_INITIAL: i32 = MOOD_MAX;
+#[cfg(test)]
 const MOOD_NORMAL_LIMIT: i32 = 1_190_000;
+#[cfg(test)]
 const MOOD_RECOVERY_INTERVAL_SECONDS: i64 = 6 * 60;
+#[cfg(test)]
 const MOOD_NORMAL_RECOVERY: i32 = 100;
+#[cfg(test)]
 const MOOD_MARRIED_RECOVERY_BONUS: i32 = 100;
 const MOOD_BATH_RECOVERY: i32 = 300_000;
 const MOOD_BATH_INTERVAL_RECOVERY: i32 = 40_000;

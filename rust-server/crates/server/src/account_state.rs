@@ -224,6 +224,7 @@ pub(super) fn add_medal(account: &mut Value, medal_id: i32, time: u32) {
 /// Populate missing hero skill rows from client ship configuration. Existing skill levels stay
 /// untouched; this only repairs fresh/legacy snapshots where the client would otherwise render
 /// its dummy level-1 skill.
+#[cfg(test)]
 pub(super) fn ensure_hero_pskills(
     account: &mut Value,
     catalog: &std::collections::BTreeMap<i32, Vec<i32>>,
@@ -281,6 +282,7 @@ pub(super) fn ensure_hero_pskills(
     changed
 }
 
+#[cfg(test)]
 pub(super) fn ensure_hero_mood_state(account: &mut Value) -> bool {
     let Some(heroes) = account
         .get_mut("dock")
@@ -309,6 +311,7 @@ pub(super) fn ensure_hero_mood_state(account: &mut Value) -> bool {
     changed
 }
 
+#[cfg(test)]
 pub(super) fn apply_natural_mood_recovery(account: &mut Value, now: u32, multiplier: f64) -> bool {
     let Some(heroes) = account
         .get_mut("dock")

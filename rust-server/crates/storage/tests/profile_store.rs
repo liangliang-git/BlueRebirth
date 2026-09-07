@@ -4,7 +4,6 @@ use blueoath_domain::{
     PresetFleetState, ProfileId, ProfileState, TemplateId,
 };
 use blueoath_storage::{ProfileStore, StorageError, StoredProfileState, StoredShip};
-use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
@@ -210,7 +209,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 16);
+    assert_eq!(version, 17);
     assert_eq!(state_json_columns, 0);
     for column in ["class_id", "create_time", "message"] {
         let count: i64 = connection
@@ -227,86 +226,6 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
 }
 
 #[test]
-fn account_json_round_trips_without_losing_unknown_fields() {
-    let (store, root) = store();
-    let account = json!({
-        "profileId": "one",
-        "character": {"uid": 1, "name": "One"},
-        "futureField": {"preserve": true}
-    });
-
-    let legacy = store.legacy_json_accounts();
-    legacy.save("one", &account).unwrap();
-    assert_eq!(legacy.load("one").unwrap(), Some(account));
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn account_directory_lists_saved_accounts_in_stable_order() {
-    let (store, root) = store();
-    store
-        .legacy_json_accounts()
-        .save("two", &json!({"profileId": "two", "character": {"uid": 2}}))
-        .unwrap();
-    store
-        .legacy_json_accounts()
-        .save("one", &json!({"profileId": "one", "character": {"uid": 1}}))
-        .unwrap();
-
-    let accounts = store.legacy_json_accounts().list().unwrap();
-    assert_eq!(accounts.len(), 2);
-    assert_eq!(accounts[0].0, "one");
-    assert_eq!(accounts[0].1["character"]["uid"], 1);
-    assert_eq!(accounts[1].0, "two");
-    assert_eq!(accounts[1].1["character"]["uid"], 2);
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn invalid_account_profile_id_is_rejected() {
-    let (store, root) = store();
-    let error = store
-        .legacy_json_accounts()
-        .save("bad/id", &json!({}))
-        .unwrap_err();
-
-    assert!(matches!(error, StorageError::InvalidProfileId));
-    assert!(store
-        .legacy_json_accounts()
-        .load("bad/id")
-        .unwrap()
-        .is_none());
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn account_revision_supports_atomic_compare_and_swap() {
-    let (store, root) = store();
-    let first = json!({"profileId": "one", "gold": 10});
-    let second = json!({"profileId": "one", "gold": 20});
-
-    let legacy = store.legacy_json_accounts();
-    let revision = legacy.save_with_revision("one", &first, None).unwrap();
-    assert_eq!(revision, 1);
-    assert_eq!(
-        legacy.load_with_revision("one").unwrap(),
-        Some((first.clone(), 1))
-    );
-
-    let next_revision = legacy
-        .save_with_revision("one", &second, Some(revision))
-        .unwrap();
-    assert_eq!(next_revision, 2);
-
-    let error = legacy
-        .save_with_revision("one", &first, Some(revision))
-        .unwrap_err();
-    assert!(matches!(error, StorageError::RevisionConflict { .. }));
-    assert_eq!(legacy.load("one").unwrap(), Some(second));
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
 fn opening_store_is_idempotent_and_records_schema_version() {
     let (store, root) = store();
     drop(store);
@@ -319,6 +238,15 @@ fn opening_store_is_idempotent_and_records_schema_version() {
         .unwrap();
     assert!(version >= 6);
     assert!(reopened.list().unwrap().is_empty());
+    let accounts_table: i64 = rusqlite::Connection::open(root.join("profiles.db"))
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(accounts_table, 0);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -500,15 +428,6 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(active.remaining_fleet_ids, vec![1, 2]);
     assert_eq!(active.hero_ids, vec![hero_id]);
     assert_eq!(active.attack_count, 3);
-    let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
-    let legacy_rows: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM accounts WHERE id = 'typed'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(legacy_rows, 0);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -528,103 +447,5 @@ fn typed_loader_does_not_treat_profile_row_as_complete_account() {
         .load_typed_account(&ProfileId::new("profile-only").unwrap())
         .unwrap()
         .is_none());
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn account_snapshot_write_projects_core_rows_into_normalized_tables() {
-    let (store, root) = store();
-    let account = json!({
-        "character": {
-            "uid": 7,
-            "name": "Captain",
-            "level": 3,
-            "exp": 12,
-            "secretaryId": 1,
-            "gold": 100,
-            "diamond": 20,
-            "supply": 50,
-            "pvePt": 4,
-            "head": 1021051,
-            "headFrame": 2
-        },
-        "dock": {"heroes": [{
-            "heroId": 1,
-            "templateId": 10210511,
-            "level": 2,
-            "exp": 5,
-            "mood": 100,
-            "affection": 200,
-            "curHp": 99,
-            "lock": true,
-            "equipSlots": [3, 0]
-        }]},
-        "equip": {"items": [{
-            "equipId": 3,
-            "templateId": 30091,
-            "enhanceLv": 1,
-            "star": 2,
-            "enhanceExp": 4,
-            "heroId": 1
-        }]},
-        "bag": {"items": [{"templateId": 60000, "num": 8}]},
-        "fleet": {"tactics": [{"formationId": 2, "strategyId": 4}]},
-        "battleSession": {"copyId": 1001, "startedAt": 10},
-        "tasks": {"records": [{"taskId": 9, "type": 1, "progress": 2, "completed": true}]},
-        "seaProgress": {"records": [{"copyId": 1001, "starLevel": 7, "passCount": 2}]},
-        "copyProgress": {"records": [{"copyId": 2001, "starLevel": 3, "firstPassed": true}]},
-        "dailyCopy": {"resetDay": 42, "chapters": [{"chapterId": 8, "groupId": 2, "challengeTimes": 1}]},
-        "building": {"buildings": [{"id": 3, "level": 4, "landIndex": 1}]},
-        "tower": {"chapterId": 7, "floor": 5, "resetDay": 42}
-    });
-
-    store
-        .legacy_json_accounts()
-        .save("normalized", &account)
-        .unwrap();
-    let typed = store
-        .load_typed_account(&ProfileId::new("normalized").unwrap())
-        .unwrap()
-        .unwrap();
-    assert_eq!(typed.character.uid, 7);
-    assert_eq!(typed.dock.heroes.len(), 1);
-    assert_eq!(typed.dock.equipments.len(), 1);
-    assert_eq!(
-        typed
-            .resources
-            .amount(blueoath_domain::CurrencyKind::Gold)
-            .get(),
-        100
-    );
-    let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
-    for (table, expected) in [
-        ("characters", 1),
-        ("heroes", 1),
-        ("equipments", 1),
-        ("hero_equip_slots", 2),
-        ("inventory", 1),
-        ("fleets", 1),
-        ("battle_sessions", 1),
-        ("tasks", 1),
-        ("sea_progress", 1),
-        ("copy_progress", 1),
-        ("daily_copy_progress", 1),
-        ("buildings", 1),
-        ("tower_progress", 1),
-    ] {
-        let count: i64 = connection
-            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, expected, "table {table}");
-    }
-    connection
-        .execute("DELETE FROM accounts WHERE id = 'normalized'", [])
-        .unwrap();
-    let repository_loaded = AccountRepository::load(&store, &ProfileId::new("normalized").unwrap())
-        .unwrap()
-        .unwrap();
-    assert_eq!(repository_loaded.character.uid, 7);
     let _ = std::fs::remove_dir_all(root);
 }

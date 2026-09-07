@@ -57,6 +57,28 @@ pub(super) fn handle_typed(
             append_varint_field(&mut payload, 2, 0);
             HandlerResult::Reply(Response::raw(method, payload))
         }
+        "usersvr.GetOtherInfo" => {
+            let Ok(request) = UserOtherInfoRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "other user request is invalid",
+                ));
+            };
+            HandlerResult::Reply(Response::raw(
+                method,
+                other_user_payload_typed(state, account, request.requested_uid),
+            ))
+        }
+        "user.TeacherRank" => {
+            let Ok(request) = TeacherRankRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "teacher rank request is invalid",
+                ));
+            };
+            HandlerResult::Reply(Response::raw(
+                method,
+                teacher_rank_payload_typed(state, account, request.begin, request.offset),
+            ))
+        }
         _ => HandlerResult::Empty,
     }
 }
@@ -515,6 +537,69 @@ fn teacher_rank_payload(state: &ServerState, current: &Value, begin: i32, offset
     output
 }
 
+fn teacher_rank_payload_typed(
+    state: &ServerState,
+    current: &blueoath_domain::AccountState,
+    begin: i32,
+    offset: i32,
+) -> Vec<u8> {
+    let mut entries = state
+        .social_store
+        .as_ref()
+        .and_then(|store| store.list_typed_accounts().ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|account| TeacherRankEntry {
+            uid: account.character.uid,
+            name: account.character.name,
+            level: account.character.level,
+            head: account.character.head,
+            head_frame: account.character.head_frame,
+            prestige: account
+                .activities
+                .progress
+                .get("teacher\u{1f}prestige")
+                .copied()
+                .unwrap_or_default(),
+        })
+        .collect::<Vec<_>>();
+    let current_entry = TeacherRankEntry {
+        uid: current.character.uid,
+        name: current.character.name.clone(),
+        level: current.character.level,
+        head: current.character.head,
+        head_frame: current.character.head_frame,
+        prestige: current
+            .activities
+            .progress
+            .get("teacher\u{1f}prestige")
+            .copied()
+            .unwrap_or_default(),
+    };
+    if let Some(existing) = entries
+        .iter_mut()
+        .find(|entry| entry.uid == current_entry.uid)
+    {
+        *existing = current_entry;
+    } else {
+        entries.push(current_entry);
+    }
+    entries.sort_by(|left, right| {
+        right
+            .prestige
+            .cmp(&left.prestige)
+            .then_with(|| left.uid.cmp(&right.uid))
+    });
+
+    let start = usize::try_from(begin.saturating_sub(1)).unwrap_or_default();
+    let limit = usize::try_from(offset.max(1)).unwrap_or(50).min(50);
+    let mut output = Vec::new();
+    for entry in entries.iter().skip(start).take(limit) {
+        append_message_field(&mut output, 1, &teacher_simple_user_payload(entry));
+    }
+    output
+}
+
 fn teacher_simple_user_payload(entry: &TeacherRankEntry) -> Vec<u8> {
     let mut output = Vec::new();
     append_varint_field(&mut output, 1, entry.uid);
@@ -940,6 +1025,41 @@ pub(super) fn other_user_payload(
     output
 }
 
+fn other_user_payload_typed(
+    state: &ServerState,
+    current: &blueoath_domain::AccountState,
+    requested_uid: u64,
+) -> Vec<u8> {
+    let typed_account = (requested_uid > 0)
+        .then(|| state.social_store.as_ref()?.list_typed_accounts().ok())
+        .flatten()
+        .and_then(|accounts| {
+            accounts
+                .into_iter()
+                .find(|account| account.character.uid == requested_uid)
+        });
+    let character = typed_account
+        .as_ref()
+        .map(|account| &account.character)
+        .unwrap_or(&current.character);
+    let uid = typed_account
+        .as_ref()
+        .map(|account| account.character.uid)
+        .unwrap_or(if requested_uid > 0 {
+            requested_uid
+        } else {
+            current.character.uid
+        });
+    let secretary_id = character.secretary_id.map(|id| id.get()).unwrap_or(1);
+    let mut output = Vec::new();
+    append_varint_field(&mut output, 1, uid);
+    append_bytes_field(&mut output, 2, character.name.as_bytes());
+    append_varint_field(&mut output, 3, u64::from(character.head));
+    append_varint_field(&mut output, 5, u64::from(character.level));
+    append_varint_field(&mut output, 10, secretary_id);
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use crate::common::response::HandlerResult;
@@ -1007,6 +1127,68 @@ mod tests {
     }
 
     #[test]
+    fn typed_social_queries_do_not_require_json_account() {
+        let root = std::env::temp_dir().join(format!(
+            "blueoath-typed-social-{}-{}",
+            std::process::id(),
+            current_unix_millis()
+        ));
+        let store = blueoath_storage::ProfileStore::open(&root).unwrap();
+        let mut friend = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("friend").unwrap(),
+            "Friend",
+        );
+        friend.character.uid = 42;
+        friend.character.head = 7;
+        friend.character.level = 9;
+        friend.character.secretary_id = Some(blueoath_domain::HeroId::new(3).unwrap());
+        store.save_typed_account(&mut friend).unwrap();
+
+        let mut current = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("current").unwrap(),
+            "Captain",
+        );
+        current.character.uid = 1;
+        current
+            .activities
+            .progress
+            .insert("teacher\u{1f}prestige".to_owned(), 123);
+        let mut state = ServerState::new("current", "Captain", "1.4.0");
+        state.social_store = Some(store);
+        let mut pushes = Vec::new();
+
+        let result = handle_typed(
+            &mut current,
+            &state,
+            "usersvr.GetOtherInfo",
+            &[],
+            &mut pushes,
+        );
+        let HandlerResult::Reply(response) = result else {
+            panic!("expected typed other-user response");
+        };
+        assert_eq!(decode_varint_field(&response.payload, 1), 1);
+
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, 1);
+        append_varint_field(&mut request, 2, 10);
+        let result = handle_typed(
+            &mut current,
+            &state,
+            "user.TeacherRank",
+            &request,
+            &mut pushes,
+        );
+        let HandlerResult::Reply(response) = result else {
+            panic!("expected typed teacher rank response");
+        };
+        let rows = decode_repeated_message_field(&response.payload, 1);
+        assert_eq!(decode_varint_field(&rows[0], 1), 1);
+        assert_eq!(decode_varint_field(&rows[0], 11), 123);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn other_user_payload_reads_matching_account_directory() {
         let root = std::env::temp_dir().join(format!(
             "blueoath-social-{}-{}",
@@ -1014,22 +1196,15 @@ mod tests {
             current_unix_millis()
         ));
         let store = blueoath_storage::ProfileStore::open(&root).unwrap();
-        store
-            .legacy_json_accounts()
-            .save(
-                "friend",
-                &json!({
-                    "profileId": "friend",
-                    "character": {
-                        "uid": 42,
-                        "name": "Friend",
-                        "head": 7,
-                        "level": 9,
-                        "secretaryId": 3
-                    }
-                }),
-            )
-            .unwrap();
+        let mut friend = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("friend").unwrap(),
+            "Friend",
+        );
+        friend.character.uid = 42;
+        friend.character.head = 7;
+        friend.character.level = 9;
+        friend.character.secretary_id = Some(blueoath_domain::HeroId::new(3).unwrap());
+        store.save_typed_account(&mut friend).unwrap();
         let mut state = ServerState::new("local", "Local", "1.4.0");
         state.social_store = Some(store.clone());
         let own = json!({"character": {"uid": 1, "name": "Local"}});

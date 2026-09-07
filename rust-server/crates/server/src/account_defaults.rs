@@ -1,7 +1,10 @@
-use serde_json::{json, Value};
+#[cfg(test)]
+use serde_json::json;
+use serde_json::Value;
 
 use super::*;
 
+#[cfg(test)]
 pub(super) fn default_account_snapshot(profile_id: &str, name: &str, now: u32) -> Value {
     let reset_day = (i64::from(now) + 8 * 60 * 60) / 86_400;
     let reset_week = (reset_day + 3) / 7;

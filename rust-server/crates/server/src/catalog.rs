@@ -409,7 +409,6 @@ pub(super) struct GameCatalogs {
     pub(super) hero_breakdown: Arc<HeroBreakdownCatalog>,
     pub(super) buildings: Arc<BuildingCatalog>,
     pub(super) equip_new_test: Arc<EquipNewTestCatalog>,
-    pub(super) hero_skills: Arc<std::collections::BTreeMap<i32, Vec<i32>>>,
     pub(super) affection: Arc<AffectionCatalog>,
     pub(super) combination: Arc<CombinationCatalog>,
 }

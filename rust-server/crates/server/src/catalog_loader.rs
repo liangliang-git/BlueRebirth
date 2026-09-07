@@ -420,6 +420,7 @@ pub(super) fn load_equip_catalog(client_path: Option<&PathBuf>) -> EquipCatalog 
     }
 }
 
+#[cfg(test)]
 pub(super) fn load_hero_skill_catalog(
     client_path: Option<&PathBuf>,
 ) -> std::collections::BTreeMap<i32, Vec<i32>> {
