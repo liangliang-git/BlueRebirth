@@ -17,27 +17,32 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     match method {
         "chat.ChatInfo" => Some(chat_info_payload(account)),
         "chat.ChangeWorldChannel" => {
-            let channel = decode_varint_field(request_args, 1);
-            if channel < 0 {
-                *context.response_err = 1;
-                *context.response_err_msg = "chat channel is invalid".to_owned();
-                return Some(Vec::new());
-            }
+            let channel = match ChangeWorldChannelRequest::decode(request_args) {
+                Ok(request) => request.channel,
+                Err(_) => {
+                    *context.response_err = 1;
+                    *context.response_err_msg = "chat channel is invalid".to_owned();
+                    return Some(Vec::new());
+                }
+            };
             let chat = chat_state_mut(account);
             chat["channel"] = json!(channel);
             Some(varint_payload(1, channel as u64))
         }
         "chat.SendMessage" => {
-            let message = decode_string_field(request_args, 3).unwrap_or_default();
-            if message.trim().is_empty() {
-                *context.response_err = 1;
-                *context.response_err_msg = "chat message is empty".to_owned();
-                return Some(Vec::new());
-            }
-            let channel = decode_varint_field(request_args, 1).max(0);
-            let receive_uid = decode_varint_u64_field(request_args, 2);
-            let msg_type = decode_varint_field(request_args, 4).max(0);
-            let voice = decode_string_field(request_args, 5).unwrap_or_default();
+            let request = match SendMessageRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    *context.response_err = 1;
+                    *context.response_err_msg = "chat message request is invalid".to_owned();
+                    return Some(Vec::new());
+                }
+            };
+            let message = request.message;
+            let channel = request.channel;
+            let receive_uid = request.receive_uid;
+            let msg_type = request.message_type;
+            let voice = request.voice;
             let entry = json!({
                 "uid": uid,
                 "channel": channel,
@@ -64,14 +69,19 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             Some(response)
         }
         "chat.SendBarrage" => {
-            let id = decode_varint_field(request_args, 1);
-            let offset = decode_varint_field(request_args, 2);
-            let content = decode_string_field(request_args, 3).unwrap_or_default();
-            if id < 0 || content.trim().is_empty() {
-                *context.response_err = 1;
-                *context.response_err_msg = "barrage request is invalid".to_owned();
-                return Some(Vec::new());
-            }
+            let request = match SendBarrageRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    *context.response_err = 1;
+                    *context.response_err_msg = "barrage request is invalid".to_owned();
+                    return Some(Vec::new());
+                }
+            };
+            let SendBarrageRequest {
+                id,
+                offset,
+                content,
+            } = request;
             let chat = chat_state_mut(account);
             let barrages = chat
                 .get_mut("barrages")

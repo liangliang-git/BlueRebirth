@@ -1,6 +1,7 @@
 use blueoath_protocol::{
-    ChangeNameRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest, Decode,
-    ProtocolError, SeaDifficultyRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
+    ChangeNameRequest, ChangeWorldChannelRequest, CopyRecordRequest, CopyStartRequest,
+    DailyCopyEnterRequest, Decode, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
+    SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
     SetSecretaryRequest,
 };
 
@@ -116,5 +117,42 @@ fn rejects_invalid_typed_copy_requests() {
     assert!(matches!(
         SeaDifficultyRequest::decode(&[0x08, 9, 0x10, 8]),
         Err(ProtocolError::Invalid("sea request has invalid value"))
+    ));
+}
+
+#[test]
+fn decodes_typed_chat_requests_with_length_limits() {
+    let message = SendMessageRequest::decode(&[
+        0x08, 3, 0x10, 7, 0x1a, 2, b'h', b'i', 0x20, 1, 0x2a, 1, b'v',
+    ])
+    .unwrap();
+    assert_eq!(message.channel, 3);
+    assert_eq!(message.receive_uid, 7);
+    assert_eq!(message.message, "hi");
+    assert_eq!(message.message_type, 1);
+    assert_eq!(message.voice, "v");
+    assert_eq!(
+        ChangeWorldChannelRequest::decode(&[0x08, 2])
+            .unwrap()
+            .channel,
+        2
+    );
+    assert_eq!(
+        SendBarrageRequest::decode(&[0x08, 9, 0x1a, 3, b'w', b'a', b'v'])
+            .unwrap()
+            .id,
+        9
+    );
+}
+
+#[test]
+fn rejects_invalid_typed_chat_requests() {
+    assert!(matches!(
+        SendMessageRequest::decode(&[0x08, 1]),
+        Err(ProtocolError::Invalid("chat message is missing content"))
+    ));
+    assert!(matches!(
+        SendBarrageRequest::decode(&[0x1a, 0]),
+        Err(ProtocolError::Invalid("barrage request is invalid"))
     ));
 }

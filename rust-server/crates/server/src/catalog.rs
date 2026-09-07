@@ -868,6 +868,24 @@ pub(super) static GAMEPLAY_CATALOG: OnceLock<GameplayCatalog> = OnceLock::new();
 pub(super) static COMMANDER_LEVEL_CATALOG: OnceLock<CommanderLevelCatalog> = OnceLock::new();
 pub(super) static BUILD_DRAW_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 pub(super) static BATTLE_DRAW_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+mod validation_tests {
+    use super::{BattleCatalog, ChapterCatalog};
+
+    #[test]
+    fn fallback_catalog_passes_startup_validation() {
+        assert!(ChapterCatalog::fallback().validate().is_ok());
+        assert!(BattleCatalog::default().validate().is_ok());
+    }
+
+    #[test]
+    fn malformed_catalog_is_rejected_before_runtime() {
+        let mut catalog = ChapterCatalog::fallback();
+        catalog.daily_chapters.push((8, 0));
+        assert!(catalog.validate().is_err());
+    }
+}
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, OnceLock};
 

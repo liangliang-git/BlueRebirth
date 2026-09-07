@@ -240,6 +240,93 @@ pub struct SeaDifficultyRequest {
     pub difficulty: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeWorldChannelRequest {
+    pub channel: i32,
+}
+
+impl Decode for ChangeWorldChannelRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let channel = optional_i32(&fields, 1, "chat channel has duplicate value")?;
+        if channel < 0 {
+            return Err(ProtocolError::Invalid("chat channel is invalid"));
+        }
+        Ok(Self { channel })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendMessageRequest {
+    pub channel: i32,
+    pub receive_uid: u64,
+    pub message: String,
+    pub message_type: i32,
+    pub voice: String,
+}
+
+impl Decode for SendMessageRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let channel = optional_i32(&fields, 1, "chat message has duplicate channel")?;
+        let receive_uid = optional_u64(&fields, 2, "chat message has duplicate receiver")?;
+        let message = decode_required_string(
+            payload,
+            3,
+            "chat message is missing content",
+            "chat message has duplicate content",
+            "chat message is too long",
+            512,
+        )?;
+        let message_type = optional_i32(&fields, 4, "chat message has duplicate type")?;
+        let voice = decode_optional_string(
+            payload,
+            5,
+            "chat message has duplicate voice",
+            "chat voice is too long",
+            2048,
+        )?;
+        Ok(Self {
+            channel,
+            receive_uid,
+            message,
+            message_type,
+            voice,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendBarrageRequest {
+    pub id: i32,
+    pub offset: i32,
+    pub content: String,
+}
+
+impl Decode for SendBarrageRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let id = optional_i32(&fields, 1, "barrage has duplicate id")?;
+        let offset = optional_i32(&fields, 2, "barrage has duplicate offset")?;
+        let content = decode_required_string(
+            payload,
+            3,
+            "barrage is missing content",
+            "barrage has duplicate content",
+            "barrage is too long",
+            512,
+        )?;
+        if id < 0 || offset < 0 || content.trim().is_empty() {
+            return Err(ProtocolError::Invalid("barrage request is invalid"));
+        }
+        Ok(Self {
+            id,
+            offset,
+            content,
+        })
+    }
+}
+
 impl Decode for SeaDifficultyRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
@@ -306,6 +393,32 @@ fn decode_required_string(
     value.ok_or(ProtocolError::Invalid(missing))
 }
 
+fn decode_optional_string(
+    payload: &[u8],
+    field: u32,
+    duplicate: &'static str,
+    too_long: &'static str,
+    max_length: usize,
+) -> Result<String, ProtocolError> {
+    let mut reader = PbReader::new(payload);
+    let mut value = None;
+    while let Some((current, wire)) = reader.next_field()? {
+        if current == field && wire == 2 {
+            if value.is_some() {
+                return Err(ProtocolError::Invalid(duplicate));
+            }
+            let text = reader.read_string()?;
+            if text.chars().count() > max_length {
+                return Err(ProtocolError::Invalid(too_long));
+            }
+            value = Some(text);
+        } else {
+            reader.skip(wire)?;
+        }
+    }
+    Ok(value.unwrap_or_default())
+}
+
 fn optional_i32(
     fields: &BTreeMap<u32, Vec<u64>>,
     field: u32,
@@ -314,6 +427,18 @@ fn optional_i32(
     match fields.get(&field).map(Vec::as_slice).unwrap_or_default() {
         [] => Ok(0),
         [value] => to_i32(*value, "typed request field is out of range"),
+        [_first, _second, ..] => Err(ProtocolError::Invalid(duplicate_error)),
+    }
+}
+
+fn optional_u64(
+    fields: &BTreeMap<u32, Vec<u64>>,
+    field: u32,
+    duplicate_error: &'static str,
+) -> Result<u64, ProtocolError> {
+    match fields.get(&field).map(Vec::as_slice).unwrap_or_default() {
+        [] => Ok(0),
+        [value] => Ok(*value),
         [_first, _second, ..] => Err(ProtocolError::Invalid(duplicate_error)),
     }
 }
