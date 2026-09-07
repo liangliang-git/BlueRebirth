@@ -209,6 +209,50 @@ pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountStat
                     replace: 0,
                 })
                 .collect(),
+            combination_info: HeroCombinationInfo {
+                com_lv: i32::try_from(
+                    account
+                        .activities
+                        .progress
+                        .get(&format!("compat:hero:{}:combination:level", hero.id.get()))
+                        .copied()
+                        .unwrap_or_default(),
+                )
+                .unwrap_or(i32::MAX),
+                com_grade: i32::try_from(
+                    account
+                        .activities
+                        .progress
+                        .get(&format!("compat:hero:{}:combination:grade", hero.id.get()))
+                        .copied()
+                        .unwrap_or_default(),
+                )
+                .unwrap_or(i32::MAX),
+                combine: u32::try_from(
+                    account
+                        .activities
+                        .progress
+                        .get(&format!(
+                            "compat:hero:{}:combination:combine",
+                            hero.id.get()
+                        ))
+                        .copied()
+                        .unwrap_or_default(),
+                )
+                .unwrap_or(u32::MAX),
+                be_combined: u32::try_from(
+                    account
+                        .activities
+                        .progress
+                        .get(&format!(
+                            "compat:hero:{}:combination:beCombined",
+                            hero.id.get()
+                        ))
+                        .copied()
+                        .unwrap_or_default(),
+                )
+                .unwrap_or(u32::MAX),
+            },
             lock: hero.locked,
             ..HeroGrid::default()
         })

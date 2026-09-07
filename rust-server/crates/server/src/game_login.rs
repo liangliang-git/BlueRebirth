@@ -219,6 +219,7 @@ where
                 request.method.as_str(),
                 request_args,
                 catalogs.affection,
+                catalogs.combination,
                 &mut pre_pushes,
             );
             if let HandlerResult::Error(error) = &result {
