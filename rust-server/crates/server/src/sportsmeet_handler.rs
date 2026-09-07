@@ -15,13 +15,16 @@ pub(super) fn handle_typed(
         "sportsmeet.GetSportsTickCount" => reply(method, tick_count_payload_typed(account)),
         "sportsmeet.GetPointsRewardDetail" => reply(method, points_detail_payload_typed(account)),
         "sportsmeet.ReceivePointsReward" => {
-            let points = decode_varint_field(request_args, 1);
+            let points = match SportsMeetPointsRequest::decode(request_args) {
+                Ok(request) => request.points,
+                Err(_) => return invalid("sports meet points are invalid"),
+            };
             receive_points_reward_typed(
                 server_state,
                 account,
                 catalog,
                 method,
-                Some(points.max(0) as u64),
+                Some(points),
                 pre_pushes,
             )
         }
@@ -36,6 +39,10 @@ pub(super) fn handle_typed(
             "sports meet operation is not supported",
         )),
     }
+}
+
+fn invalid(message: &'static str) -> HandlerResult {
+    HandlerResult::Error(GameError::InvalidRequest(message))
 }
 
 fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {

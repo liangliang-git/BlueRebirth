@@ -5,7 +5,7 @@ use blueoath_protocol::{
     GetBarrageByIdRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, OutpostBuildingRequest,
     OutpostSetHeroRequest, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
     SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
-    SetSecretaryRequest, TaskAllRewardRequest, TaskRewardRequest,
+    SetSecretaryRequest, SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest,
 };
 
 #[test]
@@ -262,6 +262,10 @@ fn decodes_typed_chat_requests_with_length_limits() {
             hero_ids: vec![2, 3],
         }
     );
+    assert_eq!(
+        SportsMeetPointsRequest::decode(&[0x08, 99]).unwrap(),
+        SportsMeetPointsRequest { points: 99 }
+    );
 }
 
 #[test]
@@ -289,5 +293,9 @@ fn rejects_invalid_typed_chat_requests() {
     assert!(matches!(
         OutpostBuildingRequest::decode(&[0x08, 0]),
         Err(ProtocolError::Invalid("outpost building id is invalid"))
+    ));
+    assert!(matches!(
+        SportsMeetPointsRequest::decode(&[0x08, 0]),
+        Err(ProtocolError::Invalid("sports meet points are invalid"))
     ));
 }

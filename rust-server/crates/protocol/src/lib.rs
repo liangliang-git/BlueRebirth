@@ -1727,6 +1727,25 @@ impl Decode for OutpostSetHeroRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SportsMeetPointsRequest {
+    pub points: u64,
+}
+
+impl Decode for SportsMeetPointsRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let points = required_field(&fields, 1, "sports meet is missing points")?;
+        if points == 0 {
+            return Err(ProtocolError::Invalid("sports meet points are invalid"));
+        }
+        Ok(Self {
+            points: u64::try_from(points)
+                .map_err(|_| ProtocolError::Invalid("sports meet points are invalid"))?,
+        })
+    }
+}
+
 impl Decode for SeaDifficultyRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
