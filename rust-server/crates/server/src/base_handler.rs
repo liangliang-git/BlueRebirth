@@ -12,6 +12,88 @@ pub(super) fn handle_typed(
     pre_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
     match method {
+        "jopen.GetJopen" => {
+            HandlerResult::Reply(Response::raw(method, typed_jopen_payload(account)))
+        }
+        "jopen.FetchHero" | "jopen.FetchEquip" => {
+            let key = if method == "jopen.FetchHero" {
+                "compat:jopen:fetchHeroTime"
+            } else {
+                "compat:jopen:fetchEquipTime"
+            };
+            account
+                .activities
+                .progress
+                .insert(key.to_owned(), u64::from(current_unix_seconds()));
+            append_method_push(pre_pushes, "jopen.GetJopen", typed_jopen_payload(account));
+            HandlerResult::PushOnly
+        }
+        "milestone.GetMilestone" => {
+            HandlerResult::Reply(Response::raw(method, typed_milestone_info_payload(account)))
+        }
+        "milestone.FetchReward" => {
+            let activity_id = decode_varint_field(request_args, 1);
+            let index = decode_varint_field(request_args, 2);
+            if activity_id <= 0 || index <= 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "milestone request is invalid",
+                ));
+            }
+            account
+                .activities
+                .progress
+                .insert(format!("compat:milestone:{activity_id}:{index}"), 1);
+            HandlerResult::Reply(Response::raw(method, Vec::new()))
+        }
+        "guide.PlotReward" => {
+            let plot_id = decode_varint_field(request_args, 1);
+            if plot_id <= 0 {
+                return HandlerResult::Error(GameError::InvalidRequest("guide plot id is invalid"));
+            }
+            account
+                .activities
+                .progress
+                .insert(format!("compat:guide:plot:{plot_id}"), 1);
+            let mut payload = Vec::new();
+            append_varint_field(&mut payload, 1, plot_id as u64);
+            HandlerResult::Reply(Response::raw(method, payload))
+        }
+        "user.Logoff" => {
+            account.activities.progress.insert(
+                "compat:user:lastLogoffTime".to_owned(),
+                u64::from(current_unix_seconds()),
+            );
+            HandlerResult::Reply(Response::raw(method, Vec::new()))
+        }
+        "user.SetUserOrderRecord" => {
+            let fields = [(1, "type"), (2, "sort"), (3, "screen"), (4, "order")];
+            for (field, name) in fields {
+                account.activities.progress.insert(
+                    format!("compat:user:order:{name}"),
+                    decode_varint_field(request_args, field).max(0) as u64,
+                );
+            }
+            account.activities.progress.insert(
+                "compat:user:order:time".to_owned(),
+                u64::from(current_unix_seconds()),
+            );
+            HandlerResult::Reply(Response::raw(method, Vec::new()))
+        }
+        "user.Refresh" => {
+            account.activities.progress.insert(
+                "compat:user:refresh:maxPowerIndex".to_owned(),
+                decode_varint_field(request_args, 2).max(0) as u64,
+            );
+            account.activities.progress.insert(
+                "compat:user:refresh:minPowerIndex".to_owned(),
+                decode_varint_field(request_args, 3).max(0) as u64,
+            );
+            account.activities.progress.insert(
+                "compat:user:refresh:time".to_owned(),
+                u64::from(current_unix_seconds()),
+            );
+            HandlerResult::Reply(Response::raw(method, Vec::new()))
+        }
         "user.BuyGold" | "user.BuySupply" | "user.BuyPvePt" => {
             if ResourcePurchaseRequest::decode(request_args).is_err() {
                 return HandlerResult::Error(GameError::InvalidRequest(
@@ -873,6 +955,61 @@ fn jopen_payload(account: &Value) -> Vec<u8> {
     output
 }
 
+fn typed_jopen_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(
+        &mut output,
+        1,
+        account
+            .activities
+            .progress
+            .get("compat:jopen:fetchHeroTime")
+            .copied()
+            .unwrap_or_default(),
+    );
+    append_varint_field(
+        &mut output,
+        2,
+        account
+            .activities
+            .progress
+            .get("compat:jopen:fetchEquipTime")
+            .copied()
+            .unwrap_or_default(),
+    );
+    output
+}
+
+fn typed_milestone_info_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let mut grouped = std::collections::BTreeMap::<u64, Vec<u64>>::new();
+    for key in account.activities.progress.keys() {
+        let Some(rest) = key.strip_prefix("compat:milestone:") else {
+            continue;
+        };
+        let mut parts = rest.split(':');
+        let (Some(activity_id), Some(index)) = (
+            parts.next().and_then(|value| value.parse::<u64>().ok()),
+            parts.next().and_then(|value| value.parse::<u64>().ok()),
+        ) else {
+            continue;
+        };
+        grouped.entry(activity_id).or_default().push(index);
+    }
+    let mut output = Vec::new();
+    for (activity_id, indexes) in grouped {
+        let mut activity = Vec::new();
+        append_varint_field(&mut activity, 1, activity_id);
+        for index in indexes {
+            let mut reward = Vec::new();
+            append_varint_field(&mut reward, 1, index);
+            append_varint_field(&mut reward, 2, 1);
+            append_message_field(&mut activity, 2, &reward);
+        }
+        append_message_field(&mut output, 1, &activity);
+    }
+    output
+}
+
 fn apply_support_reward(
     account: &mut Value,
     hero_ids: &[u64],
@@ -1124,6 +1261,70 @@ mod tests {
             1_000
         );
         assert_eq!(pushes.len(), 1);
+    }
+
+    #[test]
+    fn typed_base_state_uses_progress_index() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("typed-base-state").unwrap(),
+            "Captain",
+        );
+        let state = ServerState::new("typed-base-state", "Captain", "1.0.0");
+        let mut pushes = Vec::new();
+
+        assert!(matches!(
+            handle_typed(&mut account, &state, "jopen.FetchHero", &[], &mut pushes,),
+            HandlerResult::PushOnly
+        ));
+        assert!(account
+            .activities
+            .progress
+            .contains_key("compat:jopen:fetchHeroTime"));
+        assert_eq!(
+            TMessageCodec::decode_response(pushes.last().unwrap())
+                .unwrap()
+                .method,
+            "jopen.GetJopen"
+        );
+
+        let mut milestone = Vec::new();
+        append_varint_field(&mut milestone, 1, 9);
+        append_varint_field(&mut milestone, 2, 3);
+        assert!(matches!(
+            handle_typed(
+                &mut account,
+                &state,
+                "milestone.FetchReward",
+                &milestone,
+                &mut pushes,
+            ),
+            HandlerResult::Reply(_)
+        ));
+        let result = handle_typed(
+            &mut account,
+            &state,
+            "milestone.GetMilestone",
+            &[],
+            &mut pushes,
+        );
+        let HandlerResult::Reply(response) = result else {
+            panic!("expected milestone response");
+        };
+        let activities = decode_repeated_message_field(&response.payload, 1);
+        assert_eq!(decode_varint_field(&activities[0], 1), 9);
+        let rewards = decode_repeated_message_field(&activities[0], 2);
+        assert_eq!(decode_varint_field(&rewards[0], 1), 3);
+
+        let mut plot = Vec::new();
+        append_varint_field(&mut plot, 1, 42);
+        assert!(matches!(
+            handle_typed(&mut account, &state, "guide.PlotReward", &plot, &mut pushes,),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account.activities.progress.get("compat:guide:plot:42"),
+            Some(&1)
+        );
     }
 
     #[test]
