@@ -242,7 +242,12 @@ pub(super) fn handle_typed_with_catalog(
             let copy_id = active.copy_id;
             let hero_ids = active.hero_ids.clone();
             let started_at = active.started_at;
-            let result = decode_battle_pass_result(request_args);
+            let Ok(request) = CopyPassRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "battle pass request is invalid",
+                ));
+            };
+            let result = battle_pass_result_from_request(&request);
             let grade = if result.grade > 0 { result.grade } else { 3 };
             let first_pass = BattleService::settle_at(
                 account,
@@ -586,7 +591,7 @@ pub(super) fn handle_typed_with_catalog(
             }
             HandlerResult::Reply(Response::raw(
                 method,
-                battle_attack_payload_with_damage(request_args, 0),
+                battle_attack_payload_from_request(&request, 0),
             ))
         }
     }

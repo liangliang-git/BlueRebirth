@@ -668,6 +668,21 @@ pub(super) fn battle_attack_payload_with_damage(args: &[u8], damage: u64) -> Vec
     output
 }
 
+pub(super) fn battle_attack_payload_from_request(
+    request: &blueoath_protocol::CopyAttackRequest,
+    damage: u64,
+) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(&mut output, 1, request.attack_type);
+    append_varint_field(&mut output, 2, request.copy_id);
+    for hero_id in &request.hero_ids {
+        append_varint_field(&mut output, 3, *hero_id);
+    }
+    append_varint_field(&mut output, 4, request.enemy_id);
+    append_varint_field(&mut output, 5, damage);
+    output
+}
+
 fn battle_passed_fleet_ids(payload: &[u8]) -> std::collections::HashSet<i64> {
     let fleets = decode_repeated_message_field(payload, 20);
     let fleets = if fleets.is_empty() {

@@ -226,6 +226,12 @@ pub(super) fn decode_battle_pass_result(payload: &[u8]) -> BattlePassResult {
     let Ok(request) = blueoath_protocol::CopyPassRequest::decode(payload) else {
         return BattlePassResult::default();
     };
+    battle_pass_result_from_request(&request)
+}
+
+pub(super) fn battle_pass_result_from_request(
+    request: &blueoath_protocol::CopyPassRequest,
+) -> BattlePassResult {
     let mut result = BattlePassResult {
         grade: request.grade,
         battle_time: request.battle_time,
@@ -233,7 +239,7 @@ pub(super) fn decode_battle_pass_result(payload: &[u8]) -> BattlePassResult {
         damage: request.damage,
         ..BattlePassResult::default()
     };
-    for hero in request.heroes {
+    for hero in &request.heroes {
         let hp = i64::try_from(hero.hp).unwrap_or(i64::MAX);
         result.heroes.push(BattleHeroResult {
             hero_id: hero.hero_id,
