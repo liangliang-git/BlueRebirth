@@ -977,7 +977,7 @@ mod tests {
             )
             .unwrap();
         let mut state = ServerState::new("local", "Local", "1.4.0");
-        state.social_store = Some(store);
+        state.social_store = Some(store.legacy_json_accounts());
         let own = json!({"character": {"uid": 1, "name": "Local"}});
 
         let payload = other_user_payload(&state, &own, 42);

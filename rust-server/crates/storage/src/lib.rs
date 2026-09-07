@@ -500,6 +500,18 @@ impl ProfileStore {
         Ok(Some(account))
     }
 
+    pub fn save_typed_account(&self, account: &mut AccountState) -> Result<(), StorageError> {
+        account
+            .validate()
+            .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
+        let expected_revision = account.profile.as_ref().map(|profile| profile.revision);
+        let next_revision = self.save_typed_account_with_revision(account, expected_revision)?;
+        if let Some(profile) = account.profile.as_mut() {
+            profile.revision = next_revision;
+        }
+        Ok(())
+    }
+
     pub fn save(
         &self,
         profile_id: &str,

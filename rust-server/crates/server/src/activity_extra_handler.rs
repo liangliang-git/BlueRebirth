@@ -517,7 +517,7 @@ mod tests {
             )
             .unwrap();
         let mut server_state = ServerState::new("local", "Local", "1.4.0");
-        server_state.social_store = Some(store);
+        server_state.social_store = Some(store.legacy_json_accounts());
         let current = json!({
             "character": {"uid": 1, "name": "Lower"},
             "bigActivity": {"merits": 10}

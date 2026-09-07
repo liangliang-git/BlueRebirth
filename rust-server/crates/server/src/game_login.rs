@@ -1,3 +1,4 @@
+use blueoath_domain::AccountState;
 use blueoath_protocol::*;
 use blueoath_transport::NetSocketFrameCodec;
 use serde_json::{json, Value};
@@ -90,10 +91,11 @@ struct GameLoginRequestContext<'state, 'account, 'scratch> {
     pass_shipwrecked_ids: &'scratch mut std::collections::HashSet<u64>,
 }
 
-pub(super) async fn process_game_login_frame_payload_with_catalog_mut<S>(
+pub(super) async fn process_game_login_frame_payload_with_catalogs_typed_mut<S>(
     stream: &mut S,
     state: &ServerState,
     mut account: Option<&mut Value>,
+    mut typed_account: Option<&mut AccountState>,
     frame: blueoath_transport::NetSocketFrame,
     catalogs: &GameLoginCatalogs<'_>,
 ) -> Result<bool, ServerError>
@@ -167,14 +169,16 @@ where
             feign_role_id: state.profile_id.clone(),
             err_code: 0,
         })),
-        "player.GetUserList" => Some(UserListCodec::encode(&[user_info_from_account(
-            state,
-            account_view,
-        )])),
-        "player.CreateUser" => Some(PlayerUserCodec::encode(&user_info_from_account(
-            state,
-            account_view,
-        ))),
+        "player.GetUserList" => Some(UserListCodec::encode(&[typed_account
+            .as_deref()
+            .map(|account| user_info_from_typed_account(state, account))
+            .unwrap_or_else(|| user_info_from_account(state, account_view))])),
+        "player.CreateUser" => Some(PlayerUserCodec::encode(
+            &typed_account
+                .as_deref()
+                .map(|account| user_info_from_typed_account(state, account))
+                .unwrap_or_else(|| user_info_from_account(state, account_view)),
+        )),
         _ if matches!(
             request.method.as_str(),
             "cachedata.CacheData"
@@ -282,10 +286,12 @@ where
                 Some(Vec::new())
             }
         },
-        "user.GetUserInfo" => Some(UserInfoCodec::encode(&user_info_from_account(
-            state,
-            account_view,
-        ))),
+        "user.GetUserInfo" => Some(UserInfoCodec::encode(
+            &typed_account
+                .as_deref()
+                .map(|account| user_info_from_typed_account(state, account))
+                .unwrap_or_else(|| user_info_from_account(state, account_view)),
+        )),
         "user.UserLogin" => {
             if let Some(account) = account.as_deref_mut() {
                 advance_task_event(account, task_catalog, 1, 1, current_unix_seconds());
@@ -303,7 +309,11 @@ where
         "user.SetUserSecretary" => {
             match SetSecretaryRequest::decode(request_args) {
                 Ok(typed) => {
-                    if let Some(account) = account.as_deref_mut() {
+                    if let Some(account) = typed_account.as_mut() {
+                        account.character.secretary_id = u64::try_from(typed.secretary_id)
+                            .ok()
+                            .and_then(|id| blueoath_domain::HeroId::new(id).ok());
+                    } else if let Some(account) = account.as_deref_mut() {
                         set_character_i64(account, "secretaryId", typed.secretary_id);
                     }
                 }
@@ -318,7 +328,9 @@ where
         "user.ChangeName" => {
             match ChangeNameRequest::decode(request_args) {
                 Ok(typed) => {
-                    if let Some(account) = account.as_deref_mut() {
+                    if let Some(account) = typed_account.as_mut() {
+                        account.character.name = typed.name;
+                    } else if let Some(account) = account.as_deref_mut() {
                         set_character_string(account, "name", typed.name);
                     }
                 }
@@ -345,7 +357,9 @@ where
         "user.SetPlayerHeadFrame" => {
             match SetHeadFrameRequest::decode(request_args) {
                 Ok(typed) => {
-                    if let Some(account) = account.as_deref_mut() {
+                    if let Some(account) = typed_account.as_mut() {
+                        account.character.head_frame = typed.head_frame.max(0) as u32;
+                    } else if let Some(account) = account.as_deref_mut() {
                         set_character_i64(account, "headFrame", typed.head_frame);
                     }
                 }
@@ -360,7 +374,9 @@ where
         "user.SetHead" => {
             match SetHeadRequest::decode(request_args) {
                 Ok(typed) => {
-                    if let Some(account) = account.as_deref_mut() {
+                    if let Some(account) = typed_account.as_mut() {
+                        account.character.head = typed.head.max(0) as u32;
+                    } else if let Some(account) = account.as_deref_mut() {
                         set_character_i64(account, "head", typed.head);
                     }
                 }

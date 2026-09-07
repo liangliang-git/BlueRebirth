@@ -1,7 +1,24 @@
 use super::*;
 use crate::config::SharedPush;
+use blueoath_domain::{AccountState, NewAccountFactory, ProfileId};
 use blueoath_protocol::GameLoginCodec;
+use blueoath_storage::ProfileStore;
 use std::sync::OnceLock;
+
+fn load_or_create_typed_account(
+    store: &ProfileStore,
+    profile_id: &str,
+    name: &str,
+) -> Result<AccountState, blueoath_storage::StorageError> {
+    let profile_id = ProfileId::new(profile_id.to_owned())
+        .map_err(|_| blueoath_storage::StorageError::InvalidProfileId)?;
+    if let Some(account) = store.load_typed_account(&profile_id)? {
+        return Ok(account);
+    }
+    let mut account = NewAccountFactory::create(profile_id, name.to_owned());
+    store.save_typed_account(&mut account)?;
+    Ok(account)
+}
 
 pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
     let _ = BUILD_SHIP_CATALOG.get_or_init(|| load_build_ship_catalog(config.client_path.as_ref()));
@@ -107,6 +124,7 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
             &default_account_snapshot(&profile_id, &initial_state.name, current_unix_seconds()),
         )?;
     }
+    let _ = load_or_create_typed_account(&store, &profile_id, &initial_state.name)?;
     let mut restored_rooms = Vec::new();
     let mut restored_battles = Vec::new();
     for (_, account) in store.legacy_json_accounts().list()? {
@@ -404,7 +422,7 @@ where
     // the account transaction commits.
     let _persist_guard = context.persist_lock.lock().await;
     let mood_recovery_multiplier = context.mood_recovery_multiplier;
-    let mut account = {
+    let (mut account, mut typed_account) = {
         let account_profile_id = context.profile_id.to_owned();
         let account_store = context.store.clone();
         let hero_skills = Arc::clone(&context.catalogs.hero_skills);
@@ -429,7 +447,12 @@ where
                     legacy_store.save(&account_profile_id, value)?;
                 }
             }
-            Ok::<_, blueoath_storage::StorageError>(account)
+            let typed_account = load_or_create_typed_account(
+                &account_store,
+                &account_profile_id,
+                &account_profile_id,
+            )?;
+            Ok::<_, blueoath_storage::StorageError>((account, typed_account))
         })
         .await
         .map_err(|error| ServerError::StorageTask(error.to_string()))??
@@ -442,12 +465,14 @@ where
         state.clone()
     };
     let account_before = account.clone();
+    let typed_account_before = typed_account.clone();
     let mut buffered = BufferedNetSocket::from_frame(&frame);
     let login_catalogs = context.catalogs.login_catalogs();
-    let keep_alive = process_game_login_frame_payload_with_catalog_mut(
+    let keep_alive = process_game_login_frame_payload_with_catalogs_typed_mut(
         &mut buffered,
         &state_snapshot,
         account.as_mut(),
+        Some(&mut typed_account),
         frame,
         &login_catalogs,
     )
@@ -464,6 +489,12 @@ where
             .await
             .map_err(|error| ServerError::StorageTask(error.to_string()))??;
         }
+    }
+    if typed_account != typed_account_before {
+        let account_store = context.store.clone();
+        tokio::task::spawn_blocking(move || account_store.save_typed_account(&mut typed_account))
+            .await
+            .map_err(|error| ServerError::StorageTask(error.to_string()))??;
     }
     let responses = buffered.into_output();
     drop(_persist_guard);
@@ -695,6 +726,7 @@ async fn build_kcp_wire_responses(
                     &default_account_snapshot(&profile_id, &profile_id, current_unix_seconds()),
                 )?;
             }
+            let _ = load_or_create_typed_account(&account_store, &profile_id, &profile_id)?;
             Ok::<_, blueoath_storage::StorageError>(())
         })
         .await
@@ -721,7 +753,7 @@ async fn build_kcp_wire_responses(
         .lock()
         .map_err(|_| ServerError::InvalidMessage("state mutex poisoned".to_owned()))?
         .mood_recovery_multiplier;
-    let mut account = tokio::task::spawn_blocking(move || {
+    let (mut account, mut typed_account) = tokio::task::spawn_blocking(move || {
         let legacy_store = account_store.legacy_json_accounts();
         let mut account = legacy_store.load(&profile_id)?;
         if let Some(value) = account.as_mut() {
@@ -741,7 +773,8 @@ async fn build_kcp_wire_responses(
                 legacy_store.save(&profile_id, value)?;
             }
         }
-        Ok::<_, blueoath_storage::StorageError>(account)
+        let typed_account = load_or_create_typed_account(&account_store, &profile_id, &profile_id)?;
+        Ok::<_, blueoath_storage::StorageError>((account, typed_account))
     })
     .await
     .map_err(|error| ServerError::StorageTask(error.to_string()))??;
@@ -759,10 +792,12 @@ async fn build_kcp_wire_responses(
     NetSocketFrameCodec::write(&mut input, 0, &message.payload).await?;
     input.shutdown().await?;
     let login_catalogs = catalogs.login_catalogs();
-    process_game_login_frame_with_catalogs_mut(
+    let typed_account_before = typed_account.clone();
+    process_game_login_frame_with_catalogs_typed_mut(
         &mut output,
         &state_snapshot,
         account.as_mut(),
+        Some(&mut typed_account),
         &login_catalogs,
     )
     .await?;
@@ -778,6 +813,12 @@ async fn build_kcp_wire_responses(
             .await
             .map_err(|error| ServerError::StorageTask(error.to_string()))??;
         }
+    }
+    if typed_account != typed_account_before {
+        let account_store = store.clone();
+        tokio::task::spawn_blocking(move || account_store.save_typed_account(&mut typed_account))
+            .await
+            .map_err(|error| ServerError::StorageTask(error.to_string()))??;
     }
     let mut responses = Vec::new();
     loop {

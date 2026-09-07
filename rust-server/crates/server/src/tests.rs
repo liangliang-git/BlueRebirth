@@ -1,8 +1,9 @@
+use super::catalog::GameLoginCatalogs;
 use super::common::error::GameError;
 use super::game_login::pass_mini_game;
 use super::{
     add_bag_item, add_building_state, adjust_character_i64, advance_task_event,
-    advance_task_event_with_param, append_message_field, append_varint_field,
+    advance_task_event_with_param, append_bytes_field, append_message_field, append_varint_field,
     apply_hero_breakdown_rewards, apply_mail_reward, apply_shop_good, apply_strategy_state,
     apply_talent_change, auto_select_enhancement_materials, bag_info_from_account, bag_item_count,
     bathroom_info_payload, battle_attack_payload_with_damage, battle_copy_passed, battle_enemy_ids,
@@ -30,22 +31,23 @@ use super::{
     mark_battle_fleet_passed, mop_up_pass_rets, mop_up_payload, mop_up_payload_with_pass_rets,
     normalize_daily_copy_state, normalize_task_state, prepare_local_request,
     preset_fleet_info_from_account, process_game_login_frame_with_catalog_mut,
-    receive_construction, record_battle_pass, renovate_equip_state, resolve_study_skill_id,
-    return_shop_buy_response, scale_reward, sea_difficulty_for_account,
-    set_preset_fleet_from_account, set_sea_difficulty, settle_mop_up, settle_mop_up_with_config,
-    settle_support_state, ship_attributes_for_hero, ship_attributes_for_template,
-    shop_costs_from_value, shop_info_payload, start_construction, start_study_state,
-    start_support_state, story_memory_payload, study_info_payload, study_skill_state,
-    sync_achievement_points, task_completed, task_info_payload, update_bathroom_state,
-    update_building_assignments, update_mop_up_state, validate_battle_attack, BattleCatalog,
-    BattleCopy, BattleEnemy, BattleFleetReward, BuildShipCatalog, BuildingCatalog, ChapterCatalog,
-    CommanderLevelCatalog, EquipCatalog, EquipLevelbreakRule, EquipNewTestCatalog, EquipNum,
-    EquipRenovateRule, HeroBreakdownCatalog, HeroLevelCatalog, HeroSkillUpgradeCatalog,
-    MailTemplate, ServerConfig, ServerState, ShipAdvanceCatalog, ShipBreakCatalog,
-    ShipRemouldCatalog, ShipStat, ShipStatCatalog, ShopCatalog, ShopCost, ShopGood, ShopReward,
-    SupportCatalog, SupportFleetItem, TalentCatalog, TalentNode, TaskCatalog, TaskDefinition,
-    UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
+    process_game_login_frame_with_catalogs_typed_mut, receive_construction, record_battle_pass,
+    renovate_equip_state, resolve_study_skill_id, return_shop_buy_response, scale_reward,
+    sea_difficulty_for_account, set_preset_fleet_from_account, set_sea_difficulty, settle_mop_up,
+    settle_mop_up_with_config, settle_support_state, ship_attributes_for_hero,
+    ship_attributes_for_template, shop_costs_from_value, shop_info_payload, start_construction,
+    start_study_state, start_support_state, story_memory_payload, study_info_payload,
+    study_skill_state, sync_achievement_points, task_completed, task_info_payload,
+    update_bathroom_state, update_building_assignments, update_mop_up_state,
+    validate_battle_attack, BattleCatalog, BattleCopy, BattleEnemy, BattleFleetReward,
+    BuildShipCatalog, BuildingCatalog, ChapterCatalog, CommanderLevelCatalog, EquipCatalog,
+    EquipLevelbreakRule, EquipNewTestCatalog, EquipNum, EquipRenovateRule, HeroBreakdownCatalog,
+    HeroLevelCatalog, HeroSkillUpgradeCatalog, MailTemplate, ServerConfig, ServerState,
+    ShipAdvanceCatalog, ShipBreakCatalog, ShipRemouldCatalog, ShipStat, ShipStatCatalog,
+    ShopCatalog, ShopCost, ShopGood, ShopReward, SupportCatalog, SupportFleetItem, TalentCatalog,
+    TalentNode, TaskCatalog, TaskDefinition, UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
 };
+use blueoath_domain::{NewAccountFactory, ProfileId};
 use blueoath_protocol::{
     CopyRecordListCodec, EquipListCodec, FashionInfo, FashionList, HeroBagCodec, PresetFleet,
     PresetFleetCodec, PresetFleetInfo, TMessageCodec, TRequest,
@@ -53,6 +55,67 @@ use blueoath_protocol::{
 use blueoath_transport::NetSocketFrameCodec;
 use serde_json::json;
 use tokio::io::duplex;
+
+#[tokio::test]
+async fn typed_user_routes_update_account_state_without_json_account() {
+    let state = ServerState::new("typed-user", "Fallback", "1.4.0");
+    let mut account = NewAccountFactory::create(ProfileId::new("typed-user").unwrap(), "Old");
+    account.character.uid = 77;
+    let catalogs = GameLoginCatalogs::empty();
+    let (mut client, mut server) = duplex(16_384);
+
+    let mut args = Vec::new();
+    append_bytes_field(&mut args, 1, b"Typed Captain");
+    NetSocketFrameCodec::write(
+        &mut client,
+        0,
+        &TMessageCodec::encode_request(&TRequest {
+            method: "user.ChangeName".to_owned(),
+            args: Some(args),
+            callback_handler: 31,
+            ..TRequest::default()
+        }),
+    )
+    .await
+    .unwrap();
+    process_game_login_frame_with_catalogs_typed_mut(
+        &mut server,
+        &state,
+        None,
+        Some(&mut account),
+        &catalogs,
+    )
+    .await
+    .unwrap();
+    let _ = NetSocketFrameCodec::read(&mut client).await.unwrap();
+    assert_eq!(account.character.name, "Typed Captain");
+
+    let mut args = Vec::new();
+    append_varint_field(&mut args, 2, 1021052);
+    NetSocketFrameCodec::write(
+        &mut client,
+        0,
+        &TMessageCodec::encode_request(&TRequest {
+            method: "user.SetHead".to_owned(),
+            args: Some(args),
+            callback_handler: 32,
+            ..TRequest::default()
+        }),
+    )
+    .await
+    .unwrap();
+    process_game_login_frame_with_catalogs_typed_mut(
+        &mut server,
+        &state,
+        None,
+        Some(&mut account),
+        &catalogs,
+    )
+    .await
+    .unwrap();
+    let _ = NetSocketFrameCodec::read(&mut client).await.unwrap();
+    assert_eq!(account.character.head, 1021052);
+}
 
 #[test]
 fn equipment_projection_keeps_rise_common_materials_and_hero_effects() {

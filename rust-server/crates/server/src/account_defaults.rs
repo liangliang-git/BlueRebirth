@@ -323,3 +323,38 @@ pub(super) fn user_info_from_account(state: &ServerState, account: Option<&Value
         ..UserInfo::default()
     }
 }
+
+pub(super) fn user_info_from_typed_account(
+    state: &ServerState,
+    account: &blueoath_domain::AccountState,
+) -> UserInfo {
+    let character = &account.character;
+    let resource = |kind| i32::try_from(account.resources.amount(kind).get()).unwrap_or(i32::MAX);
+    UserInfo {
+        uid: character.uid,
+        uname: if character.name.is_empty() {
+            state.name.clone()
+        } else {
+            character.name.clone()
+        },
+        level: i32::try_from(character.level).unwrap_or(i32::MAX),
+        class_id: 1,
+        secretary_id: character
+            .secretary_id
+            .map(|id| u32::try_from(id.get()).unwrap_or(u32::MAX))
+            .unwrap_or(1),
+        create_time: current_unix_seconds() as i32,
+        gold: resource(blueoath_domain::CurrencyKind::Gold),
+        diamond: resource(blueoath_domain::CurrencyKind::Diamond),
+        supply: resource(blueoath_domain::CurrencyKind::Supply),
+        pve_pt: resource(blueoath_domain::CurrencyKind::PvePoint),
+        head: if character.head == 0 {
+            1021051
+        } else {
+            i32::try_from(character.head).unwrap_or(i32::MAX)
+        },
+        head_frame: i32::try_from(character.head_frame).unwrap_or(i32::MAX),
+        exp: i32::try_from(character.exp).unwrap_or(i32::MAX),
+        ..UserInfo::default()
+    }
+}

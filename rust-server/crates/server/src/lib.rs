@@ -14,7 +14,7 @@ use blueoath_protocol::{
     HeroBag, HeroBagCodec, HeroGrid, MedalAcquiredTime, TMessageCodec, TResponse, TRetLogin,
     UserInfo, UserInfoCodec,
 };
-use blueoath_storage::{ProfileStore, StorageError};
+use blueoath_storage::StorageError;
 use blueoath_transport::{
     FrameCodec, FrameError, KcpConnection, KcpPacket, NetSocketFrameCodec, NetSocketFrameError,
 };
@@ -56,7 +56,9 @@ mod study_state;
 mod task_state;
 mod wire;
 
-use account_defaults::{default_account_snapshot, user_info_from_account};
+use account_defaults::{
+    default_account_snapshot, user_info_from_account, user_info_from_typed_account,
+};
 use account_state::*;
 use battle_state::*;
 pub use blueoath_game::{BattleService, ProgressService, ResourceService, RewardService};
@@ -79,7 +81,7 @@ use construction_state::*;
 use equip_state::*;
 pub use frame_service::process_frame;
 use frame_service::{prepare_local_request, storage_failure_response};
-use game_login::process_game_login_frame_payload_with_catalog_mut;
+use game_login::process_game_login_frame_payload_with_catalogs_typed_mut;
 use guild_state::*;
 use hero_state::*;
 pub use local_protocol::dispatch;
@@ -245,10 +247,31 @@ async fn process_game_login_frame_with_catalogs_mut<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    process_game_login_frame_with_catalogs_typed_mut(stream, state, account, None, catalogs).await
+}
+
+pub(crate) async fn process_game_login_frame_with_catalogs_typed_mut<S>(
+    stream: &mut S,
+    state: &ServerState,
+    account: Option<&mut Value>,
+    typed_account: Option<&mut blueoath_domain::AccountState>,
+    catalogs: &GameLoginCatalogs<'_>,
+) -> Result<bool, ServerError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let Some(frame) = NetSocketFrameCodec::read(stream).await? else {
         return Ok(false);
     };
-    process_game_login_frame_payload_with_catalog_mut(stream, state, account, frame, catalogs).await
+    process_game_login_frame_payload_with_catalogs_typed_mut(
+        stream,
+        state,
+        account,
+        typed_account,
+        frame,
+        catalogs,
+    )
+    .await
 }
 
 fn current_unix_seconds() -> u32 {
