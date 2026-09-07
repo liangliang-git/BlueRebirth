@@ -523,6 +523,17 @@ fn typed_repository_transaction_commits_domain_mutation() {
     account.interaction_items.groups.insert(11, 2);
     account.interaction_items.posters.insert(12, 3);
     account
+        .sweep
+        .entries
+        .push(blueoath_domain::SweepEntryState {
+            fleet_id: 1,
+            copy_id: 9,
+            start_time: 100,
+            end_time: 101,
+            sweep_counts: 2,
+            chapter_id: 0,
+        });
+    account
         .ship_task
         .tasks
         .push(blueoath_domain::ShipTaskTaskState {
@@ -679,6 +690,9 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(loaded.interaction_items.visible.get(&10), Some(&true));
     assert_eq!(loaded.interaction_items.groups.get(&11), Some(&2));
     assert_eq!(loaded.interaction_items.posters.get(&12), Some(&3));
+    assert_eq!(loaded.sweep.entries[0].fleet_id, 1);
+    assert_eq!(loaded.sweep.entries[0].copy_id, 9);
+    assert_eq!(loaded.sweep.entries[0].sweep_counts, 2);
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())

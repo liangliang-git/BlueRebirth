@@ -182,6 +182,206 @@ pub(super) fn handle_typed_with_catalog(
     }
 }
 
+pub(super) fn handle_typed_mop_up(
+    state: &ServerState,
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    battle_catalog: Option<&BattleCatalog>,
+    pre_pushes: &mut Vec<Vec<u8>>,
+    post_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    let now = current_unix_seconds() as u64;
+    match method {
+        "mopUp.GetMopUpData" => {
+            HandlerResult::Reply(Response::raw(method, typed_mop_up_payload(account, &[])))
+        }
+        "mopUp.CheckSweep" => {
+            let active = account
+                .sweep
+                .entries
+                .iter()
+                .filter(|entry| entry.end_time > now)
+                .count();
+            HandlerResult::Reply(Response::raw(method, vec![0x08, (active == 0) as u8]))
+        }
+        "mopUp.StopSweep" => {
+            let (fleet_id, copy_id, _) = decode_mop_up_arg(request_args);
+            account.sweep.entries.retain(|entry| {
+                (fleet_id != 0 && entry.fleet_id != fleet_id)
+                    || (copy_id != 0 && entry.copy_id != copy_id)
+            });
+            let payload = typed_mop_up_payload(account, &[]);
+            append_method_push(post_pushes, "mopUp.GetMopUpData", payload.clone());
+            HandlerResult::Reply(Response::raw(method, payload))
+        }
+        "mopUp.StartSweep" => {
+            let (fleet_id, copy_id, sweep_count) = decode_mop_up_arg(request_args);
+            if fleet_id == 0
+                || copy_id == 0
+                || !(1..=99).contains(&sweep_count)
+                || !account.fleet.fleets.keys().any(|id| id.get() == fleet_id)
+                || !account
+                    .battle
+                    .passed_copies
+                    .iter()
+                    .any(|id| id.get() == copy_id)
+            {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "sweep fleet or copy is not available",
+                ));
+            }
+            let Some(catalog) = battle_catalog else {
+                return HandlerResult::Error(GameError::CatalogUnavailable);
+            };
+            let Some(fleet_id_typed) = blueoath_domain::FleetId::new(fleet_id).ok() else {
+                return HandlerResult::Error(GameError::InvalidRequest("sweep fleet is invalid"));
+            };
+            let hero_ids = account
+                .fleet
+                .fleets
+                .get(&fleet_id_typed)
+                .map(|fleet| fleet.members.iter().map(|id| id.get()).collect::<Vec<_>>())
+                .unwrap_or_default();
+            if hero_ids.is_empty()
+                || !consume_battle_supply_typed(
+                    account,
+                    Some(catalog),
+                    copy_id as i32,
+                    &hero_ids,
+                    sweep_count as i32,
+                )
+            {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "insufficient supply or missing supply configuration",
+                ));
+            }
+            let rewards = typed_sweep_rewards(account, catalog, copy_id as i32, sweep_count);
+            if !rewards.is_empty() && !can_grant_typed_task_rewards(account, &rewards) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "sweep reward is unsupported",
+                ));
+            }
+            for reward in &rewards {
+                let _ = grant_typed_task_reward(account, reward);
+            }
+            account
+                .sweep
+                .entries
+                .retain(|entry| entry.fleet_id != fleet_id);
+            account
+                .sweep
+                .entries
+                .push(blueoath_domain::SweepEntryState {
+                    fleet_id,
+                    copy_id,
+                    start_time: now,
+                    end_time: now.saturating_add(1),
+                    sweep_counts: sweep_count,
+                    chapter_id: 0,
+                });
+            account.sweep.entries.retain(|entry| entry.end_time > now);
+            let pass_rets = mop_up_pass_rets(copy_id as i32, &rewards);
+            let payload = typed_mop_up_payload(account, &pass_rets);
+            append_method_push(
+                pre_pushes,
+                "user.UpdateUserInfo",
+                UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            append_method_push(post_pushes, "mopUp.GetMopUpData", payload.clone());
+            HandlerResult::Reply(Response::raw(method, payload))
+        }
+        _ => HandlerResult::Empty,
+    }
+}
+
+fn typed_sweep_rewards(
+    account: &blueoath_domain::AccountState,
+    catalog: &BattleCatalog,
+    copy_id: i32,
+    sweep_count: u64,
+) -> Vec<ShopReward> {
+    let mut rewards = Vec::new();
+    if !account
+        .battle
+        .passed_copies
+        .iter()
+        .any(|id| id.get() == u64::try_from(copy_id).unwrap_or_default())
+    {
+        if let Some(first) = catalog.copy_first_rewards.get(&copy_id) {
+            rewards.extend(first.iter().map(|(goods_type, item_id, num)| ShopReward {
+                goods_type: *goods_type,
+                item_id: *item_id,
+                num: *num,
+                instance_id: 0,
+            }));
+        }
+    }
+    let drop_ids = catalog
+        .copy_drop_ids
+        .get(&copy_id)
+        .cloned()
+        .unwrap_or_default();
+    for draw in 0..sweep_count {
+        for drop_id in &drop_ids {
+            if let Some(reward) = draw_copy_drop_with_seed(
+                catalog,
+                *drop_id,
+                0,
+                next_battle_drop_seed().wrapping_add(draw),
+            ) {
+                rewards.push(reward);
+            }
+        }
+    }
+    if let Some((count, guaranteed)) = catalog.copy_must_drop_rewards.get(&copy_id) {
+        for _ in 0..*count {
+            rewards.extend(
+                guaranteed
+                    .iter()
+                    .map(|(goods_type, item_id, num)| ShopReward {
+                        goods_type: *goods_type,
+                        item_id: *item_id,
+                        num: *num,
+                        instance_id: 0,
+                    }),
+            );
+        }
+    }
+    rewards
+}
+
+fn typed_mop_up_payload(account: &blueoath_domain::AccountState, pass_rets: &[Vec<u8>]) -> Vec<u8> {
+    let now = current_unix_seconds() as u64;
+    let mut output = Vec::new();
+    let active = account
+        .sweep
+        .entries
+        .iter()
+        .filter(|entry| entry.end_time > now)
+        .count();
+    append_varint_field(&mut output, 1, active as u64);
+    for entry in &account.sweep.entries {
+        let mut encoded = Vec::new();
+        append_varint_field(&mut encoded, 1, entry.fleet_id);
+        append_varint_field(&mut encoded, 2, entry.copy_id);
+        append_varint_field(&mut encoded, 3, entry.start_time);
+        append_varint_field(&mut encoded, 4, entry.end_time);
+        append_varint_field(&mut encoded, 5, entry.sweep_counts);
+        append_varint_field(&mut encoded, 6, entry.chapter_id);
+        append_message_field(&mut output, 2, &encoded);
+    }
+    for pass_ret in pass_rets {
+        append_message_field(&mut output, 3, pass_ret);
+    }
+    output
+}
+
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
@@ -1166,5 +1366,34 @@ mod tests {
             HandlerResult::Reply(_)
         ));
         assert!(account.battle.active.is_none());
+    }
+
+    #[test]
+    fn typed_mop_up_get_returns_domain_queue() {
+        let mut account = NewAccountFactory::create(ProfileId::new("mop-up").unwrap(), "Battle");
+        account
+            .sweep
+            .entries
+            .push(blueoath_domain::SweepEntryState {
+                fleet_id: 1,
+                copy_id: 9,
+                start_time: 10,
+                end_time: 20,
+                sweep_counts: 2,
+                chapter_id: 0,
+            });
+        let mut pre_pushes = Vec::new();
+        let mut post_pushes = Vec::new();
+        let result = handle_typed_mop_up(
+            &ServerState::new("mop-up", "Battle", "test"),
+            &mut account,
+            "mopUp.GetMopUpData",
+            &[],
+            None,
+            &mut pre_pushes,
+            &mut post_pushes,
+        );
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert_eq!(account.sweep.entries[0].copy_id, 9);
     }
 }

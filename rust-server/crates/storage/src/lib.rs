@@ -1330,6 +1330,34 @@ impl ProfileStore {
                     }
                     _ => {}
                 }
+            } else if activity_id == "sweep" {
+                let mut parts = progress_kind.split(':');
+                if parts.next() != Some("entry") {
+                    continue;
+                }
+                let Some(position) = parts.next().and_then(|value| value.parse::<usize>().ok())
+                else {
+                    continue;
+                };
+                let Some(field) = parts.next() else {
+                    continue;
+                };
+                if account.sweep.entries.len() <= position {
+                    account
+                        .sweep
+                        .entries
+                        .resize(position + 1, Default::default());
+                }
+                let entry = &mut account.sweep.entries[position];
+                match field {
+                    "fleet" => entry.fleet_id = value,
+                    "copy" => entry.copy_id = value,
+                    "start" => entry.start_time = value,
+                    "end" => entry.end_time = value,
+                    "count" => entry.sweep_counts = value,
+                    "chapter" => entry.chapter_id = value,
+                    _ => {}
+                }
             } else if activity_id == "interactionItem" {
                 let mut parts = progress_kind.split(':');
                 match parts.next() {
@@ -2897,6 +2925,28 @@ impl ProfileStore {
                     timestamp(),
                 ],
             )?;
+        }
+        for (position, entry) in account.sweep.entries.iter().enumerate() {
+            for (field, value) in [
+                ("fleet", entry.fleet_id),
+                ("copy", entry.copy_id),
+                ("start", entry.start_time),
+                ("end", entry.end_time),
+                ("count", entry.sweep_counts),
+                ("chapter", entry.chapter_id),
+            ] {
+                transaction.execute(
+                    "INSERT INTO activity_progress(
+                        profile_id, activity_id, progress_kind, value, updated_at
+                     ) VALUES (?1, 'sweep', ?2, ?3, ?4)",
+                    params![
+                        profile.id.as_str(),
+                        format!("entry:{position}:{field}"),
+                        typed_i64(value, "sweep state")?,
+                        timestamp(),
+                    ],
+                )?;
+            }
         }
         let mut interaction_progress = vec![(
             "crystalBallToy".to_owned(),

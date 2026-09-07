@@ -1586,6 +1586,21 @@ where
                 None
             }
         }
+        _ if method.is_family(MethodFamily::MopUp) && typed_account.is_some() => {
+            let result = battle_handler::handle_typed_mop_up(
+                state,
+                typed_account.as_mut().expect("typed mop up account"),
+                request.method.as_str(),
+                request_args,
+                battle_catalog,
+                &mut pre_pushes,
+                &mut post_pushes,
+            );
+            if let HandlerResult::Error(error) = &result {
+                handler_error = Some(error.clone());
+            }
+            result.into_payload()
+        }
         _ if method.is_family(MethodFamily::Copy)
             && !matches!(
                 request.method.as_str(),
@@ -2516,7 +2531,6 @@ fn legacy_only_method(method: &str) -> bool {
             | MethodFamily::Battle
             | MethodFamily::Copy
             | MethodFamily::DailyCopy
-            | MethodFamily::MopUp
     )
 }
 

@@ -559,6 +559,21 @@ pub struct InteractionItemState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SweepEntryState {
+    pub fleet_id: u64,
+    pub copy_id: u64,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub sweep_counts: u64,
+    pub chapter_id: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SweepState {
+    pub entries: Vec<SweepEntryState>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InviteScoreState {
     pub have_got_ssr: u64,
     pub have_got_fashion: u64,
@@ -737,6 +752,8 @@ pub struct AccountState {
     pub magazine: MagazineState,
     #[serde(default)]
     pub interaction_items: InteractionItemState,
+    #[serde(default)]
+    pub sweep: SweepState,
     #[serde(default)]
     pub exchange_times: BTreeMap<u64, u32>,
     #[serde(default)]
