@@ -46,6 +46,8 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "hero.HeroCombineUpLv"
             | "hero.HeroCombineQuickLevelUp"
             | "hero.HeroCombineBreak"
+            | "bag.GetNormalTreasureInfo"
+            | "bag.GetSelectTreasureInfo"
             | "illustrate.VowDecTime"
             | "illustrate.IllustrateNew"
             | "repair.RepairHero"
@@ -146,6 +148,12 @@ pub(super) fn handle_typed(
             combination_catalog,
             pre_pushes,
         );
+    }
+    if matches!(
+        method,
+        "bag.GetNormalTreasureInfo" | "bag.GetSelectTreasureInfo"
+    ) {
+        return handle_typed_treasure(account, method, request_args, pre_pushes);
     }
     if method == "hero.Marry" {
         let hero_id = decode_varint_u64_field(request_args, 1);
@@ -630,6 +638,240 @@ fn handle_typed_combination(
     pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
     pre_pushes.push(BagInfoCodec::encode(&bag_info_from_typed_account(account)));
     HandlerResult::PushOnly
+}
+
+fn typed_treasure_reward_supported(reward: &ShopReward) -> bool {
+    reward.num > 0 && matches!(reward.goods_type, 1 | 2 | 3 | 5 | 6 | 18) && reward.item_id > 0
+}
+
+fn typed_next_hero_id(account: &blueoath_domain::AccountState) -> Option<blueoath_domain::HeroId> {
+    blueoath_domain::HeroId::new(
+        account
+            .dock
+            .heroes
+            .keys()
+            .map(|id| id.get())
+            .max()
+            .unwrap_or_default()
+            .checked_add(1)?,
+    )
+    .ok()
+}
+
+fn typed_next_equip_id(
+    account: &blueoath_domain::AccountState,
+) -> Option<blueoath_domain::EquipId> {
+    blueoath_domain::EquipId::new(
+        account
+            .dock
+            .equipments
+            .keys()
+            .map(|id| id.get())
+            .max()
+            .unwrap_or_default()
+            .checked_add(1)?,
+    )
+    .ok()
+}
+
+fn grant_typed_treasure_reward(
+    account: &mut blueoath_domain::AccountState,
+    reward: &mut ShopReward,
+) -> bool {
+    if reward.goods_type == 5 {
+        let Some(currency) = typed_currency_kind(reward.item_id) else {
+            return false;
+        };
+        return account
+            .resources
+            .credit(currency, u64::try_from(reward.num).unwrap_or_default())
+            .is_ok();
+    }
+    if matches!(reward.goods_type, 1 | 6) {
+        return can_grant_typed_task_reward(account, reward)
+            && grant_typed_task_reward(account, reward);
+    }
+    if reward.goods_type == 18 {
+        let Ok(fashion_tid) = blueoath_domain::TemplateId::new(reward.item_id as u64) else {
+            return false;
+        };
+        account
+            .fashion
+            .entries
+            .entry(reward.item_id as u64)
+            .or_default()
+            .insert(fashion_tid);
+        return true;
+    }
+    if reward.goods_type == 3 {
+        let count = usize::try_from(reward.num).unwrap_or_default();
+        let mut last_id = None;
+        for _ in 0..count {
+            let Some(id) = typed_next_hero_id(account) else {
+                return false;
+            };
+            let Ok(template_id) = blueoath_domain::TemplateId::new(reward.item_id as u64) else {
+                return false;
+            };
+            account.dock.heroes.insert(
+                id,
+                blueoath_domain::HeroState {
+                    id,
+                    template_id,
+                    name: String::new(),
+                    change_name_time: 0,
+                    level: 1,
+                    exp: 0,
+                    mood: 100,
+                    affection: 500_000,
+                    hp: 10_000_000_000,
+                    locked: false,
+                    equip_slots: vec![None; 6],
+                    pskills: std::collections::BTreeMap::new(),
+                },
+            );
+            last_id = Some(id.get());
+        }
+        reward.instance_id = i32::try_from(last_id.unwrap_or_default()).unwrap_or(i32::MAX);
+        return true;
+    }
+    if reward.goods_type == 2 {
+        let count = usize::try_from(reward.num).unwrap_or_default();
+        let Ok(template_id) = blueoath_domain::TemplateId::new(reward.item_id as u64) else {
+            return false;
+        };
+        let mut last_id = None;
+        for _ in 0..count {
+            let Some(id) = typed_next_equip_id(account) else {
+                return false;
+            };
+            account.dock.equipments.insert(
+                id,
+                blueoath_domain::EquipmentState {
+                    id,
+                    template_id,
+                    enhance_level: 0,
+                    star: 0,
+                    enhance_exp: 0,
+                    hero_id: None,
+                },
+            );
+            last_id = Some(id.get());
+        }
+        reward.instance_id = i32::try_from(last_id.unwrap_or_default()).unwrap_or(i32::MAX);
+        return true;
+    }
+    false
+}
+
+fn handle_typed_treasure(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    pre_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    let treasure_id = decode_varint_field(request_args, 1);
+    let (open_num, selected_option, drop_id) = if method == "bag.GetNormalTreasureInfo" {
+        let catalog = BUILD_SHIP_CATALOG.get_or_init(BuildShipCatalog::default);
+        (
+            decode_varint_field(request_args, 2),
+            None,
+            catalog.treasure_drop_by_item.get(&treasure_id).copied(),
+        )
+    } else {
+        let position = decode_varint_field(request_args, 2);
+        let open_num = decode_varint_field(request_args, 3).max(1);
+        let catalog = BUILD_SHIP_CATALOG.get_or_init(BuildShipCatalog::default);
+        let Some(selected) = catalog.selected_treasure_by_item.get(&treasure_id) else {
+            return HandlerResult::Error(GameError::CatalogUnavailable);
+        };
+        let selected_option = if selected.options.is_empty() {
+            None
+        } else if position <= 0
+            || usize::try_from(position)
+                .ok()
+                .is_none_or(|p| p > selected.options.len())
+        {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "select treasure position is out of range",
+            ));
+        } else {
+            Some(selected.options[usize::try_from(position - 1).unwrap_or_default()])
+        };
+        (
+            open_num,
+            selected_option,
+            (selected.drop_id > 0).then_some(selected.drop_id),
+        )
+    };
+    if treasure_id <= 0 || !(1..=99).contains(&open_num) {
+        return HandlerResult::Error(GameError::InvalidRequest("treasure id or count is invalid"));
+    }
+    let Some(drop_id) = drop_id else {
+        return HandlerResult::Error(GameError::CatalogUnavailable);
+    };
+    let Some(treasure_template) = blueoath_domain::TemplateId::new(treasure_id as u64).ok() else {
+        return HandlerResult::Error(GameError::InvalidRequest("treasure id is invalid"));
+    };
+    if account
+        .inventory
+        .items
+        .get(&treasure_template)
+        .copied()
+        .unwrap_or_default()
+        < open_num as u64
+    {
+        return HandlerResult::Error(GameError::InvalidState("treasure count is insufficient"));
+    }
+    let catalog = BUILD_SHIP_CATALOG.get_or_init(BuildShipCatalog::default);
+    let mut pending = Vec::new();
+    for index in 0..open_num {
+        let reward = selected_option.or_else(|| {
+            draw_build_drop_reward_with_roll(
+                catalog,
+                drop_id,
+                mix_build_draw_roll(
+                    u64::from(current_unix_millis())
+                        ^ BUILD_DRAW_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+                        ^ u64::try_from(index).unwrap_or_default(),
+                ),
+            )
+        });
+        let Some((goods_type, item_id, num)) = reward else {
+            return HandlerResult::Error(GameError::InvalidState("treasure drop pool is invalid"));
+        };
+        let reward = ShopReward {
+            goods_type,
+            item_id,
+            num,
+            instance_id: 0,
+        };
+        if !typed_treasure_reward_supported(&reward) {
+            return HandlerResult::Error(GameError::InvalidState("treasure reward is unsupported"));
+        }
+        pending.push(reward);
+    }
+    let snapshot = account.clone();
+    if !consume_typed_item(account, treasure_id, open_num as u64) {
+        return HandlerResult::Error(GameError::InvalidState("treasure count cannot be consumed"));
+    }
+    for reward in &mut pending {
+        if !grant_typed_treasure_reward(account, reward) {
+            *account = snapshot;
+            return HandlerResult::Error(GameError::InvalidState(
+                "treasure reward cannot be granted",
+            ));
+        }
+    }
+    pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
+    pre_pushes.push(BagInfoCodec::encode(&bag_info_from_typed_account(account)));
+    pre_pushes.push(EquipListCodec::encode(&equip_list_from_typed_account(
+        account,
+    )));
+    HandlerResult::Reply(Response::raw(
+        method,
+        encode_treasure_response(&pending, treasure_id),
+    ))
 }
 
 pub(super) fn handle<'state, 'account, 'scratch>(
@@ -2335,5 +2577,36 @@ mod tests {
                 .get("compat:hero:1:combination:level"),
             Some(&1)
         );
+
+        let mut ship_reward = ShopReward {
+            goods_type: 3,
+            item_id: 20_000_001,
+            num: 1,
+            instance_id: 0,
+        };
+        assert!(grant_typed_treasure_reward(&mut account, &mut ship_reward));
+        assert_eq!(account.dock.heroes.len(), 2);
+        assert!(ship_reward.instance_id > 0);
+
+        let mut equip_reward = ShopReward {
+            goods_type: 2,
+            item_id: 30_000_001,
+            num: 1,
+            instance_id: 0,
+        };
+        assert!(grant_typed_treasure_reward(&mut account, &mut equip_reward));
+        assert_eq!(account.dock.equipments.len(), 3);
+
+        let mut fashion_reward = ShopReward {
+            goods_type: 18,
+            item_id: 40_000_001,
+            num: 1,
+            instance_id: 0,
+        };
+        assert!(grant_typed_treasure_reward(
+            &mut account,
+            &mut fashion_reward
+        ));
+        assert!(account.fashion.entries.contains_key(&40_000_001));
     }
 }
