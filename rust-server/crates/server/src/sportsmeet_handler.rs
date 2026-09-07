@@ -1,41 +1,70 @@
 use serde_json::{json, Value};
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     match method {
-        "sportsmeet.GetSportsTickCount" => Some(tick_count_payload(context.account.as_deref()?)),
+        "sportsmeet.GetSportsTickCount" => {
+            let Some(account) = context.account.as_deref() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            reply(method, tick_count_payload(account))
+        }
         "sportsmeet.GetPointsRewardDetail" => {
-            Some(points_detail_payload(context.account.as_deref()?))
+            let Some(account) = context.account.as_deref() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            reply(method, points_detail_payload(account))
         }
         "sportsmeet.ReceivePointsReward" => {
             let points = decode_varint_field(request_args, 1);
-            Some(receive_points_reward(context, catalog, Some(points.max(0))))
+            if context.account.is_none() {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            }
+            reply(
+                method,
+                receive_points_reward(context, catalog, Some(points.max(0))),
+            )
         }
-        "sportsmeet.ReceiveAllPointsReward" => Some(receive_points_reward(context, catalog, None)),
-        "sportsmeetrank.GetOwnerRankData" => Some(owner_rank_payload(context.account.as_deref()?)),
-        "sportsmeetrank.GetAttackBeeRank" => Some(rank_payload(
-            context.account.as_deref()?,
-            2,
-            RankKind::AttackBee,
-        )),
-        "sportsmeetrank.GetTrackRank" => Some(rank_payload(
-            context.account.as_deref()?,
-            2,
-            RankKind::Track,
-        )),
-        "sportsmeetrank.GetSteeplechaseRank" => Some(rank_payload(
-            context.account.as_deref()?,
-            2,
-            RankKind::Steeplechase,
-        )),
-        _ => None,
+        "sportsmeet.ReceiveAllPointsReward" => {
+            if context.account.is_none() {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            }
+            reply(method, receive_points_reward(context, catalog, None))
+        }
+        "sportsmeetrank.GetOwnerRankData" => {
+            let Some(account) = context.account.as_deref() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            reply(method, owner_rank_payload(account))
+        }
+        "sportsmeetrank.GetAttackBeeRank" => rank_reply(context, method, RankKind::AttackBee),
+        "sportsmeetrank.GetTrackRank" => rank_reply(context, method, RankKind::Track),
+        "sportsmeetrank.GetSteeplechaseRank" => rank_reply(context, method, RankKind::Steeplechase),
+        _ => HandlerResult::Empty,
     }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
+}
+
+fn rank_reply(
+    context: &GameLoginRequestContext<'_, '_, '_>,
+    method: &str,
+    kind: RankKind,
+) -> HandlerResult {
+    let Some(account) = context.account.as_deref() else {
+        return HandlerResult::Error(GameError::AccountUnavailable);
+    };
+    reply(method, rank_payload(account, 2, kind))
 }
 
 fn sports_state_mut(account: &mut Value) -> &mut Value {
@@ -255,7 +284,18 @@ fn rank_payload(account: &Value, rank: i32, kind: RankKind) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use crate::common::response::HandlerResult;
+
     use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
+    }
 
     #[test]
     fn points_reward_is_idempotent() {

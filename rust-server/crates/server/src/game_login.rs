@@ -630,7 +630,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            teaching_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result =
+                teaching_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::Outpost) => {
             let mut context = GameLoginRequestContext {
@@ -647,7 +653,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            outpost_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result =
+                outpost_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::ShipTask) => {
             let mut context = GameLoginRequestContext {
@@ -664,7 +676,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            shiptask_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result =
+                shiptask_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::SportsMeet)
             || method.is_family(MethodFamily::SportsMeetRank) =>
@@ -683,7 +701,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            sportsmeet_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result =
+                sportsmeet_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if extended_handler::handles(request.method.as_str()) => {
             let mut context = GameLoginRequestContext {
@@ -734,7 +758,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            guildtask_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result =
+                guildtask_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if guild_extension_handler::handles(request.method.as_str()) => {
             let mut context = GameLoginRequestContext {
@@ -998,7 +1028,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            talent_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result =
+                talent_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::Tower) => {
             let mut context = GameLoginRequestContext {
@@ -1015,7 +1051,12 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            tower_handler::handle(&mut context, request.method.as_str(), request_args)
+            let result = tower_handler::handle(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         _ if method.is_family(MethodFamily::ActivityTower) => {
             let mut context = GameLoginRequestContext {
@@ -1032,7 +1073,13 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            tower_handler::handle_activity(&mut context, request.method.as_str(), request_args)
+            let result =
+                tower_handler::handle_activity(&mut context, request.method.as_str(), request_args);
+            if let HandlerResult::Error(error) = &result {
+                response_err = error.client_code();
+                response_err_msg = error.to_string();
+            }
+            result.into_payload()
         }
         "copy.ChooseSfLv" => {
             let (copy_id, requested) = match SeaDifficultyRequest::decode(request_args) {

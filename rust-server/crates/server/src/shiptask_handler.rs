@@ -1,16 +1,20 @@
 use serde_json::{json, Value};
 
+use super::common::error::GameError;
+use super::common::response::HandlerResult;
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
+    let Some(account) = context.account.as_deref_mut() else {
+        return HandlerResult::Error(GameError::AccountUnavailable);
+    };
     match method {
         "shiptask.GetShipTaskReward" => {
             let payload = {
-                let account = context.account.as_deref_mut()?;
                 let ship_tid = decode_varint_field(request_args, 1);
                 let task_id = decode_varint_field(request_args, 2);
                 let state = shiptask_state_mut(account);
@@ -37,11 +41,10 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 shiptask_info_payload(account)
             };
             append_shiptask_push(context, payload);
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "shiptask.GetAchievementReward" => {
             let payload = {
-                let account = context.account.as_deref_mut()?;
                 let ship_tid = decode_varint_field(request_args, 1);
                 let achievement_id = decode_varint_field(request_args, 2);
                 let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
@@ -109,11 +112,10 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 shiptask_info_payload(account)
             };
             append_shiptask_push(context, payload);
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "shiptask.SetCurrentShip" => {
             let payload = {
-                let account = context.account.as_deref_mut()?;
                 let state = shiptask_state_mut(account);
                 state["currentShipTid"] = json!(decode_varint_field(request_args, 1));
                 state["currentHeroTemplateId"] = json!(decode_varint_field(request_args, 2));
@@ -121,9 +123,9 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 shiptask_info_payload(account)
             };
             append_shiptask_push(context, payload);
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
 }
 
@@ -231,6 +233,15 @@ fn shiptask_info_payload(account: &Value) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
+    }
 
     #[test]
     fn shiptask_payload_contains_current_ship_and_rows() {

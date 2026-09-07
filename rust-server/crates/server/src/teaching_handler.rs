@@ -1,30 +1,29 @@
 use serde_json::json;
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let state = context.state;
     let account = &mut *context.account;
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
     let current = account.as_deref().unwrap_or(&serde_json::Value::Null);
 
     match method {
         "teachingsvr.TeacherList"
         | "teachingsvr.MyStudent"
         | "teachingsvr.StudentList"
-        | "teachingsvr.ApplyList" => Some(teaching_list_payload()),
-        "teachingsvr.MyTeacher" => Some(teaching_user_payload(state, current)),
-        "teachingsvr.Search" => Some(teaching_list_payload()),
-        "teachingsvr.GetOtherInfo" => Some(teaching_other_user_payload(
-            state,
-            current,
-            decode_varint_u64_field(request_args, 1),
-        )),
+        | "teachingsvr.ApplyList" => reply(method, teaching_list_payload()),
+        "teachingsvr.MyTeacher" => reply(method, teaching_user_payload(state, current)),
+        "teachingsvr.Search" => reply(method, teaching_list_payload()),
+        "teachingsvr.GetOtherInfo" => reply(
+            method,
+            teaching_other_user_payload(state, current, decode_varint_u64_field(request_args, 1)),
+        ),
         "teachingsvr.TaskReward" => {
             let mut output = Vec::new();
             append_varint_field(
@@ -32,7 +31,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 1,
                 decode_varint_field(request_args, 1).max(0) as u64,
             );
-            Some(output)
+            reply(method, output)
         }
         "teachingsvr.Apply"
         | "teachingsvr.Agree"
@@ -40,19 +39,37 @@ pub(super) fn handle<'state, 'account, 'scratch>(
         | "teachingsvr.Delete"
         | "teachingsvr.Appraise"
         | "teachingsvr.PersonalInfo" => {
-            if let Some(account) = account.as_deref_mut() {
-                account["lastTeachingAction"] = json!({
-                    "method": method,
-                    "args": request_args,
-                    "time": current_unix_seconds(),
-                });
-            } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
-            }
-            Some(Vec::new())
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            account["lastTeachingAction"] = json!({
+                "method": method,
+                "args": request_args,
+                "time": current_unix_seconds(),
+            });
+            HandlerResult::PushOnly
         }
-        _ => None,
+        _ => HandlerResult::Empty,
+    }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::response::HandlerResult;
+
+    use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
     }
 }
 

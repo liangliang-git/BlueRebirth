@@ -1,67 +1,86 @@
 use serde_json::{json, Value};
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
-    let account = context.account.as_deref_mut()?;
+) -> HandlerResult {
+    let Some(account) = context.account.as_deref_mut() else {
+        return HandlerResult::Error(GameError::AccountUnavailable);
+    };
     let now = current_unix_seconds();
     match method {
-        "tower.GetTowerInfo" => Some(tower_info_payload(account, context.catalogs.chapters, now)),
+        "tower.GetTowerInfo" => reply(
+            method,
+            tower_info_payload(account, context.catalogs.chapters, now),
+        ),
         "tower.Reset" => {
-            let tower = account
+            let Some(tower) = account
                 .as_object_mut()
-                .map(|account| account.entry("tower").or_insert_with(|| json!({})))?;
+                .map(|account| account.entry("tower").or_insert_with(|| json!({})))
+            else {
+                return invalid("tower state is invalid");
+            };
             tower["dailyCount"] = json!(0);
             tower["dailyCountEx"] = json!(0);
             tower["resetTime"] = json!(now);
             tower["heroIds"] = json!([]);
             tower["lockEquipList"] = json!([]);
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "tower.ResetChangeHeroIdList" => {
             if let Some(tower) = account.get_mut("tower") {
                 tower["heroIds"] = json!([]);
             }
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "tower.Receive" => {
-            let tower = account.as_object_mut().map(|account| {
+            let Some(tower) = account.as_object_mut().map(|account| {
                 account
                     .entry("tower".to_owned())
                     .or_insert_with(|| json!({}))
-            })?;
+            }) else {
+                return invalid("tower state is invalid");
+            };
             let daily_count = tower
                 .get("dailyCount")
                 .and_then(Value::as_i64)
                 .unwrap_or_default()
                 .max(0);
             tower["dailyCount"] = json!(daily_count.saturating_add(1));
-            Some(tower_reward_payload(tower, None))
+            reply(method, tower_reward_payload(tower, None))
         }
         "tower.Replacement" => {
-            let tower = account.as_object_mut().map(|account| {
+            let Some(tower) = account.as_object_mut().map(|account| {
                 account
                     .entry("tower".to_owned())
                     .or_insert_with(|| json!({}))
-            })?;
+            }) else {
+                return invalid("tower state is invalid");
+            };
             let topic_index = tower
                 .get("topicIndex")
                 .and_then(Value::as_i64)
                 .unwrap_or_default()
                 .max(0);
             tower["topicIndex"] = json!(topic_index.saturating_add(1));
-            Some(tower_info_payload(account, context.catalogs.chapters, now))
+            reply(
+                method,
+                tower_info_payload(account, context.catalogs.chapters, now),
+            )
         }
         "tower.SendUpgrade" => {
-            let tower = account.as_object_mut().map(|account| {
+            let Some(tower) = account.as_object_mut().map(|account| {
                 account
                     .entry("tower".to_owned())
                     .or_insert_with(|| json!({}))
-            })?;
+            }) else {
+                return invalid("tower state is invalid");
+            };
             let max_level = tower
                 .get("maxLevel")
                 .and_then(Value::as_i64)
@@ -69,15 +88,20 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 .max(0);
             tower["maxLevel"] = json!(max_level.saturating_add(1));
             tower["isNewLevel"] = json!(true);
-            Some(tower_info_payload(account, context.catalogs.chapters, now))
+            reply(
+                method,
+                tower_info_payload(account, context.catalogs.chapters, now),
+            )
         }
         "tower.ReceiveBuff" => {
             let copy_id = decode_varint_field(request_args, 1);
-            let tower = account.as_object_mut().map(|account| {
+            let Some(tower) = account.as_object_mut().map(|account| {
                 account
                     .entry("tower".to_owned())
                     .or_insert_with(|| json!({}))
-            })?;
+            }) else {
+                return invalid("tower state is invalid");
+            };
             let ids = tower
                 .as_object_mut()
                 .expect("tower state must be an object")
@@ -88,12 +112,12 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             if copy_id > 0 && !ids.iter().any(|id| id.as_i64() == Some(i64::from(copy_id))) {
                 ids.push(json!(copy_id));
             }
-            Some(tower_reward_payload(
-                tower,
-                (copy_id > 0).then_some(copy_id),
-            ))
+            reply(
+                method,
+                tower_reward_payload(tower, (copy_id > 0).then_some(copy_id)),
+            )
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
 }
 
@@ -101,19 +125,23 @@ pub(super) fn handle_activity<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
-    let account = context.account.as_deref_mut()?;
+) -> HandlerResult {
+    let Some(account) = context.account.as_deref_mut() else {
+        return HandlerResult::Error(GameError::AccountUnavailable);
+    };
     let now = current_unix_seconds();
     match method {
         "activityTower.ActivityTower" | "activityTower.GetActivityTower" => {
-            Some(activity_tower_payload(account, now))
+            reply(method, activity_tower_payload(account, now))
         }
         "activityTower.Reset" => {
-            let tower = account.as_object_mut().map(|account| {
+            let Some(tower) = account.as_object_mut().map(|account| {
                 account
                     .entry("activityTower".to_owned())
                     .or_insert_with(|| json!({}))
-            })?;
+            }) else {
+                return invalid("activity tower state is invalid");
+            };
             tower["resetTime"] = json!(now);
             tower["smallResetNumber"] = json!(tower
                 .get("smallResetNumber")
@@ -125,25 +153,29 @@ pub(super) fn handle_activity<'state, 'account, 'scratch>(
             tower["passCopyIdList"] = json!([]);
             tower["savePassCopyIdList"] = json!([]);
             tower["savePassStageCopyIdList"] = json!([]);
-            Some(activity_tower_payload(account, now))
+            reply(method, activity_tower_payload(account, now))
         }
         "activityTower.ReceiveBuff" => {
             let copy_id = decode_varint_field(request_args, 1);
-            let tower = account.as_object_mut().map(|account| {
+            let Some(tower) = account.as_object_mut().map(|account| {
                 account
                     .entry("activityTower".to_owned())
                     .or_insert_with(|| json!({}))
-            })?;
+            }) else {
+                return invalid("activity tower state is invalid");
+            };
             append_unique_id(tower, "passCopyIdList", copy_id);
-            Some(activity_tower_payload(account, now))
+            reply(method, activity_tower_payload(account, now))
         }
         "activityTower.QuickPass" => {
             let copy_id = decode_varint_field(request_args, 1);
-            let tower = account.as_object_mut().map(|account| {
+            let Some(tower) = account.as_object_mut().map(|account| {
                 account
                     .entry("activityTower".to_owned())
                     .or_insert_with(|| json!({}))
-            })?;
+            }) else {
+                return invalid("activity tower state is invalid");
+            };
             append_unique_id(tower, "passCopyIdList", copy_id);
             let quick_number = tower
                 .get("quickNumber")
@@ -157,10 +189,18 @@ pub(super) fn handle_activity<'state, 'account, 'scratch>(
                 .unwrap_or_default()
                 .max(0);
             tower["historyMax"] = json!(history_max.max(quick_number.saturating_add(1)));
-            Some(activity_tower_payload(account, now))
+            reply(method, activity_tower_payload(account, now))
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
+}
+
+fn invalid(message: &'static str) -> HandlerResult {
+    HandlerResult::Error(GameError::InvalidRequest(message))
 }
 
 pub(crate) fn tower_info_payload(
@@ -340,4 +380,25 @@ fn tower_reward_payload(tower: &Value, copy_id: Option<i32>) -> Vec<u8> {
         append_varint_field(&mut output, 6, copy_id.max(0) as u64);
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::response::HandlerResult;
+
+    use super::*;
+
+    #[test]
+    fn handlers_expose_typed_results() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle_activity;
+    }
 }

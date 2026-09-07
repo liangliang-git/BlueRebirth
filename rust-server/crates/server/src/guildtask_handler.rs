@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handles(method: &str) -> bool {
@@ -10,7 +12,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let task_id = match method {
         "guildtask.GuildTaskAccept" | "guildtask.GuildTaskFinish" | "guildtask.Donate" => {
             decode_varint_field(request_args, 2)
@@ -18,39 +20,45 @@ pub(super) fn handle<'state, 'account, 'scratch>(
         _ => decode_varint_field(request_args, 1),
     };
     match method {
-        "guildtask.UpdateGuildTaskData" => Some(guild_task_data_payload(
-            context.account.as_deref().unwrap_or(&Value::Null),
-        )),
-        "guildtask.UpdateGuildTaskUserData" => Some(guild_task_user_payload(
-            context.account.as_deref().unwrap_or(&Value::Null),
-        )),
+        "guildtask.UpdateGuildTaskData" => reply(
+            method,
+            guild_task_data_payload(context.account.as_deref().unwrap_or(&Value::Null)),
+        ),
+        "guildtask.UpdateGuildTaskUserData" => reply(
+            method,
+            guild_task_user_payload(context.account.as_deref().unwrap_or(&Value::Null)),
+        ),
         "guildtask.AcceptTask" | "guildtask.GuildTaskAccept" => {
             let Some(account) = context.account.as_deref_mut() else {
-                *context.response_err = 1;
-                *context.response_err_msg = "account is unavailable".to_owned();
-                return Some(Vec::new());
+                return HandlerResult::Error(GameError::AccountUnavailable);
             };
             let state = guild_task_state_mut(account);
             push_unique_i32(&mut state["acceptedTasks"], task_id);
             state["lastTaskId"] = json!(task_id);
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "guildtask.GuildTaskFinish" => {
             let Some(account) = context.account.as_deref_mut() else {
-                *context.response_err = 1;
-                *context.response_err_msg = "account is unavailable".to_owned();
-                return Some(Vec::new());
+                return HandlerResult::Error(GameError::AccountUnavailable);
             };
             let state = guild_task_state_mut(account);
             push_unique_i32(&mut state["finishedTasks"], task_id);
             state["lastTaskId"] = json!(task_id);
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "guildtask.Donate" => handle_donate(context, request_args, task_id),
         "guildtask.DrawTaskReward" => handle_draw_reward(context, task_id),
         "guildtask.ConstantRewardPoolGetReward" => handle_reward(context, task_id),
-        _ => None,
+        _ => HandlerResult::Empty,
     }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
+}
+
+fn invalid(message: &'static str) -> HandlerResult {
+    HandlerResult::Error(GameError::InvalidRequest(message))
 }
 
 fn guild_task_state_mut(account: &mut Value) -> &mut Value {
@@ -90,7 +98,7 @@ fn handle_donate<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     request_args: &[u8],
     task_id: i32,
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let contribute = decode_varint_field(request_args, 4);
     let items = decode_repeated_message_field(request_args, 3)
         .into_iter()
@@ -102,21 +110,15 @@ fn handle_donate<'state, 'account, 'scratch>(
         })
         .collect::<Vec<_>>();
     if task_id <= 0 || contribute <= 0 || items.is_empty() {
-        *context.response_err = 1;
-        *context.response_err_msg = "guild task donation is invalid".to_owned();
-        return Some(Vec::new());
+        return invalid("guild task donation is invalid");
     }
     let Some(account) = context.account.as_deref_mut() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "account is unavailable".to_owned();
-        return Some(Vec::new());
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
     if items.iter().any(|(goods_type, item_id, amount)| {
         !guild_task_can_consume(account, *goods_type, *item_id, *amount)
     }) {
-        *context.response_err = 1;
-        *context.response_err_msg = "guild task donation items are insufficient".to_owned();
-        return Some(Vec::new());
+        return invalid("guild task donation items are insufficient");
     }
     for (goods_type, item_id, amount) in items {
         guild_task_consume(account, goods_type, item_id, amount);
@@ -135,7 +137,7 @@ fn handle_donate<'state, 'account, 'scratch>(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_account(account)),
     );
-    Some(Vec::new())
+    HandlerResult::PushOnly
 }
 
 fn guild_task_can_consume(account: &Value, goods_type: i32, item_id: i32, amount: i32) -> bool {
@@ -160,12 +162,10 @@ fn guild_task_consume(account: &mut Value, goods_type: i32, item_id: i32, amount
 fn handle_reward<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     requested_reward_id: i32,
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     let Some(account) = context.account.as_deref_mut() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "account is unavailable".to_owned();
-        return Some(Vec::new());
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
     let reward_id =
         if requested_reward_id > 0 && catalog.rewards_by_id.contains_key(&requested_reward_id) {
@@ -194,7 +194,10 @@ fn handle_reward<'state, 'account, 'scratch>(
                     .any(|value| value.as_i64() == Some(i64::from(reward_id)))
             });
     if already_claimed {
-        return Some(encode_rewards_list(&[]));
+        return reply(
+            "guildtask.ConstantRewardPoolGetReward",
+            encode_rewards_list(&[]),
+        );
     }
     let rewards = if reward_id > 0 {
         catalog
@@ -219,13 +222,16 @@ fn handle_reward<'state, 'account, 'scratch>(
         let state = guild_task_state_mut(account);
         push_unique_i32(&mut state["claimedRewards"], reward_id);
     }
-    Some(encode_rewards_list(&rewards))
+    reply(
+        "guildtask.ConstantRewardPoolGetReward",
+        encode_rewards_list(&rewards),
+    )
 }
 
 fn handle_draw_reward<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     requested_reward_id: i32,
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     let reward_id =
         if requested_reward_id > 0 && catalog.rewards_by_id.contains_key(&requested_reward_id) {
@@ -250,9 +256,7 @@ fn handle_draw_reward<'state, 'account, 'scratch>(
         instance_id: 0,
     });
     let Some(account) = context.account.as_deref_mut() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "account is unavailable".to_owned();
-        return Some(Vec::new());
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
     let reward = if reward_id > 0 {
         rewards
@@ -278,7 +282,23 @@ fn handle_draw_reward<'state, 'account, 'scratch>(
     append_varint_field(&mut output, 5, reward.item_id.max(0) as u64);
     append_varint_field(&mut output, 7, reward.num.max(0) as u64);
     append_varint_field(&mut output, 9, 0);
-    Some(output)
+    reply("guildtask.DrawTaskReward", output)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::response::HandlerResult;
+
+    use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
+    }
 }
 
 fn state_i64(state: &Value, key: &str) -> i64 {

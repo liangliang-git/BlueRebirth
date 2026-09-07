@@ -1,25 +1,22 @@
 use serde_json::{json, Value};
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let state = context.state;
     let pre_pushes = &mut *context.pre_pushes;
-    let account = &mut *context.account;
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
-    let Some(account) = account.as_deref_mut() else {
-        *response_err = 1;
-        *response_err_msg = "account is unavailable".to_owned();
-        return Some(Vec::new());
+    let Some(account) = context.account.as_deref_mut() else {
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
 
     match method {
-        "outpost.GetOutPostInfo" => Some(outpost_info_payload(account)),
+        "outpost.GetOutPostInfo" => reply(method, outpost_info_payload(account)),
         "outpost.UpgradeBuilding" | "outpost.DegradeBuilding" => {
             let building_id = decode_varint_field(request_args, 1);
             let delta = if method.ends_with("UpgradeBuilding") {
@@ -35,12 +32,9 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             );
             match level_result {
                 Ok(()) => push_outpost_refresh(state, pre_pushes, account),
-                Err(message) => {
-                    *response_err = 1;
-                    *response_err_msg = message.to_owned();
-                }
+                Err(message) => return invalid(message),
             }
-            Some(outpost_info_payload(account))
+            reply(method, outpost_info_payload(account))
         }
         "outpost.SetHero" => {
             let building_id = decode_varint_field(request_args, 1);
@@ -48,10 +42,9 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             if !update_building(account, building_id, |building| {
                 building["heroList"] = json!(hero_ids);
             }) {
-                *response_err = 1;
-                *response_err_msg = "outpost building was not found".to_owned();
+                return invalid("outpost building was not found");
             }
-            Some(outpost_info_payload(account))
+            reply(method, outpost_info_payload(account))
         }
         "outpost.SetUseCoin" => {
             let building_id = decode_varint_field(request_args, 1);
@@ -59,16 +52,15 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             if !update_building(account, building_id, |building| {
                 building["useCoin"] = json!(use_coin);
             }) {
-                *response_err = 1;
-                *response_err_msg = "outpost building was not found".to_owned();
+                return invalid("outpost building was not found");
             }
-            Some(outpost_info_payload(account))
+            reply(method, outpost_info_payload(account))
         }
         "outpost.SaveTactic" => {
             let tactics = decode_repeated_message_field(request_args, 1);
             account["outpostTactics"] = json!(tactics.clone());
             let _ = update_tactics(account, tactics);
-            Some(outpost_info_payload(account))
+            reply(method, outpost_info_payload(account))
         }
         "outpost.RemoveTactic" => {
             remove_tactic(
@@ -76,7 +68,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 decode_varint_field(request_args, 1),
                 decode_varint_field(request_args, 2),
             );
-            Some(outpost_info_payload(account))
+            reply(method, outpost_info_payload(account))
         }
         "outpost.ChangeTacticName" => {
             change_tactic_name(
@@ -85,18 +77,18 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 decode_varint_field(request_args, 2),
                 decode_string_field(request_args, 3).unwrap_or_default(),
             );
-            Some(outpost_info_payload(account))
+            reply(method, outpost_info_payload(account))
         }
         "outpost.ReceiveItem" => {
             let rewards =
                 collect_outpost_items(account, Some(decode_varint_field(request_args, 1)));
             push_outpost_refresh(state, pre_pushes, account);
-            Some(encode_receive_result(&rewards))
+            reply(method, encode_receive_result(&rewards))
         }
         "outpost.ReceiveAll" => {
             let rewards = collect_outpost_items(account, None);
             push_outpost_refresh(state, pre_pushes, account);
-            Some(encode_receive_result(&rewards))
+            reply(method, encode_receive_result(&rewards))
         }
         "outpost.SpeedUpProduction" => {
             let building_id = decode_varint_field(request_args, 1);
@@ -107,17 +99,21 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             ) {
                 Ok(rewards) => {
                     push_outpost_refresh(state, pre_pushes, account);
-                    Some(encode_receive_result(&rewards))
+                    reply(method, encode_receive_result(&rewards))
                 }
-                Err(message) => {
-                    *response_err = 1;
-                    *response_err_msg = message.to_owned();
-                    Some(Vec::new())
-                }
+                Err(message) => invalid(message),
             }
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
+}
+
+fn invalid(message: &'static str) -> HandlerResult {
+    HandlerResult::Error(GameError::InvalidRequest(message))
 }
 
 fn outpost_info_payload(account: &mut Value) -> Vec<u8> {
@@ -492,4 +488,20 @@ fn push_outpost_refresh(state: &ServerState, pre_pushes: &mut Vec<Vec<u8>>, acco
         "outpost.UpdateOutPostInfo",
         outpost_info_payload(&mut account.clone()),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::response::HandlerResult;
+
+    use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
+    }
 }
