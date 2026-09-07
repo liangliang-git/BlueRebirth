@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+#[cfg(test)]
 use serde_json::{json, Value};
 
 use super::common::error::GameError;
@@ -467,6 +468,7 @@ pub(super) fn handle_typed(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn equip_test_copy_payload(account: &Value) -> Vec<u8> {
     let state = account.get("equipTestCopy").unwrap_or(&Value::Null);
     let mut output = Vec::new();
@@ -494,6 +496,7 @@ pub(crate) fn equip_test_copy_payload(account: &Value) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 pub(crate) fn equip_new_test_copy_payload(account: &Value) -> Vec<u8> {
     let state = account.get("equipNewTestCopy").unwrap_or(&Value::Null);
     let mut output = Vec::new();
@@ -532,6 +535,7 @@ pub(crate) fn equip_new_test_copy_payload(account: &Value) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 pub(crate) fn equip_activity_payload(account: &Value) -> Vec<u8> {
     let state = account.get("equipActivity").unwrap_or(&Value::Null);
     let mut output = Vec::new();
@@ -569,6 +573,7 @@ pub(crate) fn equip_activity_payload(account: &Value) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 pub(crate) fn mark_new_test_reward(
     account: &mut Value,
     copy_index: i32,
@@ -617,6 +622,7 @@ pub(crate) fn mark_new_test_reward(
     true
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_new_test_reward(
     catalog: &EquipNewTestCatalog,
     account: &Value,
@@ -655,6 +661,7 @@ pub(crate) fn resolve_new_test_reward(
     Ok(reward_id)
 }
 
+#[cfg(test)]
 pub(crate) fn update_new_test_max_damage(
     account: &mut Value,
     catalog: &EquipNewTestCatalog,
@@ -692,6 +699,7 @@ pub(crate) fn update_new_test_max_damage(
     Some(next)
 }
 
+#[cfg(test)]
 pub(crate) fn mark_equip_activity_reward(account: &mut Value, equip_id: u64) -> bool {
     let infos = account
         .as_object_mut()

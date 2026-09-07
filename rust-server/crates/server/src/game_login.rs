@@ -1663,6 +1663,7 @@ where
             .map(|account| completed_copy_ids(account, "seaProgress"))
             .unwrap_or_default();
         let sea_difficulty = account_view.map(sea_difficulty_for_account).unwrap_or(1);
+        #[allow(unused_mut)]
         let mut pushes = vec![
             (
                 "user.UpdateUserInfo",
@@ -1723,6 +1724,7 @@ where
                 story_memory_payload(chapter_catalog.map(|catalog| catalog.memories.as_slice())),
             ),
         ];
+        #[cfg(test)]
         if !catalog.equip_new_test.is_empty() {
             pushes.push((
                 "copy.GetCopy",
