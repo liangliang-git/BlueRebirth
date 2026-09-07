@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+#[cfg(test)]
 use serde_json::{json, Value};
 
 use super::*;
@@ -118,6 +119,7 @@ pub(super) fn construction_info_payload(account: &Value, now: u32) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 pub(super) fn promote_construction_waiting(jobs: &mut [Value], transition_time: i64) {
     let active = jobs
         .iter()

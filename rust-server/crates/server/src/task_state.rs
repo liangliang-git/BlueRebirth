@@ -2,6 +2,7 @@
 
 #[cfg(test)]
 use serde_json::json;
+#[cfg(test)]
 use serde_json::Value;
 
 use super::*;
@@ -266,6 +267,7 @@ pub(super) fn complete_task(
     }
 }
 
+#[cfg(test)]
 pub(super) fn task_claimed(account: &Value, task_type: i32, task_id: i32) -> bool {
     account
         .get("tasks")
@@ -323,6 +325,7 @@ pub(super) fn sync_achievement_points(account: &mut Value, catalog: &TaskCatalog
     true
 }
 
+#[cfg(test)]
 pub(super) fn task_is_visible(
     account: &Value,
     catalog: &TaskCatalog,

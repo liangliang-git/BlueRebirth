@@ -1391,6 +1391,7 @@ pub(super) fn battle_other_drop_multiplier(catalog: Option<&BattleCatalog>, grad
         .unwrap_or(1.0)
 }
 
+#[cfg(test)]
 pub(super) fn battle_rank_drop_reward(
     catalog: Option<&BattleCatalog>,
     copy_id: i32,
@@ -1410,6 +1411,7 @@ pub(super) fn battle_rank_drop_reward(
     })
 }
 
+#[cfg(test)]
 pub(super) fn battle_task_progress_enabled(catalog: Option<&BattleCatalog>, copy_id: i32) -> bool {
     !catalog.is_some_and(|catalog| catalog.task_disabled_copies.contains(&copy_id))
 }
