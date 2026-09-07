@@ -1,12 +1,14 @@
 use serde_json::Value;
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let state = context.state;
     let account = &mut *context.account;
     let catalogs = context.catalogs;
@@ -20,28 +22,25 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     } = catalogs;
     let account_view = account.as_deref();
     let pre_pushes = &mut *context.pre_pushes;
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
 
     match method {
         "building.AddBuilding" => {
             let template_id = decode_varint_field(request_args, 1);
             let land_index = decode_varint_field(request_args, 2);
-            if let Some(account) = account.as_deref_mut() {
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            {
                 if let Some(building_id) =
                     add_building_state(account, template_id, land_index, current_unix_seconds())
                 {
                     append_building_refresh(pre_pushes, account);
                     let mut ret = Vec::new();
                     append_varint_field(&mut ret, 1, building_id.max(0) as u64);
-                    Some(ret)
+                    reply(method, ret)
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "building placement is invalid".to_owned();
-                    Some(Vec::new())
+                    invalid("building placement is invalid")
                 }
-            } else {
-                Some(Vec::new())
             }
         }
         "building.UpgradeBuilding" | "building.DegradeBuilding" => {
@@ -51,44 +50,39 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             } else {
                 -1
             };
-            if let Some(account) = account.as_deref_mut() {
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            {
                 if change_building_level(account, building_id, delta) {
                     append_building_refresh(pre_pushes, account);
-                    Some(Vec::new())
+                    HandlerResult::PushOnly
                 } else {
-                    *response_err = if method == "building.DegradeBuilding" {
-                        3409
-                    } else {
-                        1
-                    };
-                    *response_err_msg = "building level change is invalid".to_owned();
-                    Some(Vec::new())
+                    invalid("building level change is invalid")
                 }
-            } else {
-                Some(Vec::new())
             }
         }
         "building.FinishBuilding" => {
             let building_id = decode_varint_field(request_args, 1);
-            if let Some(account) = account.as_deref_mut() {
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            {
                 if finish_building_state(account, building_id, current_unix_seconds()) {
                     append_building_refresh(pre_pushes, account);
-                    Some(Vec::new())
+                    HandlerResult::PushOnly
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "building was not found".to_owned();
-                    Some(Vec::new())
+                    invalid("building was not found")
                 }
-            } else {
-                Some(Vec::new())
             }
         }
-        "building.UpdateBuildingInfo" => {
-            Some(UserBuildingInfoCodec::encode(&building_info_from_account(
+        "building.UpdateBuildingInfo" => reply(
+            method,
+            UserBuildingInfoCodec::encode(&building_info_from_account(
                 account_view.unwrap_or(&Value::Null),
                 current_unix_seconds(),
-            )))
-        }
+            )),
+        ),
         "building.UpdateHeroAddition" => {
             append_method_push(
                 pre_pushes,
@@ -98,7 +92,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                     current_unix_seconds(),
                 )),
             );
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "building.SetHero" | "building.SetBuildingListHero" => {
             let assignments = if method == "building.SetHero" {
@@ -109,15 +103,17 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             } else {
                 decode_building_assignments(request_args)
             };
-            if let Some(account) = account.as_deref_mut() {
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            {
                 if !update_building_assignments(
                     account,
                     &assignments,
                     current_unix_seconds(),
                     building_catalog,
                 ) {
-                    *response_err = 1;
-                    *response_err_msg = "building assignment is invalid".to_owned();
+                    return invalid("building assignment is invalid");
                 } else {
                     append_method_push(
                         pre_pushes,
@@ -129,13 +125,16 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                     );
                 }
             }
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "building.ProduceItem" | "building.ComposeItem" => {
             let building_id = decode_varint_field(request_args, 1);
             let recipe_id = decode_varint_field(request_args, 2);
             let count = decode_varint_field(request_args, 3);
-            if let Some(account) = account.as_deref_mut() {
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            {
                 if set_building_production(
                     account,
                     building_id,
@@ -144,14 +143,10 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                     current_unix_seconds(),
                 ) {
                     append_building_refresh(pre_pushes, account);
-                    Some(Vec::new())
+                    HandlerResult::PushOnly
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "building production request is invalid".to_owned();
-                    Some(Vec::new())
+                    invalid("building production request is invalid")
                 }
-            } else {
-                Some(Vec::new())
             }
         }
         "building.ReceiveBuilding" | "building.ReceiveItem" | "building.ReceiveAll" => {
@@ -160,7 +155,10 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             } else {
                 Some(decode_varint_field(request_args, 1))
             };
-            if let Some(account) = account.as_deref_mut() {
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            {
                 let now = current_unix_seconds();
                 let rewards = collect_building_rewards(
                     account,
@@ -187,13 +185,15 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                         BagInfoCodec::encode(&bag_info_from_account(account)),
                     );
                 }
-                return Some(encode_rewards_list(&rewards));
+                return reply(method, encode_rewards_list(&rewards));
             }
-            Some(encode_rewards_list(&[]))
         }
         "building.ReceiveResource" => {
             let resource_id = decode_varint_field(request_args, 1);
-            if let Some(account) = account.as_deref_mut() {
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            {
                 let now = current_unix_seconds();
                 let rewards = collect_building_rewards(
                     account,
@@ -220,67 +220,71 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                         BagInfoCodec::encode(&bag_info_from_account(account)),
                     );
                 }
-                Some(encode_rewards_list(&rewards))
-            } else {
-                Some(encode_rewards_list(&[]))
+                reply(method, encode_rewards_list(&rewards))
             }
         }
         "building.UseStrengthSpeedup" => {
             let building_id = decode_varint_field(request_args, 1);
-            if let Some(account) = account.as_deref_mut() {
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            {
                 if finish_building_state(account, building_id, current_unix_seconds()) {
                     append_building_refresh(pre_pushes, account);
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "building was not found".to_owned();
+                    return invalid("building was not found");
                 }
             }
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "building.TriggerNormalHeroPlot" | "building.TriggerSpecialHeroPlot" => {
             // Client removes plot marker after a successful empty TTriggerPlotRet response.
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "building.SaveTactic" | "building.SetTacticName" | "building.RemoveTactic" => {
-            if let Some(account) = account.as_deref_mut() {
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            {
                 if update_building_tactics(account, method, request_args) {
                     append_building_refresh(pre_pushes, account);
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "building tactic request is invalid".to_owned();
+                    return invalid("building tactic request is invalid");
                 }
             }
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
-        "build.BuildInfo" | "build.BuildsInfo" => Some(construction_info_payload(
-            account_view.unwrap_or(&Value::Null),
-            current_unix_seconds(),
-        )),
+        "build.BuildInfo" | "build.BuildsInfo" => reply(
+            method,
+            construction_info_payload(account_view.unwrap_or(&Value::Null), current_unix_seconds()),
+        ),
         "buildnotes.GetNotesList" | "buildnotes.GiveLike" => {
-            Some(build_notes_payload(current_unix_seconds()))
+            reply(method, build_notes_payload(current_unix_seconds()))
         }
         "discuss.GetDiscuss" => {
             let htid = decode_varint_field(request_args, 1);
-            Some(discuss_payload(htid))
+            reply(method, discuss_payload(htid))
         }
-        "discuss.HeroLike" => Some(encode_discuss_empty()),
+        "discuss.HeroLike" => reply(method, encode_discuss_empty()),
         "discuss.Discuss" | "discuss.Like" | "discuss.Dislike" => {
-            if let Some(account) = account.as_deref_mut() {
-                account["lastDiscussAction"] = serde_json::json!({
-                    "method": method,
-                    "args": request_args,
-                    "time": current_unix_seconds(),
-                });
-            }
-            Some(encode_discuss_empty())
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            account["lastDiscussAction"] = serde_json::json!({
+                "method": method,
+                "args": request_args,
+                "time": current_unix_seconds(),
+            });
+            reply(method, encode_discuss_empty())
         }
         "build.BuildingByFormula" => {
             let projects = decode_construction_projects(request_args);
             if projects.is_empty() || projects.len() > 10 {
-                *response_err = 1;
-                *response_err_msg = "construction project count is invalid".to_owned();
-                Some(Vec::new())
-            } else if let Some(account) = account.as_deref_mut() {
+                invalid("construction project count is invalid")
+            } else {
+                let Some(account) = account.as_deref_mut() else {
+                    return HandlerResult::Error(GameError::AccountUnavailable);
+                };
                 match start_construction(account, &projects, current_unix_seconds()) {
                     Ok(()) => {
                         advance_task_event(
@@ -310,21 +314,18 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                             "user.UpdateUserInfo",
                             UserInfoCodec::encode(&user_info_from_account(state, Some(account))),
                         );
-                        Some(Vec::new())
+                        HandlerResult::PushOnly
                     }
-                    Err(error) => {
-                        *response_err = 1;
-                        *response_err_msg = error.to_owned();
-                        Some(Vec::new())
-                    }
+                    Err(error) => invalid(error),
                 }
-            } else {
-                Some(Vec::new())
             }
         }
         "build.BuildQuicklyFinish" => {
             let indexes = decode_repeated_varint_field(request_args, 1);
-            if let Some(account) = account.as_deref_mut() {
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            {
                 if finish_construction(account, &indexes, current_unix_seconds()) {
                     append_method_push(
                         pre_pushes,
@@ -336,23 +337,21 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                         "bag.UpdateBagData",
                         BagInfoCodec::encode(&bag_info_from_account(account)),
                     );
-                    Some(Vec::new())
+                    HandlerResult::PushOnly
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "construction quick-finish failed".to_owned();
-                    Some(Vec::new())
+                    invalid("construction quick-finish failed")
                 }
-            } else {
-                Some(Vec::new())
             }
         }
         "build.BuildReceive" => {
             let indexes = decode_repeated_varint_field(request_args, 1);
-            if let Some(account) = account.as_deref_mut() {
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            {
                 let (ret, added) = receive_construction(account, &indexes, current_unix_seconds());
                 if added == 0 {
-                    *response_err = 1;
-                    *response_err_msg = "no completed construction".to_owned();
+                    return invalid("no completed construction");
                 } else {
                     pre_pushes.push(encode_hero_bag_push(account));
                     append_method_push(
@@ -371,12 +370,34 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                         illustrate_info_payload(account, handbook_behaviours, None),
                     );
                 }
-                Some(ret)
-            } else {
-                Some(Vec::new())
+                reply(method, ret)
             }
         }
-        _ => None,
+        _ => HandlerResult::Empty,
+    }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
+}
+
+fn invalid(message: &'static str) -> HandlerResult {
+    HandlerResult::Error(GameError::InvalidRequest(message))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::response::HandlerResult;
+
+    use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
     }
 }
 
