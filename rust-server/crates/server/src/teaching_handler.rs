@@ -14,21 +14,23 @@ pub(super) fn handle_typed(
         | "teachingsvr.ApplyList"
         | "teachingsvr.Search" => reply(method, teaching_list_payload()),
         "teachingsvr.MyTeacher" => reply(method, teaching_user_payload_typed(state, account)),
-        "teachingsvr.GetOtherInfo" => reply(
-            method,
-            teaching_other_user_payload_typed(
-                state,
-                account,
-                decode_varint_u64_field(request_args, 1),
-            ),
-        ),
+        "teachingsvr.GetOtherInfo" => {
+            let request = match TeachingUserRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => return HandlerResult::Error(GameError::InvalidRequest("teaching uid")),
+            };
+            reply(
+                method,
+                teaching_other_user_payload_typed(state, account, request.uid),
+            )
+        }
         "teachingsvr.TaskReward" => {
+            let request = match TeachingUserRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => return HandlerResult::Error(GameError::InvalidRequest("teaching task")),
+            };
             let mut output = Vec::new();
-            append_varint_field(
-                &mut output,
-                1,
-                decode_varint_field(request_args, 1).max(0) as u64,
-            );
+            append_varint_field(&mut output, 1, request.uid);
             reply(method, output)
         }
         "teachingsvr.Apply"

@@ -1746,6 +1746,25 @@ impl Decode for SportsMeetPointsRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TeachingUserRequest {
+    pub uid: u64,
+}
+
+impl Decode for TeachingUserRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let uid = required_field(&fields, 1, "teaching request is missing uid")?;
+        if uid == 0 {
+            return Err(ProtocolError::Invalid("teaching uid is invalid"));
+        }
+        Ok(Self {
+            uid: u64::try_from(uid)
+                .map_err(|_| ProtocolError::Invalid("teaching uid is invalid"))?,
+        })
+    }
+}
+
 impl Decode for SeaDifficultyRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
