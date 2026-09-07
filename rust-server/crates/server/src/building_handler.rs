@@ -260,6 +260,16 @@ pub(super) fn handle_typed_with_multipliers(
             append_typed_building_refresh(pre_pushes, account, now);
             HandlerResult::PushOnly
         }
+        "buildnotes.GetNotesList" | "buildnotes.GiveLike" => {
+            HandlerResult::Reply(Response::raw(method, build_notes_payload(now)))
+        }
+        "discuss.GetDiscuss" => HandlerResult::Reply(Response::raw(
+            method,
+            discuss_payload(decode_varint_field(request_args, 1)),
+        )),
+        "discuss.HeroLike" | "discuss.Discuss" | "discuss.Like" | "discuss.Dislike" => {
+            HandlerResult::Reply(Response::raw(method, encode_discuss_empty()))
+        }
         _ => HandlerResult::Empty,
     }
 }
