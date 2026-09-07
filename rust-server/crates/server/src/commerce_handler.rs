@@ -26,8 +26,8 @@ pub(super) fn handle_typed(
                 ));
             };
             match shop_refresh_payload(catalogs.shop, request.shop_id) {
-                Some(payload) => HandlerResult::Reply(Response::raw(method, payload)),
-                None => HandlerResult::Error(GameError::InvalidRequest("shop was not found")),
+                Ok(payload) => HandlerResult::Reply(Response::raw(method, payload)),
+                Err(error) => HandlerResult::Error(GameError::InvalidRequest(error)),
             }
         }
         "shop.BuyGoods" => {

@@ -302,13 +302,16 @@ pub(super) fn shop_info_payload(catalog: Option<&ShopCatalog>) -> Vec<u8> {
     payload
 }
 
-pub(super) fn shop_refresh_payload(catalog: Option<&ShopCatalog>, shop_id: i32) -> Option<Vec<u8>> {
+pub(super) fn shop_refresh_payload(
+    catalog: Option<&ShopCatalog>,
+    shop_id: i32,
+) -> Result<Vec<u8>, &'static str> {
     let goods = catalog
         .and_then(|value| value.goods_by_shop.get(&shop_id))
         .cloned()
         .unwrap_or_default();
     if goods.is_empty() {
-        return None;
+        return Err("shop was not found");
     }
     let mut payload = Vec::new();
     append_varint_field(&mut payload, 1, shop_id.max(0) as u64);
@@ -323,5 +326,5 @@ pub(super) fn shop_refresh_payload(catalog: Option<&ShopCatalog>, shop_id: i32) 
     append_varint_field(&mut payload, 4, 0);
     append_varint_field(&mut payload, 5, 0);
     append_varint_field(&mut payload, 6, 0);
-    Some(payload)
+    Ok(payload)
 }
