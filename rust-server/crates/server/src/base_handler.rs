@@ -1335,35 +1335,6 @@ pub(super) fn milestone_info_payload(account: &Value) -> Vec<u8> {
     output
 }
 
-fn guide_setting_payload(account: &mut Option<&mut Value>, args: &[u8]) -> Vec<u8> {
-    let mut output = Vec::new();
-    for nested in decode_repeated_message_field(args, 1) {
-        let key = decode_string_field(&nested, 1).unwrap_or_default();
-        let value = decode_string_field(&nested, 2).unwrap_or_default();
-        if key.is_empty() {
-            continue;
-        }
-        if let Some(account) = account.as_deref_mut() {
-            let settings = account
-                .as_object_mut()
-                .map(|root| {
-                    root.entry("guide".to_owned())
-                        .or_insert_with(|| json!({"settings": {}}))
-                })
-                .and_then(|guide| guide.get_mut("settings"))
-                .and_then(Value::as_object_mut);
-            if let Some(settings) = settings {
-                settings.insert(key.clone(), Value::String(value.clone()));
-            }
-        }
-        let mut setting = Vec::new();
-        append_bytes_field(&mut setting, 1, key.as_bytes());
-        append_bytes_field(&mut setting, 2, value.as_bytes());
-        append_message_field(&mut output, 3, &setting);
-    }
-    output
-}
-
 pub(super) fn other_user_payload(
     state: &ServerState,
     account: &Value,
