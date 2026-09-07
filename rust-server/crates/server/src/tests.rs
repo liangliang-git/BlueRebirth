@@ -2120,17 +2120,16 @@ async fn battle_match_routes_return_typed_local_responses() {
 
 #[tokio::test]
 async fn copy_extra_and_pvp_ready_routes_return_typed_state() {
-    let mut account = default_account_snapshot("battle-extra", "Captain", 123);
+    let mut account = NewAccountFactory::create(ProfileId::new("battle-extra").unwrap(), "Captain");
+    account.character.uid = 1;
     let state = ServerState::new("battle-extra", "Captain", "1.4.0");
-    let catalog = BattleCatalog::default();
 
     let mut add_args = Vec::new();
     append_varint_field(&mut add_args, 1, 77);
     append_varint_field(&mut add_args, 2, 4);
-    let added = battle_route_test_request(
+    let added = typed_coop_route_test_request(
         &mut account,
         &state,
-        &catalog,
         "copyextra.AddCopyRewardCount",
         add_args,
     )
@@ -2149,10 +2148,9 @@ async fn copy_extra_and_pvp_ready_routes_return_typed_state() {
         4
     );
 
-    let extra = battle_route_test_request(
+    let extra = typed_coop_route_test_request(
         &mut account,
         &state,
-        &catalog,
         "copyextra.UpdateCopyExtraInfo",
         Vec::new(),
     )
@@ -2166,16 +2164,9 @@ async fn copy_extra_and_pvp_ready_routes_return_typed_state() {
     assert_eq!(decode_varint_field(&reward_rows[0], 1), 77);
     assert_eq!(decode_varint_field(&reward_rows[0], 2), 4);
 
-    let mut typed_account =
-        NewAccountFactory::create(ProfileId::new("battle-extra-typed").unwrap(), "Captain");
-    typed_account.character.uid = 1;
-    let ready = typed_coop_route_test_request(
-        &mut typed_account,
-        &state,
-        "battle.pvpMatchReady",
-        Vec::new(),
-    )
-    .await;
+    let ready =
+        typed_coop_route_test_request(&mut account, &state, "battle.pvpMatchReady", Vec::new())
+            .await;
     let ready_response = ready
         .iter()
         .find(|response| response.method == "battle.pvpMatchReady")
@@ -2184,7 +2175,7 @@ async fn copy_extra_and_pvp_ready_routes_return_typed_state() {
     assert!(room_id > 0);
 
     let timeout = typed_coop_route_test_request(
-        &mut typed_account,
+        &mut account,
         &state,
         "battle.pvpMatchReadyTimeout",
         Vec::new(),
