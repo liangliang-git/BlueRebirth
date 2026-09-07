@@ -13,7 +13,7 @@ pub(super) fn handles(method: &str) -> bool {
 
 pub(super) fn handle_typed(
     server_state: &ServerState,
-    account: &blueoath_domain::AccountState,
+    account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
 ) -> HandlerResult {
@@ -34,9 +34,43 @@ pub(super) fn handle_typed(
         "guildbigactivity.GuildRateData" => {
             HandlerResult::Reply(Response::raw(method, typed_guild_rate_payload(account)))
         }
+        "guildbigactivity.PresentItem" => {
+            let item_id = decode_varint_field(request_args, 1);
+            let count = decode_varint_field(request_args, 2).clamp(1, 99);
+            if item_id <= 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "guild activity item id is invalid",
+                ));
+            }
+            let progress = &mut account.activities.progress;
+            progress.insert(
+                "guildBigActivity\u{1f}lastItemId".to_owned(),
+                item_id as u64,
+            );
+            let count_key = "guildBigActivity\u{1f}presentCount".to_owned();
+            let current = progress.get(&count_key).copied().unwrap_or_default();
+            progress.insert(count_key, current.saturating_add(count as u64));
+            HandlerResult::Reply(Response::raw(method, typed_guild_activity_payload(account)))
+        }
         "guildbigactivityrank.GetGuildRankList" => {
             HandlerResult::Reply(Response::raw(method, typed_guild_rank_payload(account)))
         }
+        "heroawaken.FinishAwaken" => {
+            let finished = decode_varint_field(request_args, 1) != 0;
+            account
+                .activities
+                .progress
+                .insert("heroAwaken\u{1f}isFinished".to_owned(), u64::from(finished));
+            HandlerResult::Reply(Response::raw(
+                method,
+                typed_hero_awaken_finish_payload(account),
+            ))
+        }
+        "heroawaken.MilestoneInfo" => HandlerResult::Reply(Response::raw(
+            method,
+            typed_hero_awaken_milestone_payload(account),
+        )),
+        "heroawaken.RewardMilestone" => handle_typed_hero_awaken_reward(account, request_args),
         _ => HandlerResult::Empty,
     }
 }
@@ -134,7 +168,11 @@ fn typed_guild_activity_payload(account: &blueoath_domain::AccountState) -> Vec<
         .sum::<u64>();
     let mut output = Vec::new();
     append_varint_field(&mut output, 1, points);
-    append_varint_field(&mut output, 2, 0);
+    append_varint_field(
+        &mut output,
+        2,
+        typed_activity_value(account, "guildBigActivity\u{1f}presentCount"),
+    );
     append_varint_field(&mut output, 3, 0);
     output
 }
@@ -150,9 +188,114 @@ fn typed_guild_rate_payload(account: &blueoath_domain::AccountState) -> Vec<u8> 
     let mut output = Vec::new();
     append_varint_field(&mut output, 1, points);
     append_varint_field(&mut output, 2, points.saturating_add(1));
-    append_varint_field(&mut output, 3, 100);
+    append_varint_field(
+        &mut output,
+        3,
+        100_u64.saturating_sub(typed_activity_value(
+            account,
+            "guildBigActivity\u{1f}presentCount",
+        )),
+    );
     append_varint_field(&mut output, 4, 100);
     output
+}
+
+fn typed_hero_awaken_finish_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(
+        &mut output,
+        1,
+        typed_activity_value(account, "heroAwaken\u{1f}isFinished"),
+    );
+    output
+}
+
+fn typed_hero_awaken_milestone_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+    let mut output = Vec::new();
+    append_varint_field(
+        &mut output,
+        1,
+        typed_activity_value(account, "heroAwaken\u{1f}totalPt"),
+    );
+    for key in account.activities.progress.keys() {
+        if let Some(milestone) = key
+            .strip_prefix("heroAwaken\u{1f}claimed:")
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            append_varint_field(&mut output, 2, milestone);
+        }
+    }
+    output
+}
+
+fn handle_typed_hero_awaken_reward(
+    account: &mut blueoath_domain::AccountState,
+    request_args: &[u8],
+) -> HandlerResult {
+    let milestone = decode_varint_field(request_args, 1);
+    if milestone <= 0 {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "hero awaken milestone is invalid",
+        ));
+    }
+    if typed_activity_value(account, "heroAwaken\u{1f}totalPt") < milestone as u64 {
+        return HandlerResult::Error(GameError::InvalidState(
+            "hero awaken milestone is not reached",
+        ));
+    }
+    let claim_key = format!("heroAwaken\u{1f}claimed:{milestone}");
+    if account.activities.progress.contains_key(&claim_key) {
+        return HandlerResult::Reply(Response::raw(
+            "heroawaken.RewardMilestone",
+            encode_rewards_list(&[]),
+        ));
+    }
+    let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
+    let reward_id = catalog
+        .activity
+        .get(&5002)
+        .and_then(|activity| activity.get("p4"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_array)
+        .find(|row| row.first().and_then(Value::as_i64) == Some(i64::from(milestone)))
+        .and_then(|row| row.get(1).and_then(Value::as_i64))
+        .and_then(|id| i32::try_from(id).ok())
+        .unwrap_or_default();
+    let rewards = catalog
+        .rewards_by_id
+        .get(&reward_id)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|reward| ShopReward {
+            goods_type: reward.goods_type,
+            item_id: reward.item_id,
+            num: reward.num,
+            instance_id: reward.instance_id,
+        })
+        .collect::<Vec<_>>();
+    if rewards.is_empty() || !rewards.iter().all(can_grant_typed_task_reward_for_activity) {
+        return HandlerResult::Error(GameError::InvalidState("hero awaken reward is unsupported"));
+    }
+    if !can_grant_typed_task_rewards(account, &rewards) {
+        return HandlerResult::Error(GameError::InvalidState(
+            "hero awaken reward cannot be granted",
+        ));
+    }
+    for reward in &rewards {
+        let _ = grant_typed_task_reward(account, reward);
+    }
+    account.activities.progress.insert(claim_key, 1);
+    HandlerResult::Reply(Response::raw(
+        "heroawaken.RewardMilestone",
+        encode_rewards_list(&rewards),
+    ))
+}
+
+fn can_grant_typed_task_reward_for_activity(reward: &ShopReward) -> bool {
+    reward.num > 0 && (reward.goods_type == 5 || matches!(reward.goods_type, 1 | 6))
 }
 
 fn typed_guild_rank_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
@@ -719,5 +862,47 @@ mod tests {
             2
         );
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn typed_activity_extra_mutations_use_progress_state() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("activity-extra-typed").unwrap(),
+            "Captain",
+        );
+        let state = ServerState::new("activity-extra-typed", "Captain", "test");
+        let mut present = Vec::new();
+        append_varint_field(&mut present, 1, 42);
+        append_varint_field(&mut present, 2, 3);
+        assert!(matches!(
+            handle_typed(
+                &state,
+                &mut account,
+                "guildbigactivity.PresentItem",
+                &present,
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account
+                .activities
+                .progress
+                .get("guildBigActivity\u{1f}presentCount"),
+            Some(&3)
+        );
+
+        let mut finish = Vec::new();
+        append_varint_field(&mut finish, 1, 1);
+        assert!(matches!(
+            handle_typed(&state, &mut account, "heroawaken.FinishAwaken", &finish),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account
+                .activities
+                .progress
+                .get("heroAwaken\u{1f}isFinished"),
+            Some(&1)
+        );
     }
 }

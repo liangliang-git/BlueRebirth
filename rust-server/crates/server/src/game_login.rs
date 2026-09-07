@@ -739,7 +739,7 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::Boss) => {
-            let result = if let Some(typed) = typed_account.as_ref() {
+            let result = if let Some(typed) = typed_account.as_mut() {
                 let result = boss_handler::handle_typed(state, typed, request.method.as_str());
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result
@@ -826,7 +826,7 @@ where
             result.into_payload()
         }
         _ if activity_extra_handler::handles(request.method.as_str()) => {
-            let result = if let Some(typed) = typed_account.as_ref() {
+            let result = if let Some(typed) = typed_account.as_mut() {
                 let result = activity_extra_handler::handle_typed(
                     state,
                     typed,
