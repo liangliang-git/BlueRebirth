@@ -33,6 +33,7 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "activitycodeexchange.ExchangeCode"
             | "activitycodeexchange.ExchangeReward"
             | "activitypapercut.UpdateActivityPaperCutInfo"
+            | "activitypapercut.MakePaperCut"
             | "activitysecretcopy.UpdateActivitySecretCopyInfo"
             | "activitysecretcopy.GetReward"
             | "activityvalentineloveletter.UpdateActivityValentineLoveLetterInfo"
@@ -55,12 +56,14 @@ pub(super) fn handle_typed(
         "activityVideo.SetActivityVideo"
             | "activitycodeexchange.ExchangeCode"
             | "activitycodeexchange.ExchangeReward"
+            | "activitypapercut.MakePaperCut"
     ) {
         return match method {
             "activityVideo.SetActivityVideo" => handle_typed_video_set(account, request_args),
             "activitycodeexchange.ExchangeCode" | "activitycodeexchange.ExchangeReward" => {
                 handle_typed_code_exchange(account, method, request_args)
             }
+            "activitypapercut.MakePaperCut" => handle_typed_paper_cut(account, request_args),
             _ => unreachable!(),
         };
     }
@@ -310,6 +313,119 @@ fn handle_typed_code_exchange(
             "activity exchange method is unsupported",
         )),
     }
+}
+
+fn handle_typed_paper_cut(
+    account: &mut blueoath_domain::AccountState,
+    request_args: &[u8],
+) -> HandlerResult {
+    let materials = decode_repeated_varint_field(request_args, 1);
+    if materials.is_empty() {
+        return HandlerResult::Error(GameError::InvalidRequest("paper cut materials are empty"));
+    }
+    let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
+    let Some(formula_config) = catalog.paper_cut_formulas.values().find(|config| {
+        config
+            .get("formula")
+            .and_then(Value::as_array)
+            .is_some_and(|values| {
+                if values.len() != materials.len() {
+                    return false;
+                }
+                let mut configured = values
+                    .iter()
+                    .filter_map(Value::as_i64)
+                    .filter_map(|value| i32::try_from(value).ok())
+                    .collect::<Vec<_>>();
+                if configured.len() != materials.len() {
+                    return false;
+                }
+                configured.sort_unstable();
+                let mut requested = materials.clone();
+                requested.sort_unstable();
+                configured == requested
+            })
+    }) else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "paper cut formula is not configured",
+        ));
+    };
+    let formula = json_i32(formula_config, "id").unwrap_or_default();
+    let drop_id = json_i32(formula_config, "drop_id").unwrap_or_default();
+    let Some(drop) = catalog
+        .drop_items
+        .get(&drop_id)
+        .and_then(|config| config.get("drop"))
+        .and_then(Value::as_array)
+        .and_then(|values| values.first())
+        .and_then(Value::as_array)
+    else {
+        return HandlerResult::Error(GameError::InvalidState(
+            "paper cut reward is not configured",
+        ));
+    };
+    let goods_type =
+        i32::try_from(drop.first().and_then(Value::as_i64).unwrap_or_default()).unwrap_or_default();
+    let item_id =
+        i32::try_from(drop.get(1).and_then(Value::as_i64).unwrap_or_default()).unwrap_or_default();
+    let amount =
+        i32::try_from(drop.get(2).and_then(Value::as_i64).unwrap_or_default()).unwrap_or_default();
+    let reward = ShopReward {
+        goods_type,
+        item_id,
+        num: amount,
+        instance_id: 0,
+    };
+    let mut required = std::collections::BTreeMap::<blueoath_domain::TemplateId, u64>::new();
+    for material in materials {
+        let Ok(template_id) = blueoath_domain::TemplateId::new(material.max(0) as u64) else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "paper cut material id is invalid",
+            ));
+        };
+        let count = required.entry(template_id).or_default();
+        *count = count.saturating_add(1);
+    }
+    if required.iter().any(|(template_id, amount)| {
+        account
+            .inventory
+            .items
+            .get(template_id)
+            .copied()
+            .unwrap_or_default()
+            < *amount
+    }) {
+        return HandlerResult::Error(GameError::InvalidState(
+            "paper cut materials are insufficient",
+        ));
+    }
+    if !task_state::can_grant_typed_task_reward(account, &reward) {
+        return HandlerResult::Error(GameError::InvalidState("paper cut reward is unsupported"));
+    }
+    let snapshot = account.clone();
+    for (template_id, amount) in required {
+        let Some(current) = account.inventory.items.get_mut(&template_id) else {
+            *account = snapshot;
+            return HandlerResult::Error(GameError::InvalidState(
+                "paper cut materials are insufficient",
+            ));
+        };
+        *current -= amount;
+        if *current == 0 {
+            account.inventory.items.remove(&template_id);
+        }
+    }
+    if !task_state::grant_typed_task_reward(account, &reward) {
+        *account = snapshot;
+        return HandlerResult::Error(GameError::InvalidState("paper cut reward is unsupported"));
+    }
+    let key = format!("activity:activityPaperCut:formula:{formula}:count");
+    let count = account.activities.progress.entry(key).or_default();
+    *count = count.saturating_add(1);
+    typed_reply(
+        "activitypapercut.MakePaperCut",
+        paper_cut_ret_payload(formula, &[reward]),
+    )
 }
 
 fn handle_typed_video_set(
