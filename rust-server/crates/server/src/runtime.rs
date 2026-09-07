@@ -316,11 +316,10 @@ where
             .map_err(|_| ServerError::InvalidMessage("state mutex poisoned".to_owned()))?;
         (state.profile_id.clone(), state.mood_recovery_multiplier)
     };
-    let connection_uid = store
-        .load_account(&profile_id)?
-        .as_ref()
-        .and_then(|account| account.get("character"))
-        .and_then(|character| json_u64(character, "uid"))
+    let connection_uid = blueoath_domain::ProfileId::new(profile_id.clone())
+        .ok()
+        .and_then(|id| store.load_typed_account(&id).ok().flatten())
+        .map(|account| account.character.uid)
         .unwrap_or(1);
     let mut shared_events = {
         let state = state
@@ -734,10 +733,10 @@ async fn build_kcp_wire_responses(
     })
     .await
     .map_err(|error| ServerError::StorageTask(error.to_string()))??;
-    peer.uid = account
-        .as_ref()
-        .and_then(|account| account.get("character"))
-        .and_then(|character| json_u64(character, "uid"))
+    peer.uid = blueoath_domain::ProfileId::new(peer.profile_id.clone())
+        .ok()
+        .and_then(|id| store.load_typed_account(&id).ok().flatten())
+        .map(|account| account.character.uid)
         .unwrap_or(1);
     let state_snapshot = state
         .lock()
