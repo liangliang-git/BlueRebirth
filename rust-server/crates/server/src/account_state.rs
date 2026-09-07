@@ -757,6 +757,7 @@ pub(super) fn apply_strategy_state(account: &mut Value, method: &str, args: &[u8
 }
 
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn strategy_info_payload(account: &Value) -> Vec<u8> {
     let mut output = Vec::new();
     if let Some(list) = account
@@ -955,6 +956,7 @@ pub(super) fn settle_support_state(
     })
 }
 
+#[cfg(test)]
 #[cfg(test)]
 pub(super) fn support_info_payload(account: &Value) -> Vec<u8> {
     let mut output = Vec::new();
