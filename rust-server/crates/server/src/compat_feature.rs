@@ -15,7 +15,7 @@ const HP_COEFFICIENT: i64 = 10_000_000_000;
 const OATH_RING_TEMPLATE: i32 = 10_180;
 
 pub(super) fn handles_typed(method: &str) -> bool {
-    method == "repair.RepairHero"
+    matches!(method, "hero.Marry" | "repair.RepairHero")
 }
 
 pub(super) fn handle_typed(
@@ -25,6 +25,80 @@ pub(super) fn handle_typed(
     request_args: &[u8],
     pre_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
+    if method == "hero.Marry" {
+        let hero_id = decode_varint_u64_field(request_args, 1);
+        let marry_type = decode_varint_field(request_args, 2);
+        if hero_id == 0 || !(1..=2).contains(&marry_type) {
+            return HandlerResult::Error(GameError::InvalidRequest("marriage request is invalid"));
+        }
+        if !account
+            .dock
+            .heroes
+            .values()
+            .any(|hero| hero.id.get() == hero_id)
+        {
+            return HandlerResult::Error(GameError::NotFound("hero"));
+        }
+        let marry_time_key = format!("compat:hero:{hero_id}:marryTime");
+        if account
+            .activities
+            .progress
+            .get(&marry_time_key)
+            .copied()
+            .unwrap_or_default()
+            > 0
+        {
+            return HandlerResult::Error(GameError::InvalidState("hero is already married"));
+        }
+        let Ok(ring) = blueoath_domain::TemplateId::new(OATH_RING_TEMPLATE as u64) else {
+            return HandlerResult::Error(GameError::InvalidState("oath ring id is invalid"));
+        };
+        if account
+            .inventory
+            .items
+            .get(&ring)
+            .copied()
+            .unwrap_or_default()
+            < 1
+        {
+            return HandlerResult::Error(GameError::InvalidState("oath ring is missing"));
+        }
+        let now = current_unix_seconds();
+        account
+            .inventory
+            .items
+            .entry(ring)
+            .and_modify(|count| *count -= 1);
+        if account.inventory.items.get(&ring).copied() == Some(0) {
+            account.inventory.items.remove(&ring);
+        }
+        account
+            .activities
+            .progress
+            .insert(marry_time_key, u64::from(now));
+        account.activities.progress.insert(
+            format!("compat:hero:{hero_id}:marryType"),
+            marry_type as u64,
+        );
+        let married_count_key = "compat:character:marriedNum".to_owned();
+        let married_count = account
+            .activities
+            .progress
+            .get(&married_count_key)
+            .copied()
+            .unwrap_or_default();
+        account
+            .activities
+            .progress
+            .insert(married_count_key, married_count.saturating_add(1));
+        pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
+        append_method_push(
+            pre_pushes,
+            "user.UpdateUserInfo",
+            UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+        );
+        return HandlerResult::PushOnly;
+    }
     if method != "repair.RepairHero" {
         return HandlerResult::Error(GameError::InvalidRequest(
             "compat feature method is unsupported",
