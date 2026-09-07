@@ -695,20 +695,7 @@ where
                     &mut post_pushes,
                 )
             } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                chat_handler::handle(&mut context, request.method.as_str(), request_args)
+                HandlerResult::Error(GameError::InvalidRequest("chat requires typed account"))
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -756,20 +743,9 @@ where
                     &mut pre_pushes,
                 )
             } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                guildbox_handler::handle(&mut context, request.method.as_str(), request_args)
+                HandlerResult::Error(GameError::InvalidRequest(
+                    "guild box requires typed account",
+                ))
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -957,20 +933,9 @@ where
                     &mut post_pushes,
                 )
             } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                shiptask_handler::handle(&mut context, request.method.as_str(), request_args)
+                HandlerResult::Error(GameError::InvalidRequest(
+                    "ship task requires typed account",
+                ))
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
