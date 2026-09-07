@@ -1979,21 +1979,49 @@ async fn battle_route_test_request(
     responses
 }
 
+async fn typed_coop_route_test_request(
+    account: &mut blueoath_domain::AccountState,
+    state: &ServerState,
+    method: &str,
+    args: Vec<u8>,
+) -> Vec<blueoath_protocol::TResponse> {
+    let (mut client, mut server) = duplex(1_048_576);
+    let request = TMessageCodec::encode_request(&TRequest {
+        method: method.to_owned(),
+        args: Some(args),
+        callback_handler: 73,
+        ..TRequest::default()
+    });
+    NetSocketFrameCodec::write(&mut client, 0, &request)
+        .await
+        .unwrap();
+    let catalogs = GameLoginCatalogs::empty();
+    process_game_login_frame_with_catalogs_typed_mut(
+        &mut server,
+        state,
+        None,
+        Some(account),
+        &catalogs,
+    )
+    .await
+    .unwrap();
+    drop(server);
+    let mut responses = Vec::new();
+    while let Some(frame) = NetSocketFrameCodec::read(&mut client).await.unwrap() {
+        responses.push(TMessageCodec::decode_response(&frame.payload).unwrap());
+    }
+    responses
+}
+
 #[tokio::test]
 async fn battle_match_routes_return_typed_local_responses() {
-    let mut account = default_account_snapshot("match-test", "Captain", 123);
+    let mut account = NewAccountFactory::create(ProfileId::new("match-test").unwrap(), "Captain");
+    account.character.uid = 1;
     let mut state = ServerState::new("match-test", "Captain", "1.4.0");
     state.battle_port = 19_090;
-    let catalog = BattleCatalog::default();
 
-    let responses = battle_route_test_request(
-        &mut account,
-        &state,
-        &catalog,
-        "battle.CreateRoom",
-        Vec::new(),
-    )
-    .await;
+    let responses =
+        typed_coop_route_test_request(&mut account, &state, "battle.CreateRoom", Vec::new()).await;
     let create_response = responses
         .iter()
         .find(|response| response.method == "battle.CreateRoom")
@@ -2001,14 +2029,13 @@ async fn battle_match_routes_return_typed_local_responses() {
     assert_eq!(create_response.err, 0);
     let room_id = decode_varint_field(create_response.ret.as_deref().unwrap_or_default(), 1);
     assert!(room_id > 0);
-    assert_eq!(account["battleRoom"]["roomId"], json!(room_id));
 
-    let mut guest = default_account_snapshot("match-guest", "Guest", 123);
-    guest["character"]["uid"] = json!(2);
+    let mut guest = NewAccountFactory::create(ProfileId::new("match-guest").unwrap(), "Guest");
+    guest.character.uid = 2;
     let mut join_args = Vec::new();
     append_varint_field(&mut join_args, 1, room_id as u64);
     let join_responses =
-        battle_route_test_request(&mut guest, &state, &catalog, "battle.JoinRoom", join_args).await;
+        typed_coop_route_test_request(&mut guest, &state, "battle.JoinRoom", join_args).await;
     assert!(join_responses
         .iter()
         .find(|response| response.method == "battle.JoinRoom")
@@ -2016,36 +2043,19 @@ async fn battle_match_routes_return_typed_local_responses() {
 
     let mut owner_chat_args = Vec::new();
     append_varint_field(&mut owner_chat_args, 1, 9);
-    battle_route_test_request(
-        &mut account,
-        &state,
-        &catalog,
-        "battle.SendAutoMsg",
-        owner_chat_args,
-    )
-    .await;
-    let guest_poll = battle_route_test_request(
-        &mut guest,
-        &state,
-        &catalog,
-        "battle.MatchLeave",
-        Vec::new(),
-    )
-    .await;
+    typed_coop_route_test_request(&mut account, &state, "battle.SendAutoMsg", owner_chat_args)
+        .await;
+    let guest_poll =
+        typed_coop_route_test_request(&mut guest, &state, "battle.MatchLeave", Vec::new()).await;
     assert!(guest_poll
         .iter()
         .any(|response| response.method == "battle.receiveAutoMsg"));
 
     let mut match_args = Vec::new();
     append_varint_field(&mut match_args, 1, 2);
-    let guest_match = battle_route_test_request(
-        &mut guest,
-        &state,
-        &catalog,
-        "battle.MatchJoin",
-        match_args.clone(),
-    )
-    .await;
+    let guest_match =
+        typed_coop_route_test_request(&mut guest, &state, "battle.MatchJoin", match_args.clone())
+            .await;
     assert!(guest_match.iter().any(|response| {
         response.method == "battle.MatchJoin"
             && response.err == 0
@@ -2054,14 +2064,9 @@ async fn battle_match_routes_return_typed_local_responses() {
                     0x0a, 0x0b, 0x0a, 0x09, 0x08, 0x02, 0x12, 0x05, b'l', b'o', b'c', b'a', b'l',
                 ]
     }));
-    let duplicate_guest_match = battle_route_test_request(
-        &mut guest,
-        &state,
-        &catalog,
-        "battle.MatchJoin",
-        match_args.clone(),
-    )
-    .await;
+    let duplicate_guest_match =
+        typed_coop_route_test_request(&mut guest, &state, "battle.MatchJoin", match_args.clone())
+            .await;
     assert!(duplicate_guest_match.iter().any(|response| {
         response.method == "battle.MatchJoin"
             && response.err == 0
@@ -2070,14 +2075,8 @@ async fn battle_match_routes_return_typed_local_responses() {
                     0x0a, 0x0b, 0x0a, 0x09, 0x08, 0x02, 0x12, 0x05, b'l', b'o', b'c', b'a', b'l',
                 ]
     }));
-    let responses = battle_route_test_request(
-        &mut account,
-        &state,
-        &catalog,
-        "battle.MatchJoin",
-        match_args,
-    )
-    .await;
+    let responses =
+        typed_coop_route_test_request(&mut account, &state, "battle.MatchJoin", match_args).await;
     let match_response = responses
         .iter()
         .find(|response| response.method == "battle.MatchJoin")
@@ -2090,40 +2089,24 @@ async fn battle_match_routes_return_typed_local_responses() {
             0x09, 0x08, 0x01, 0x12, 0x05, b'l', b'o', b'c', b'a', b'l'
         ]
     );
-    let guest_match_push = battle_route_test_request(
-        &mut guest,
-        &state,
-        &catalog,
-        "battle.createBattleInfo",
-        Vec::new(),
-    )
-    .await;
+    let guest_match_push =
+        typed_coop_route_test_request(&mut guest, &state, "battle.createBattleInfo", Vec::new())
+            .await;
     assert!(guest_match_push
         .iter()
         .any(|response| response.method == "battle.MatchJoin"));
 
     let mut chat_args = Vec::new();
     append_varint_field(&mut chat_args, 1, 9);
-    let responses = battle_route_test_request(
-        &mut account,
-        &state,
-        &catalog,
-        "battle.SendAutoMsg",
-        chat_args,
-    )
-    .await;
+    let responses =
+        typed_coop_route_test_request(&mut account, &state, "battle.SendAutoMsg", chat_args).await;
     assert!(responses
         .iter()
         .any(|response| response.method == "battle.receiveAutoMsg"));
 
-    let multi_battle = battle_route_test_request(
-        &mut account,
-        &state,
-        &catalog,
-        "battle.CreateMutiBattle",
-        Vec::new(),
-    )
-    .await;
+    let multi_battle =
+        typed_coop_route_test_request(&mut account, &state, "battle.CreateMutiBattle", Vec::new())
+            .await;
     let multi_response = multi_battle
         .iter()
         .find(|response| response.method == "battle.CreateMutiBattle")
@@ -2183,10 +2166,12 @@ async fn copy_extra_and_pvp_ready_routes_return_typed_state() {
     assert_eq!(decode_varint_field(&reward_rows[0], 1), 77);
     assert_eq!(decode_varint_field(&reward_rows[0], 2), 4);
 
-    let ready = battle_route_test_request(
-        &mut account,
+    let mut typed_account =
+        NewAccountFactory::create(ProfileId::new("battle-extra-typed").unwrap(), "Captain");
+    typed_account.character.uid = 1;
+    let ready = typed_coop_route_test_request(
+        &mut typed_account,
         &state,
-        &catalog,
         "battle.pvpMatchReady",
         Vec::new(),
     )
@@ -2197,12 +2182,10 @@ async fn copy_extra_and_pvp_ready_routes_return_typed_state() {
         .expect("pvp ready response");
     let room_id = decode_varint_field(ready_response.ret.as_deref().unwrap(), 1);
     assert!(room_id > 0);
-    assert_eq!(account["pvpMatch"]["state"], "ready");
 
-    let timeout = battle_route_test_request(
-        &mut account,
+    let timeout = typed_coop_route_test_request(
+        &mut typed_account,
         &state,
-        &catalog,
         "battle.pvpMatchReadyTimeout",
         Vec::new(),
     )
@@ -2215,7 +2198,6 @@ async fn copy_extra_and_pvp_ready_routes_return_typed_state() {
         decode_varint_field(timeout_response.ret.as_deref().unwrap(), 1),
         room_id
     );
-    assert_eq!(account["pvpMatch"]["state"], "timeout");
 }
 
 #[tokio::test]
@@ -2277,48 +2259,58 @@ async fn daily_copy_enter_returns_nested_start_base_and_opens_session() {
 #[tokio::test]
 async fn shared_pve_room_is_visible_across_accounts() {
     let state = ServerState::new("match-test", "Captain", "1.4.0");
-    let catalog = BattleCatalog::default();
-    let mut owner = default_account_snapshot("owner", "Owner", 123);
-    let owner_uid = owner["character"]["uid"].as_u64().unwrap();
+    let mut owner = NewAccountFactory::create(ProfileId::new("owner").unwrap(), "Owner");
+    owner.character.uid = 1;
+    let owner_uid = owner.character.uid;
     let mut live_events = state.shared_social.lock().unwrap().push_tx.subscribe();
     let mut create_args = Vec::new();
     append_varint_field(&mut create_args, 2, 5011);
-    battle_route_test_request(
-        &mut owner,
-        &state,
-        &catalog,
-        "matchsvr.CreateRoom",
-        create_args,
-    )
-    .await;
-    let room_id = owner["pveRoom"]["roomId"].as_u64().unwrap();
+    typed_coop_route_test_request(&mut owner, &state, "matchsvr.CreateRoom", create_args).await;
+    let room_id = state
+        .shared_social
+        .lock()
+        .unwrap()
+        .typed_rooms
+        .keys()
+        .next()
+        .copied()
+        .unwrap();
 
-    let mut guest = default_account_snapshot("guest", "Guest", 123);
-    guest["character"]["uid"] = json!(2);
+    let mut guest = NewAccountFactory::create(ProfileId::new("guest").unwrap(), "Guest");
+    guest.character.uid = 2;
     let mut enter_args = Vec::new();
     append_varint_field(&mut enter_args, 1, room_id);
-    battle_route_test_request(
-        &mut guest,
-        &state,
-        &catalog,
-        "matchsvr.EnterRoom",
-        enter_args,
-    )
-    .await;
-    assert_eq!(guest["pveRoom"]["users"].as_array().unwrap().len(), 2);
+    typed_coop_route_test_request(&mut guest, &state, "matchsvr.EnterRoom", enter_args).await;
+    assert_eq!(
+        state
+            .shared_social
+            .lock()
+            .unwrap()
+            .typed_rooms
+            .get(&room_id)
+            .unwrap()
+            .users
+            .len(),
+        2
+    );
     let room_event = live_events.try_recv().expect("room broadcast");
     assert_eq!(room_event.recipient_uid, owner_uid);
     assert_eq!(room_event.method, "match.UpdateRoomInfo");
 
-    let responses = battle_route_test_request(
-        &mut owner,
-        &state,
-        &catalog,
-        "matchsvr.GetRoomList",
-        Vec::new(),
-    )
-    .await;
-    assert_eq!(owner["pveRoom"]["users"].as_array().unwrap().len(), 2);
+    let responses =
+        typed_coop_route_test_request(&mut owner, &state, "matchsvr.GetRoomList", Vec::new()).await;
+    assert_eq!(
+        state
+            .shared_social
+            .lock()
+            .unwrap()
+            .typed_rooms
+            .get(&room_id)
+            .unwrap()
+            .users
+            .len(),
+        2
+    );
     let list_response = responses
         .iter()
         .find(|response| response.method == "matchsvr.GetRoomList")
@@ -5509,19 +5501,24 @@ fn goods_copy_snapshot_contains_each_configured_copy() {
 
 #[test]
 fn pve_room_payload_contains_room_owner_and_ready_state() {
-    let account = json!({
-        "character": {"uid": 1, "name": "司令", "head": 1021051},
-        "pveRoom": {
-            "roomId": 1234,
-            "copyId": 81041,
-            "ownerId": 1,
-            "isPublic": true,
-            "capacity": 2,
-            "createTime": 99,
-            "users": [{"uid": 1, "name": "司令", "isReady": true, "enterTime": 99, "heroIds": [1]}]
-        }
-    });
-    let payload = super::game_login::coop_handler::pve_room_payload(&account);
+    let room = crate::config::TypedCoopRoom {
+        room_id: 1234,
+        copy_id: 81041,
+        owner_id: 1,
+        is_public: true,
+        capacity: 2,
+        create_time: 99,
+        users: vec![crate::config::TypedCoopUser {
+            uid: 1,
+            name: "司令".to_owned(),
+            is_ready: true,
+            enter_time: 99,
+            hero_ids: vec![1],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let payload = super::game_login::coop_handler::typed_coop_room_payload(&room);
     let users = decode_repeated_message_field(&payload, 5);
 
     assert_eq!(decode_varint_field(&payload, 1), 1234);

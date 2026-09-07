@@ -69,32 +69,24 @@ pub(crate) struct TypedBattleSession {
 
 #[derive(Debug)]
 pub(crate) struct SharedSocialState {
-    pub(crate) rooms: std::collections::BTreeMap<u64, Value>,
     pub(crate) typed_rooms: std::collections::BTreeMap<u64, TypedCoopRoom>,
     pub(crate) typed_battle_rooms: std::collections::BTreeMap<u64, TypedBattleRoom>,
     pub(crate) typed_match_queue: Vec<TypedMatchQueueEntry>,
     pub(crate) typed_battles: std::collections::BTreeMap<u64, TypedBattleSession>,
     pub(crate) pending_pushes: std::collections::BTreeMap<u64, Vec<(String, Vec<u8>)>>,
     pub(crate) push_tx: broadcast::Sender<SharedPush>,
-    #[allow(dead_code)]
-    pub(crate) match_queue: Vec<Value>,
-    #[allow(dead_code)]
-    pub(crate) battles: std::collections::BTreeMap<u64, Value>,
 }
 
 impl Default for SharedSocialState {
     fn default() -> Self {
         let (push_tx, _) = broadcast::channel(256);
         Self {
-            rooms: std::collections::BTreeMap::new(),
             typed_rooms: std::collections::BTreeMap::new(),
             typed_battle_rooms: std::collections::BTreeMap::new(),
             typed_match_queue: Vec::new(),
             typed_battles: std::collections::BTreeMap::new(),
             pending_pushes: std::collections::BTreeMap::new(),
             push_tx,
-            match_queue: Vec::new(),
-            battles: std::collections::BTreeMap::new(),
         }
     }
 }

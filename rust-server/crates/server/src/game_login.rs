@@ -1459,20 +1459,8 @@ where
                     | "battle.createBattleInfo"
             ) =>
         {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-            };
-            let result = coop_handler::handle(&mut context, request.method.as_str(), request_args);
+            let result =
+                HandlerResult::Error(GameError::InvalidRequest("co-op requires typed account"));
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
