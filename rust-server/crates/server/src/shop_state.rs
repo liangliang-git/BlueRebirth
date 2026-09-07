@@ -2,6 +2,7 @@ use serde_json::Value;
 
 use super::*;
 
+#[cfg(test)]
 pub(super) fn apply_mail_reward(account: &mut Value, mail: &MailTemplate) {
     if mail.goods_type == 5 {
         if let Some(key) = currency_character_key(mail.config_id) {
@@ -122,6 +123,7 @@ pub(super) fn append_method_push(pushes: &mut Vec<Vec<u8>>, method: &str, ret: V
     }));
 }
 
+#[cfg(test)]
 pub(super) fn append_shop_update_pushes(
     pushes: &mut Vec<Vec<u8>>,
     state: &ServerState,

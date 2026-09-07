@@ -82,8 +82,10 @@ mod talent_handler;
 #[path = "tower_handler.rs"]
 pub(super) mod tower_handler;
 
+#[cfg(test)]
 type BattlePassDetails = (i32, i32, i32, bool, Vec<i32>, Vec<(u64, i32)>);
 
+#[cfg(test)]
 #[allow(dead_code)]
 struct GameLoginRequestContext<'state, 'account, 'scratch> {
     state: &'state ServerState,
@@ -164,13 +166,18 @@ where
     let mut pre_pushes = Vec::<Vec<u8>>::new();
     let mut post_pushes = Vec::<Vec<u8>>::new();
     #[allow(unused_mut)]
+    #[cfg(test)]
     let mut pass_details: Option<BattlePassDetails> = None;
+    #[cfg(test)]
     let mut pass_rewards = Vec::<ShopReward>::new();
     #[allow(unused_mut)]
+    #[cfg(test)]
     let mut pass_hero_ids = Vec::<u64>::new();
     #[allow(unused_mut)]
+    #[cfg(test)]
     let mut pass_mvp_hero_id = None;
     #[allow(unused_mut)]
+    #[cfg(test)]
     let mut pass_shipwrecked_ids = std::collections::HashSet::new();
     let mut handler_error: Option<GameError> = None;
     let mut typed_daily_copy_handled = false;
@@ -1016,6 +1023,7 @@ where
             current_unix_seconds(),
             &[],
         )),
+        #[cfg(test)]
         "mail.FetchItem" | "mail.FetchAllItems" => {
             let fetch_one = request.method == "mail.FetchItem";
             let mid = MailIdRequest::decode(request_args)
@@ -2106,6 +2114,7 @@ where
         });
         NetSocketFrameCodec::write(stream, 0, &push).await?;
     }
+    #[cfg(test)]
     if let Some((copy_id, grade, battle_time, _first_pass, ex_buffs, exp_rewards)) = pass_details {
         if let Some(account) = account.as_deref_mut() {
             record_battle_pass(
