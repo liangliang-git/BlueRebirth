@@ -674,6 +674,7 @@ pub(super) fn json_string(value: &Value, key: &str) -> Option<String> {
     value.get(key).and_then(Value::as_str).map(str::to_owned)
 }
 
+#[cfg(test)]
 pub(super) fn apply_strategy_state(account: &mut Value, method: &str, args: &[u8]) -> bool {
     let strategy_id = decode_varint_field(args, 1);
     match method {
@@ -753,6 +754,7 @@ pub(super) fn apply_strategy_state(account: &mut Value, method: &str, args: &[u8
     }
 }
 
+#[cfg(test)]
 pub(super) fn strategy_info_payload(account: &Value) -> Vec<u8> {
     let mut output = Vec::new();
     if let Some(list) = account
@@ -796,6 +798,7 @@ pub(super) fn strategy_info_payload(account: &Value) -> Vec<u8> {
     output
 }
 
+#[cfg(test)]
 pub(super) fn start_support_state(account: &mut Value, args: &[u8], now: u32) -> Option<i32> {
     let support_id = decode_varint_field(args, 1);
     let hero_ids = decode_repeated_varint_field(args, 2);
@@ -836,6 +839,7 @@ pub(super) fn start_support_state(account: &mut Value, args: &[u8], now: u32) ->
     Some(id)
 }
 
+#[cfg(test)]
 #[cfg(test)]
 pub(super) fn complete_support_state(account: &mut Value, id: i32) -> bool {
     account
@@ -949,6 +953,7 @@ pub(super) fn settle_support_state(
     })
 }
 
+#[cfg(test)]
 pub(super) fn support_info_payload(account: &Value) -> Vec<u8> {
     let mut output = Vec::new();
     let Some(items) = account
