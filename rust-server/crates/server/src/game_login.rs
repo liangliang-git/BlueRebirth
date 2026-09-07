@@ -1433,6 +1433,7 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::BuildShip) => {
+            let mut buildship_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 buildship_handler::handle_typed(
                     typed,
@@ -1440,13 +1441,19 @@ where
                     request_args,
                     current_unix_seconds(),
                     task_catalog,
-                    &mut pre_pushes,
+                    &mut buildship_effects,
                 )
             } else {
                 HandlerResult::Error(GameError::InvalidRequest(
                     "buildship requires typed account",
                 ))
             };
+            apply_response_effects(
+                buildship_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }

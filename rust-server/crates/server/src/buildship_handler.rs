@@ -1,5 +1,5 @@
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 use blueoath_domain::{
     AccountState, CurrencyKind, EquipId, EquipmentState, HeroId, HeroState, TemplateId,
@@ -11,7 +11,7 @@ pub(super) fn handle_typed(
     request_args: &[u8],
     now: u32,
     task_catalog: Option<&TaskCatalog>,
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let catalog = BUILD_SHIP_CATALOG.get_or_init(BuildShipCatalog::default);
     match method {
@@ -130,7 +130,7 @@ pub(super) fn handle_typed(
             };
             account.build_ship.draw_counts.insert(pool_id as u64, next);
             advance_typed_task_event(account, task_catalog, 2720, 1);
-            push_typed_build_updates(account, now, task_catalog, pre_pushes);
+            push_typed_build_updates(account, now, task_catalog, effects);
             HandlerResult::Reply(Response::raw(method, encode_buildship_ret(&rewards)))
         }
         "buildship.BuildShipBox" | "buildship.BuildShipReward" => {
@@ -212,7 +212,7 @@ pub(super) fn handle_typed(
                 &mut account.build_ship.used_reward_info
             };
             claims.entry(pool_key).or_default().insert(milestone_key);
-            push_typed_build_updates(account, now, task_catalog, pre_pushes);
+            push_typed_build_updates(account, now, task_catalog, effects);
             HandlerResult::Reply(Response::raw(method, encode_buildship_ret(&[reward])))
         }
         _ => HandlerResult::Empty,
@@ -455,29 +455,28 @@ fn push_typed_build_updates(
     account: &AccountState,
     now: u32,
     task_catalog: Option<&TaskCatalog>,
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) {
-    pre_pushes.push(HeroBagCodec::encode(&hero_bag_from_typed_account(account)));
-    append_method_push(
-        pre_pushes,
+    effects.push_pre(Response::raw(
+        "hero.UpdateHeroBagData",
+        HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+    ));
+    effects.push_pre(Response::raw(
         "equip.UpdateEquipBagData",
         EquipListCodec::encode(&equip_list_from_typed_account(account)),
-    );
-    append_method_push(
-        pre_pushes,
+    ));
+    effects.push_pre(Response::raw(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-    );
-    append_method_push(
-        pre_pushes,
+    ));
+    effects.push_pre(Response::raw(
         "buildship.BuildShipInfo",
         buildship_info_payload_from_typed(account, now),
-    );
-    append_method_push(
-        pre_pushes,
+    ));
+    effects.push_pre(Response::raw(
         "task.TaskInfo",
         task_info_payload_from_typed_account(account, task_catalog),
-    );
+    ));
 }
 
 #[cfg(test)]
