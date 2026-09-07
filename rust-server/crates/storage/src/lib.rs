@@ -984,6 +984,85 @@ impl ProfileStore {
                     }
                     _ => {}
                 }
+            } else if activity_id == "adventure" {
+                match progress_kind.as_str() {
+                    "enemyIndex" => account.adventure.enemy_index = value,
+                    key if key.starts_with("role:") => {
+                        let mut parts = key.split(':');
+                        let Some(role_id) = parts
+                            .next()
+                            .and_then(|_| parts.next())
+                            .and_then(|value| value.parse::<u64>().ok())
+                        else {
+                            continue;
+                        };
+                        let Some(field) = parts.next() else {
+                            continue;
+                        };
+                        let role = account
+                            .adventure
+                            .roles
+                            .iter_mut()
+                            .find(|role| role.role_id == role_id);
+                        let role = if let Some(role) = role {
+                            role
+                        } else {
+                            account
+                                .adventure
+                                .roles
+                                .push(blueoath_domain::AdventureRoleState {
+                                    role_id,
+                                    ..Default::default()
+                                });
+                            account
+                                .adventure
+                                .roles
+                                .last_mut()
+                                .expect("pushed adventure role")
+                        };
+                        match field {
+                            "level" => role.level = value,
+                            "hp" => role.hp = value,
+                            _ => {}
+                        }
+                    }
+                    key if key.starts_with("enemy:") => {
+                        let mut parts = key.split(':');
+                        let Some(index) = parts
+                            .next()
+                            .and_then(|_| parts.next())
+                            .and_then(|value| value.parse::<u64>().ok())
+                        else {
+                            continue;
+                        };
+                        if parts.next() != Some("damage") {
+                            continue;
+                        }
+                        let enemy = account
+                            .adventure
+                            .enemies
+                            .iter_mut()
+                            .find(|enemy| enemy.index == index);
+                        let enemy = if let Some(enemy) = enemy {
+                            enemy
+                        } else {
+                            account
+                                .adventure
+                                .enemies
+                                .push(blueoath_domain::AdventureEnemyState {
+                                    index,
+                                    ..Default::default()
+                                });
+                            account
+                                .adventure
+                                .enemies
+                                .last_mut()
+                                .expect("pushed adventure enemy")
+                        };
+                        enemy.damage = value;
+                    }
+                    _ => {}
+                }
             } else if activity_id == "buildShip" {
                 let mut parts = progress_kind.split(':');
                 match parts.next() {
@@ -2294,6 +2373,33 @@ impl ProfileStore {
                     ],
                 )?;
             }
+        }
+        let mut adventure_progress = vec![("enemyIndex".to_owned(), account.adventure.enemy_index)];
+        adventure_progress.extend(account.adventure.roles.iter().flat_map(|role| {
+            [
+                (format!("role:{}:level", role.role_id), role.level),
+                (format!("role:{}:hp", role.role_id), role.hp),
+            ]
+        }));
+        adventure_progress.extend(
+            account
+                .adventure
+                .enemies
+                .iter()
+                .map(|enemy| (format!("enemy:{}:damage", enemy.index), enemy.damage)),
+        );
+        for (progress_kind, value) in adventure_progress {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'adventure', ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    progress_kind,
+                    typed_i64(value, "adventure state")?,
+                    timestamp(),
+                ],
+            )?;
         }
         for (pool_id, count) in &account.build_ship.draw_counts {
             transaction.execute(

@@ -488,6 +488,10 @@ fn typed_repository_transaction_commits_domain_mutation() {
             recharge_id: 5,
             recharge_name: "recharge".to_owned(),
         });
+    account.adventure.roles[0].level = 4;
+    account.adventure.roles[0].hp = 4_000;
+    account.adventure.enemies[1].damage = 900;
+    account.adventure.enemy_index = 1;
     account.battle.active = Some(BattleSession {
         chapter_id: ChapterId::new(3).unwrap(),
         copy_id: CopyId::new(300).unwrap(),
@@ -594,6 +598,10 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(loaded.guild_box.points_box_count, 3);
     assert_eq!(loaded.guild_box.share_boxes[0].box_id, 77);
     assert_eq!(loaded.guild_box.share_boxes[0].recharge_name, "recharge");
+    assert_eq!(loaded.adventure.roles[0].level, 4);
+    assert_eq!(loaded.adventure.roles[0].hp, 4_000);
+    assert_eq!(loaded.adventure.enemies[1].damage, 900);
+    assert_eq!(loaded.adventure.enemy_index, 1);
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())

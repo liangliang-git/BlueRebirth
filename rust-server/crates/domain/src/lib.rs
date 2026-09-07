@@ -428,6 +428,44 @@ pub struct ActivityState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdventureRoleState {
+    pub role_id: u64,
+    pub level: u64,
+    pub hp: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdventureEnemyState {
+    pub index: u64,
+    pub damage: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdventureState {
+    pub roles: Vec<AdventureRoleState>,
+    pub enemies: Vec<AdventureEnemyState>,
+    pub enemy_index: u64,
+}
+
+impl Default for AdventureState {
+    fn default() -> Self {
+        Self {
+            roles: (1..=3)
+                .map(|role_id| AdventureRoleState {
+                    role_id,
+                    level: 1,
+                    hp: 1_000,
+                })
+                .collect(),
+            enemies: (0..=2)
+                .map(|index| AdventureEnemyState { index, damage: 0 })
+                .collect(),
+            enemy_index: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InviteScoreState {
     pub have_got_ssr: u64,
     pub have_got_fashion: u64,
@@ -590,6 +628,8 @@ pub struct AccountState {
     pub chat: ChatState,
     #[serde(default)]
     pub activities: ActivityState,
+    #[serde(default)]
+    pub adventure: AdventureState,
     #[serde(default)]
     pub invite_score: InviteScoreState,
     #[serde(default)]
