@@ -963,6 +963,43 @@ impl AccountState {
                 "tower hero list contains duplicates",
             ));
         }
+        if self.supply.hero_ids.iter().collect::<BTreeSet<_>>().len() != self.supply.hero_ids.len()
+        {
+            return Err(DomainError::InvalidState(
+                "supply hero list contains duplicates",
+            ));
+        }
+        if self
+            .supply
+            .hero_ids
+            .iter()
+            .any(|hero_id| !self.dock.heroes.contains_key(hero_id))
+        {
+            return Err(DomainError::InvalidState("supply references missing hero"));
+        }
+
+        let mut support_entry_ids = BTreeSet::new();
+        for entry in &self.support.entries {
+            if entry.id == 0
+                || entry.support_id == 0
+                || !support_entry_ids.insert(entry.id)
+                || entry.hero_ids.is_empty()
+            {
+                return Err(DomainError::InvalidState("support entry is invalid"));
+            }
+            if entry.hero_ids.iter().collect::<BTreeSet<_>>().len() != entry.hero_ids.len() {
+                return Err(DomainError::InvalidState(
+                    "support hero list contains duplicates",
+                ));
+            }
+            if entry
+                .hero_ids
+                .iter()
+                .any(|hero_id| !self.dock.heroes.contains_key(hero_id))
+            {
+                return Err(DomainError::InvalidState("support references missing hero"));
+            }
+        }
         Ok(())
     }
 }
@@ -1092,7 +1129,10 @@ pub trait AccountRepository {
 
 #[cfg(test)]
 mod tests {
-    use super::{CurrencyKind, DomainError, NewAccountFactory, ProfileId, ResourceLedger};
+    use super::{
+        CurrencyKind, DomainError, HeroId, NewAccountFactory, ProfileId, ResourceLedger,
+        SupportEntryState,
+    };
 
     #[test]
     fn validates_profile_ids_at_domain_boundary() {
@@ -1137,6 +1177,32 @@ mod tests {
             Err(DomainError::InvalidState(
                 "social relation cannot target current character"
             ))
+        ));
+    }
+
+    #[test]
+    fn validates_typed_supply_and_support_references() {
+        let mut account = NewAccountFactory::create(ProfileId::new("typed").unwrap(), "Captain");
+        let starter_hero = HeroId::new(1).unwrap();
+
+        account.supply.hero_ids = vec![starter_hero, starter_hero];
+        assert!(matches!(
+            account.validate(),
+            Err(DomainError::InvalidState(
+                "supply hero list contains duplicates"
+            ))
+        ));
+
+        account.supply.hero_ids = vec![starter_hero];
+        account.support.entries.push(SupportEntryState {
+            id: 1,
+            support_id: 1,
+            start_time: 0,
+            hero_ids: vec![HeroId::new(999).unwrap()],
+        });
+        assert!(matches!(
+            account.validate(),
+            Err(DomainError::InvalidState("support references missing hero"))
         ));
     }
 }
