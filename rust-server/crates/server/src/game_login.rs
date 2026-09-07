@@ -1385,12 +1385,13 @@ where
             || method.is_family(MethodFamily::EquipNewTestCopy)
             || method.is_family(MethodFamily::EquipActivity) =>
         {
+            let mut equip_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 equip_handler::handle_typed(
                     typed,
                     request.method.as_str(),
                     request_args,
-                    &mut pre_pushes,
+                    &mut equip_effects,
                     equip_catalog,
                     task_catalog,
                 )
@@ -1399,6 +1400,12 @@ where
                     "equip request requires typed account",
                 ))
             };
+            apply_response_effects(
+                equip_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }

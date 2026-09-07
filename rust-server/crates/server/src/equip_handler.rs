@@ -4,7 +4,7 @@
 use serde_json::{json, Value};
 
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 fn typed_currency_kind(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
@@ -21,7 +21,7 @@ pub(super) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
     equip_catalog: Option<&EquipCatalog>,
     task_catalog: Option<&TaskCatalog>,
 ) -> HandlerResult {
@@ -126,16 +126,14 @@ pub(super) fn handle_typed(
                     ..EquipInfo::default()
                 })
             }));
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "equip.UpdateEquipBagData",
                 EquipListCodec::encode(&equip_push),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
+            ));
             HandlerResult::Reply(Response::raw(method, encode_retire_hero_response(&rewards)))
         }
         "equip.RiseStar" => {
@@ -294,21 +292,18 @@ pub(super) fn handle_typed(
                     ..EquipInfo::default()
                 })
             }));
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "equip.UpdateEquipBagData",
                 EquipListCodec::encode(&equip_push),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "task.TaskInfo",
                 task_info_payload_from_typed_account(account, task_catalog),
-            );
+            ));
             let response = account
                 .dock
                 .equipments
@@ -440,21 +435,18 @@ pub(super) fn handle_typed(
                 target.enhance_exp = u64::try_from(exp).unwrap_or(u64::MAX);
             }
             advance_typed_task_event(account, task_catalog, 2726, 1);
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "equip.UpdateEquipBagData",
                 EquipListCodec::encode(&equip_list_from_typed_account(account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "task.TaskInfo",
                 task_info_payload_from_typed_account(account, task_catalog),
-            );
+            ));
             HandlerResult::Reply(Response::raw(
                 method,
                 encode_equip_enhance_response(
@@ -751,7 +743,7 @@ mod tests {
             &mut account,
             "equip.UpdateEquipBagData",
             &[],
-            &mut Vec::new(),
+            &mut ResponseEffects::default(),
             None,
             None,
         ) else {
@@ -785,13 +777,13 @@ mod tests {
         let mut args = Vec::new();
         append_varint_field(&mut args, 1, 1);
         append_bytes_field(&mut args, 2, &material);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         let result = handle_typed(
             &mut account,
             "equip.Enhance",
             &args,
-            &mut pushes,
+            &mut effects,
             Some(&catalog),
             None,
         );
@@ -816,7 +808,7 @@ mod tests {
                 .enhance_exp,
             600
         );
-        assert_eq!(pushes.len(), 3);
+        assert_eq!(effects.into_parts().0.len(), 3);
     }
 
     #[test]
@@ -838,13 +830,13 @@ mod tests {
             .insert(30_091, vec![(1, 10_182, 3)]);
         let mut args = Vec::new();
         append_varint_field(&mut args, 1, 1);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         let result = handle_typed(
             &mut account,
             "equip.Dismantle",
             &args,
-            &mut pushes,
+            &mut effects,
             Some(&catalog),
             None,
         );
@@ -859,7 +851,7 @@ mod tests {
             account.dock.heroes.values().next().unwrap().equip_slots[0],
             None
         );
-        assert_eq!(pushes.len(), 2);
+        assert_eq!(effects.into_parts().0.len(), 2);
     }
 
     #[test]
@@ -892,13 +884,13 @@ mod tests {
         let mut args = Vec::new();
         append_varint_field(&mut args, 1, 1);
         append_varint_field(&mut args, 2, 2);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         let result = handle_typed(
             &mut account,
             "equip.RiseStar",
             &args,
-            &mut pushes,
+            &mut effects,
             Some(&catalog),
             None,
         );
@@ -917,6 +909,6 @@ mod tests {
             .dock
             .equipments
             .contains_key(&blueoath_domain::EquipId::new(2).unwrap()));
-        assert_eq!(pushes.len(), 3);
+        assert_eq!(effects.into_parts().0.len(), 3);
     }
 }
