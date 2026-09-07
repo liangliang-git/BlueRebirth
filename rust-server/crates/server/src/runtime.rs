@@ -139,6 +139,13 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
         combination: Arc::new(load_combination_catalog(config.client_path.as_ref())),
     });
     catalogs.validate().map_err(ServerError::Catalog)?;
+    catalogs
+        .validate_references(
+            GAMEPLAY_CATALOG
+                .get()
+                .expect("gameplay catalog initialized"),
+        )
+        .map_err(ServerError::Catalog)?;
     let profile_id = config.profile_id.clone();
     let profile_name = config.profile_name.clone();
     let version = config.version.clone();

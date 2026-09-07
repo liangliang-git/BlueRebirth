@@ -149,6 +149,19 @@ impl ChapterCatalog {
         Ok(())
     }
 
+    pub(super) fn validate_references(&self, gameplay: &GameplayCatalog) -> Result<(), String> {
+        for (chapter_id, rewards) in &self.star_rewards_by_chapter {
+            for reward_id in &rewards.reward_ids {
+                if !gameplay.rewards_by_id.contains_key(reward_id) {
+                    return Err(format!(
+                        "chapter {chapter_id} references missing reward {reward_id}"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn with_mini_game_rows(
         mut self,
         rows: impl IntoIterator<Item = (i32, Value)>,
@@ -510,6 +523,14 @@ impl GameCatalogs {
         Ok(())
     }
 
+    pub(super) fn validate_references(&self, gameplay: &GameplayCatalog) -> Result<(), String> {
+        self.chapters.validate_references(gameplay)?;
+        self.battle.validate_references()?;
+        self.tasks.validate_references()?;
+        gameplay.validate_references()?;
+        Ok(())
+    }
+
     pub(super) fn login_catalogs(&self) -> GameLoginCatalogs<'_> {
         GameLoginCatalogs {
             fashion: Some(&self.fashion),
@@ -787,7 +808,7 @@ impl GameplayCatalog {
             }
         }
         for (activity_id, activity) in &self.activity {
-            if *activity_id <= 0 || activity.id <= 0 || activity.activity_type <= 0 {
+            if *activity_id <= 0 || activity.id <= 0 || activity.activity_type < 0 {
                 return Err(format!("activity config is invalid: {activity_id}"));
             }
         }
@@ -809,6 +830,79 @@ impl GameplayCatalog {
                 })
             {
                 return Err(format!("food recipe config is invalid: {recipe_id}"));
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn validate_references(&self) -> Result<(), String> {
+        let reward_exists = |reward_id: i32, source: &str| {
+            (reward_id <= 0 || self.rewards_by_id.contains_key(&reward_id))
+                .then_some(())
+                .ok_or_else(|| format!("{source} references missing reward {reward_id}"))
+        };
+        let drop_exists = |drop_id: i32, source: &str| {
+            (drop_id <= 0 || self.drop_items.contains_key(&drop_id))
+                .then_some(())
+                .ok_or_else(|| format!("{source} references missing drop {drop_id}"))
+        };
+
+        for (level, config) in &self.battlepass_levels {
+            reward_exists(
+                config.free_level_reward,
+                &format!("battlepass level {level}"),
+            )?;
+            reward_exists(
+                config.pay_level_reward,
+                &format!("battlepass level {level}"),
+            )?;
+        }
+        for (level, config) in &self.battlepass_activity_levels {
+            reward_exists(
+                config.free_level_reward,
+                &format!("activity battlepass level {level}"),
+            )?;
+            reward_exists(
+                config.pay_level_reward,
+                &format!("activity battlepass level {level}"),
+            )?;
+        }
+        for (id, config) in &self.anniversary_videos {
+            reward_exists(config.reward_id, &format!("anniversary video {id}"))?;
+        }
+        for (id, config) in &self.food_recipes {
+            reward_exists(config.reward_id, &format!("food recipe {id}"))?;
+        }
+        for (id, config) in &self.testship_rewards {
+            reward_exists(config.reward_id, &format!("test ship reward {id}"))?;
+        }
+        for (id, config) in &self.guild_war_rewards {
+            reward_exists(config.reward_id, &format!("guild war reward {id}"))?;
+        }
+        for (id, config) in &self.guild_box_scores {
+            reward_exists(config.reward_id, &format!("guild box score {id}"))?;
+        }
+        for (id, config) in &self.valentine_gifts {
+            reward_exists(config.attach_reward, &format!("valentine gift {id}"))?;
+        }
+        for (id, config) in &self.sportsmeet_awards {
+            reward_exists(config.reward_id, &format!("sports meet award {id}"))?;
+        }
+        for (id, config) in &self.magazine_info {
+            for reward_id in &config.rewards {
+                reward_exists(*reward_id, &format!("magazine info {id}"))?;
+            }
+        }
+        for (id, config) in &self.interaction_items {
+            reward_exists(config.reward_id, &format!("interaction item {id}"))?;
+            drop_exists(config.drop_id, &format!("interaction item {id}"))?;
+        }
+        for (id, config) in &self.paper_cut_formulas {
+            drop_exists(config.drop_id, &format!("paper cut formula {id}"))?;
+        }
+        for (id, event) in &self.world_events {
+            for (_, reward_id) in &event.server_stage_rewards {
+                reward_exists(*reward_id, &format!("world event {id}"))?;
             }
         }
         Ok(())
@@ -863,7 +957,7 @@ impl ShipBreakCatalog {
         for (template_id, config) in &self.by_template {
             if *template_id <= 0
                 || config.min_level < 0
-                || config.break_to <= 0
+                || config.break_to < 0
                 || config
                     .break_item
                     .as_ref()
@@ -1063,6 +1157,41 @@ impl BattleCatalog {
         }
         Ok(())
     }
+
+    pub(super) fn validate_references(&self) -> Result<(), String> {
+        for (copy_id, copy) in &self.copies {
+            for fleet_id in &copy.fleet_ids {
+                if !self.fleet_is_last.contains_key(fleet_id) {
+                    return Err(format!(
+                        "battle copy {copy_id} references missing fleet {fleet_id}"
+                    ));
+                }
+            }
+        }
+        for (fleet_id, attached_ids) in &self.attached_fleet_ids {
+            if !self.fleet_is_last.contains_key(fleet_id) {
+                return Err(format!(
+                    "battle attached fleet parent is missing: {fleet_id}"
+                ));
+            }
+            if attached_ids
+                .iter()
+                .any(|attached_id| !self.fleet_is_last.contains_key(attached_id))
+            {
+                return Err(format!(
+                    "battle fleet {fleet_id} references missing attached fleet"
+                ));
+            }
+        }
+        for (copy_id, rank_drop_id) in &self.copy_rank_drop_ids {
+            if !self.rank_drop_rewards.contains_key(rank_drop_id) {
+                return Err(format!(
+                    "battle copy {copy_id} references missing rank drop {rank_drop_id}"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 type BattleRewardTuple = (i32, i32, i32);
@@ -1183,6 +1312,48 @@ pub(super) struct TaskCatalog {
     pub(super) teaching_rewards_by_id: std::collections::BTreeMap<i32, i32>,
 }
 
+impl TaskCatalog {
+    pub(super) fn validate_references(&self) -> Result<(), String> {
+        let task_keys = self
+            .definitions
+            .iter()
+            .map(|definition| (definition.task_type, definition.id))
+            .collect::<std::collections::BTreeSet<_>>();
+        for definition in &self.definitions {
+            if definition.reward_id > 0 && !self.rewards_by_id.contains_key(&definition.reward_id) {
+                return Err(format!(
+                    "task {}:{} references missing reward {}",
+                    definition.task_type, definition.id, definition.reward_id
+                ));
+            }
+            if definition.next_task_id > 0
+                && !task_keys.contains(&(definition.task_type, definition.next_task_id))
+            {
+                return Err(format!(
+                    "task {}:{} references missing next task {}",
+                    definition.task_type, definition.id, definition.next_task_id
+                ));
+            }
+            if definition.previous_task_id > 0
+                && !task_keys.contains(&(definition.task_type, definition.previous_task_id))
+            {
+                return Err(format!(
+                    "task {}:{} references missing previous task {}",
+                    definition.task_type, definition.id, definition.previous_task_id
+                ));
+            }
+        }
+        for (task_id, reward_id) in &self.teaching_rewards_by_id {
+            if *task_id <= 0 || *reward_id <= 0 {
+                return Err(format!(
+                    "teaching task reward reference is invalid: {task_id}"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub(super) struct AffectionCatalog {
     pub(super) exp_by_item: std::collections::BTreeMap<i32, i32>,
@@ -1238,7 +1409,10 @@ use super::{json_i32, json_i32_array, mix_build_draw_roll, ShopReward};
 
 #[cfg(test)]
 mod validation_tests {
-    use super::{BattleCatalog, ChapterCatalog};
+    use super::{
+        BattleCatalog, BattleCopy, ChapterCatalog, ChapterStarRewards, GameplayCatalog,
+        TaskCatalog, TaskDefinition,
+    };
 
     #[test]
     fn fallback_catalog_passes_startup_validation() {
@@ -1251,5 +1425,47 @@ mod validation_tests {
         let mut catalog = ChapterCatalog::fallback();
         catalog.daily_chapters.push((8, 0));
         assert!(catalog.validate().is_err());
+    }
+
+    #[test]
+    fn cross_catalog_reward_reference_is_required() {
+        let mut chapters = ChapterCatalog::fallback();
+        chapters.star_rewards_by_chapter.insert(
+            1,
+            ChapterStarRewards {
+                level_ids: vec![1],
+                star_conditions: vec![1],
+                reward_ids: vec![99],
+            },
+        );
+        assert!(chapters
+            .validate_references(&GameplayCatalog::default())
+            .is_err());
+    }
+
+    #[test]
+    fn battle_cross_catalog_fleet_reference_is_required() {
+        let mut battle = BattleCatalog::default();
+        battle.copies.insert(
+            1,
+            BattleCopy {
+                config_id: 1,
+                copy_type: 1,
+                fleet_ids: vec![7],
+            },
+        );
+        assert!(battle.validate_references().is_err());
+    }
+
+    #[test]
+    fn task_chain_reference_is_required() {
+        let mut tasks = TaskCatalog::default();
+        tasks.definitions.push(TaskDefinition {
+            task_type: 1,
+            id: 1,
+            next_task_id: 2,
+            ..TaskDefinition::default()
+        });
+        assert!(tasks.validate_references().is_err());
     }
 }

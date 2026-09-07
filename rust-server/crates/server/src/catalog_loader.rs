@@ -7,7 +7,10 @@ use super::*;
 
 fn read_config_rows(path: &Path) -> Vec<(i32, Value)> {
     if let Some(rows) = read_json_config_rows(path) {
-        return rows;
+        return rows
+            .into_iter()
+            .filter(|(id, value)| *id > 0 && !value.is_null())
+            .collect();
     }
     let Ok(connection) =
         Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
@@ -38,7 +41,9 @@ fn read_config_rows(path: &Path) -> Vec<(i32, Value)> {
     }) else {
         return Vec::new();
     };
-    rows.flatten().collect()
+    rows.flatten()
+        .filter(|(id, value)| *id > 0 && !value.is_null())
+        .collect()
 }
 
 fn config_triplets(value: &Value, key: &str) -> Vec<(i32, i32, i32)> {
@@ -220,6 +225,7 @@ fn read_json_config_rows(path: &Path) -> Option<Vec<(i32, Value)>> {
                     .unwrap_or_default();
                 Some((id, row.get("value")?.clone()))
             })
+            .filter(|(id, value)| *id > 0 && !value.is_null())
             .collect(),
     )
 }
@@ -1171,7 +1177,7 @@ fn load_reward_definitions(dir: &Path) -> std::collections::BTreeMap<i32, Vec<Sh
                     })
                 })
                 .collect::<Vec<_>>();
-            (!rewards.is_empty()).then_some((id, rewards))
+            Some((id, rewards))
         })
         .collect()
 }
