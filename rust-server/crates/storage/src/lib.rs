@@ -1742,6 +1742,60 @@ impl ProfileStore {
                 .hero_ids
                 .push(positive_hero_id(hero_value, "supply hero id")?);
         }
+        let mut statement = connection.prepare(
+            "SELECT entry_id, support_id, start_time
+             FROM support_entries WHERE profile_id = ?1 ORDER BY entry_id",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })? {
+            let (entry_id, support_id, start_time) = row?;
+            account
+                .support
+                .entries
+                .push(blueoath_domain::SupportEntryState {
+                    id: positive_u32(entry_id, "support entry id")?,
+                    support_id: positive_u32(support_id, "support id")?,
+                    start_time: non_negative_u64(start_time, "support start time")?,
+                    hero_ids: Vec::new(),
+                });
+        }
+        let mut statement = connection.prepare(
+            "SELECT entry_id, position, hero_id
+             FROM support_entry_heroes WHERE profile_id = ?1 ORDER BY entry_id, position",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })? {
+            let (entry_value, position_value, hero_value) = row?;
+            let entry_id = positive_u32(entry_value, "support entry id")?;
+            let position = usize::try_from(position_value).map_err(|_| {
+                StorageError::InvalidTypedAccount("support hero position is invalid".to_owned())
+            })?;
+            let hero_id = positive_hero_id(hero_value, "support hero id")?;
+            let Some(entry) = account
+                .support
+                .entries
+                .iter_mut()
+                .find(|entry| entry.id == entry_id)
+            else {
+                return Err(StorageError::InvalidTypedAccount(
+                    "support hero references missing entry".to_owned(),
+                ));
+            };
+            if entry.hero_ids.len() <= position {
+                entry.hero_ids.resize(position + 1, hero_id);
+            }
+            entry.hero_ids[position] = hero_id;
+        }
 
         if let Some(values) = connection
             .query_row(
@@ -2936,6 +2990,30 @@ impl ProfileStore {
                 ],
             )?;
         }
+        for entry in &account.support.entries {
+            transaction.execute(
+                "INSERT INTO support_entries(profile_id, entry_id, support_id, start_time)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(entry.id, "support entry id")?,
+                    typed_i64(entry.support_id, "support id")?,
+                    typed_i64(entry.start_time, "support start time")?,
+                ],
+            )?;
+            for (position, hero_id) in entry.hero_ids.iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO support_entry_heroes(profile_id, entry_id, position, hero_id)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        profile.id.as_str(),
+                        typed_i64(entry.id, "support entry id")?,
+                        typed_i64(position, "support hero position")?,
+                        typed_i64(hero_id.get(), "support hero id")?,
+                    ],
+                )?;
+            }
+        }
         for (key, value) in &account.activities.progress {
             let (activity_id, progress_kind) = key.split_once('\u{1f}').unwrap_or((key, "value"));
             transaction.execute(
@@ -3533,6 +3611,8 @@ fn clear_normalized_account(
         "guide_plot_rewards",
         "guide_settings",
         "supply_heroes",
+        "support_entry_heroes",
+        "support_entries",
         "fleet_members",
         "fleets",
         "hero_equip_slots",
@@ -3656,6 +3736,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0025_fashion_typed_state.sql"),
     include_str!("../../../migrations/0026_guide_typed_state.sql"),
     include_str!("../../../migrations/0027_supply_typed_state.sql"),
+    include_str!("../../../migrations/0028_support_typed_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

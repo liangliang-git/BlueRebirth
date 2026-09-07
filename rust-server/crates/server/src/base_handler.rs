@@ -115,27 +115,26 @@ pub(super) fn handle_typed(
                     "support request is invalid",
                 ));
             }
-            let id = typed_support_entries(account)
-                .into_iter()
+            let id = account
+                .support
+                .entries
+                .iter()
                 .map(|entry| entry.id)
                 .max()
                 .unwrap_or_default()
                 .saturating_add(1);
-            let prefix = format!("compat:support:{id}");
             account
-                .activities
-                .progress
-                .insert(format!("{prefix}:supportId"), support_id as u64);
-            account.activities.progress.insert(
-                format!("{prefix}:startTime"),
-                u64::from(current_unix_seconds()),
-            );
-            for hero_id in hero_ids {
-                account
-                    .activities
-                    .progress
-                    .insert(format!("{prefix}:hero:{hero_id}"), 1);
-            }
+                .support
+                .entries
+                .push(blueoath_domain::SupportEntryState {
+                    id,
+                    support_id: support_id as u32,
+                    start_time: u64::from(current_unix_seconds()),
+                    hero_ids: hero_ids
+                        .into_iter()
+                        .filter_map(|hero_id| blueoath_domain::HeroId::new(hero_id).ok())
+                        .collect(),
+                });
             append_method_push(
                 pre_pushes,
                 "supportfleet.SupportFleetInfo",
@@ -146,9 +145,12 @@ pub(super) fn handle_typed(
         "supportfleet.CompleteSupport" | "supportfleet.CancelSupport" => {
             let id = decode_varint_field(request_args, 1);
             let completion_type = decode_varint_field(request_args, 2);
-            let Some(entry) = typed_support_entries(account)
-                .into_iter()
-                .find(|entry| entry.id == id)
+            let Some(entry) = account
+                .support
+                .entries
+                .iter()
+                .find(|entry| entry.id == id.max(0) as u32)
+                .cloned()
             else {
                 return HandlerResult::Error(GameError::InvalidState(
                     "support entry is not ready or invalid",
@@ -162,11 +164,11 @@ pub(super) fn handle_typed(
             let catalog = SUPPORT_CATALOG.get().cloned().unwrap_or_default();
             let config = catalog
                 .items
-                .get(&entry.support_id)
+                .get(&(entry.support_id as i32))
                 .cloned()
                 .unwrap_or_default();
             let now = current_unix_seconds();
-            let elapsed = u64::from(now.saturating_sub(entry.start_time));
+            let elapsed = u64::from(now).saturating_sub(entry.start_time);
             if completion_type == 1 && elapsed < config.duration_seconds.max(0) as u64 {
                 return HandlerResult::Error(GameError::InvalidState(
                     "support entry is not ready or invalid",
@@ -174,7 +176,7 @@ pub(super) fn handle_typed(
             }
             let big_success = completion_type != 3
                 && config.big_success_ratio > 0
-                && (u64::from(now).saturating_add(id.max(0) as u64) % 10_000)
+                && (u64::from(now).saturating_add(u64::from(entry.id)) % 10_000)
                     < u64::try_from(config.big_success_ratio).unwrap_or_default();
             let base_rewards = if big_success && !config.big_success_base_rewards.is_empty() {
                 config.big_success_base_rewards.clone()
@@ -260,7 +262,7 @@ pub(super) fn handle_typed(
                 } else {
                     1
                 },
-                hero_ids: entry.hero_ids,
+                hero_ids: entry.hero_ids.iter().map(|hero_id| hero_id.get()).collect(),
                 base_rewards: if completion_type == 3 {
                     Vec::new()
                 } else {
@@ -1362,74 +1364,15 @@ fn typed_jopen_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
     output
 }
 
-#[derive(Debug, Clone)]
-struct TypedSupportEntry {
-    id: i32,
-    support_id: i32,
-    start_time: u32,
-    hero_ids: Vec<u64>,
-}
-
-fn typed_support_entries(account: &blueoath_domain::AccountState) -> Vec<TypedSupportEntry> {
-    let mut ids = std::collections::BTreeSet::new();
-    for key in account.activities.progress.keys() {
-        let Some(rest) = key.strip_prefix("compat:support:") else {
-            continue;
-        };
-        let Some(id) = rest
-            .strip_suffix(":supportId")
-            .and_then(|value| value.parse::<i32>().ok())
-            .filter(|id| *id > 0)
-        else {
-            continue;
-        };
-        ids.insert(id);
-    }
-    ids.into_iter()
-        .filter_map(|id| {
-            let prefix = format!("compat:support:{id}");
-            let support_id = account
-                .activities
-                .progress
-                .get(&format!("{prefix}:supportId"))
-                .copied()
-                .and_then(|value| i32::try_from(value).ok())?;
-            let start_time = account
-                .activities
-                .progress
-                .get(&format!("{prefix}:startTime"))
-                .copied()
-                .and_then(|value| u32::try_from(value).ok())
-                .unwrap_or_default();
-            let hero_prefix = format!("{prefix}:hero:");
-            let hero_ids = account
-                .activities
-                .progress
-                .keys()
-                .filter_map(|key| {
-                    key.strip_prefix(&hero_prefix)
-                        .and_then(|value| value.parse::<u64>().ok())
-                })
-                .collect::<Vec<_>>();
-            Some(TypedSupportEntry {
-                id,
-                support_id,
-                start_time,
-                hero_ids,
-            })
-        })
-        .collect()
-}
-
 fn typed_support_info_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
     let mut output = Vec::new();
-    for entry in typed_support_entries(account) {
+    for entry in &account.support.entries {
         let mut item = Vec::new();
-        append_varint_field(&mut item, 1, entry.id.max(0) as u64);
-        append_varint_field(&mut item, 2, entry.support_id.max(0) as u64);
-        append_varint_field(&mut item, 3, u64::from(entry.start_time));
-        for hero_id in entry.hero_ids {
-            append_varint_field(&mut item, 4, hero_id);
+        append_varint_field(&mut item, 1, u64::from(entry.id));
+        append_varint_field(&mut item, 2, u64::from(entry.support_id));
+        append_varint_field(&mut item, 3, entry.start_time);
+        for hero_id in &entry.hero_ids {
+            append_varint_field(&mut item, 4, hero_id.get());
         }
         append_message_field(&mut output, 1, &item);
     }
@@ -1437,11 +1380,10 @@ fn typed_support_info_payload(account: &blueoath_domain::AccountState) -> Vec<u8
 }
 
 fn typed_support_remove(account: &mut blueoath_domain::AccountState, id: i32) {
-    let prefix = format!("compat:support:{id}:");
     account
-        .activities
-        .progress
-        .retain(|key, _| !key.starts_with(&prefix));
+        .support
+        .entries
+        .retain(|entry| entry.id != id.max(0) as u32);
 }
 
 fn typed_support_currency(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
@@ -1519,7 +1461,7 @@ fn typed_support_reward_supported(goods_type: i32, item_id: i32, amount: i32) ->
 
 fn typed_support_grant(
     account: &mut blueoath_domain::AccountState,
-    hero_ids: &[u64],
+    hero_ids: &[blueoath_domain::HeroId],
     goods_type: i32,
     item_id: i32,
     amount: i32,
@@ -1527,10 +1469,7 @@ fn typed_support_grant(
     let amount = u64::try_from(amount).unwrap_or_default();
     if goods_type == 5 && item_id == 6 {
         for hero_id in hero_ids {
-            if let Some(hero) = blueoath_domain::HeroId::new(*hero_id)
-                .ok()
-                .and_then(|id| account.dock.heroes.get_mut(&id))
-            {
+            if let Some(hero) = account.dock.heroes.get_mut(hero_id) {
                 hero.exp = hero.exp.saturating_add(amount);
             }
         }
@@ -1999,7 +1938,7 @@ mod tests {
             ),
             HandlerResult::Reply(_)
         ));
-        assert_eq!(typed_support_entries(&account).len(), 1);
+        assert_eq!(account.support.entries.len(), 1);
         let mut support_cancel = Vec::new();
         append_varint_field(&mut support_cancel, 1, 1);
         append_varint_field(&mut support_cancel, 2, 3);
@@ -2013,7 +1952,7 @@ mod tests {
             ),
             HandlerResult::Reply(_)
         ));
-        assert!(typed_support_entries(&account).is_empty());
+        assert!(account.support.entries.is_empty());
 
         let mut supply_switch = Vec::new();
         append_varint_field(&mut supply_switch, 1, 1);
