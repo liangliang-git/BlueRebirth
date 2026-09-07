@@ -32,7 +32,12 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, typed_big_activity_payload(account)))
         }
         "bigactivity.GetBigActivityRank" | "bigactivity.GetBigActivityRankEx" => {
-            let start = decode_varint_field(request_args, 1).max(1);
+            let Ok(request) = BigActivityRankRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "big activity rank request is invalid",
+                ));
+            };
+            let start = request.start.max(1);
             HandlerResult::Reply(Response::raw(
                 method,
                 typed_big_activity_rank_payload(server_state, account, start),
@@ -45,13 +50,13 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, typed_guild_rate_payload(account)))
         }
         "guildbigactivity.PresentItem" => {
-            let item_id = decode_varint_field(request_args, 1);
-            let count = decode_varint_field(request_args, 2).clamp(1, 99);
-            if item_id <= 0 {
+            let Ok(request) = GuildActivityPresentRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
-                    "guild activity item id is invalid",
+                    "guild activity request is invalid",
                 ));
-            }
+            };
+            let item_id = request.item_id;
+            let count = request.count.clamp(1, 99);
             let progress = &mut account.activities.progress;
             progress.insert(
                 "guildBigActivity\u{1f}lastItemId".to_owned(),
@@ -66,11 +71,15 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, typed_guild_rank_payload(account)))
         }
         "heroawaken.FinishAwaken" => {
-            let finished = decode_varint_field(request_args, 1) != 0;
-            account
-                .activities
-                .progress
-                .insert("heroAwaken\u{1f}isFinished".to_owned(), u64::from(finished));
+            let Ok(request) = HeroAwakenFinishRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "hero awaken request is invalid",
+                ));
+            };
+            account.activities.progress.insert(
+                "heroAwaken\u{1f}isFinished".to_owned(),
+                u64::from(request.finished),
+            );
             HandlerResult::Reply(Response::raw(
                 method,
                 typed_hero_awaken_finish_payload(account),
@@ -242,12 +251,12 @@ fn handle_typed_hero_awaken_reward(
     account: &mut blueoath_domain::AccountState,
     request_args: &[u8],
 ) -> HandlerResult {
-    let milestone = decode_varint_field(request_args, 1);
-    if milestone <= 0 {
+    let Ok(request) = HeroAwakenRewardRequest::decode(request_args) else {
         return HandlerResult::Error(GameError::InvalidRequest(
-            "hero awaken milestone is invalid",
+            "hero awaken reward request is invalid",
         ));
-    }
+    };
+    let milestone = request.milestone;
     if typed_activity_value(account, "heroAwaken\u{1f}totalPt") < milestone as u64 {
         return HandlerResult::Error(GameError::InvalidState(
             "hero awaken milestone is not reached",

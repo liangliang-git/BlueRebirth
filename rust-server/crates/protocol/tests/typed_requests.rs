@@ -1,11 +1,13 @@
 use blueoath_protocol::{
-    BuildShipRequest, BuildShipRewardRequest, ChangeNameRequest, ChangeWorldChannelRequest,
-    CopyAttackRequest, CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
-    DailyCopySelectExRequest, Decode, FriendSearchRequest, FriendTargetRequest,
-    GetBarrageByIdRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildTaskDonateRequest,
-    GuildTaskIdRequest, GuildTaskMemberRequest, InviteRecordVersionRequest, InviteStateTypeRequest,
-    OutpostBuildingRequest, OutpostSetHeroRequest, ProtocolError, SeaDifficultyRequest,
-    SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
+    BigActivityRankRequest, BuildShipRequest, BuildShipRewardRequest, ChangeNameRequest,
+    ChangeWorldChannelRequest, CopyAttackRequest, CopyPassRequest, CopyRecordRequest,
+    CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode, FriendSearchRequest,
+    FriendTargetRequest, GetBarrageByIdRequest, GuildActivityPresentRequest,
+    GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildTaskDonateRequest, GuildTaskIdRequest,
+    GuildTaskMemberRequest, HeroAwakenFinishRequest, HeroAwakenRewardRequest,
+    InviteRecordVersionRequest, InviteStateTypeRequest, OutpostBuildingRequest,
+    OutpostSetHeroRequest, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
+    SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
     SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest,
     SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
 };
@@ -314,6 +316,29 @@ fn decodes_typed_guild_task_requests() {
             item_id: 2,
             amount: 3,
         }
+    );
+}
+
+#[test]
+fn decodes_typed_activity_requests() {
+    assert_eq!(
+        BigActivityRankRequest::decode(&[0x08, 3]).unwrap(),
+        BigActivityRankRequest { start: 3 }
+    );
+    assert_eq!(
+        GuildActivityPresentRequest::decode(&[0x08, 7, 0x10, 2]).unwrap(),
+        GuildActivityPresentRequest {
+            item_id: 7,
+            count: 2,
+        }
+    );
+    assert_eq!(
+        HeroAwakenFinishRequest::decode(&[0x08, 1]).unwrap(),
+        HeroAwakenFinishRequest { finished: true }
+    );
+    assert_eq!(
+        HeroAwakenRewardRequest::decode(&[0x08, 5]).unwrap(),
+        HeroAwakenRewardRequest { milestone: 5 }
     );
 }
 

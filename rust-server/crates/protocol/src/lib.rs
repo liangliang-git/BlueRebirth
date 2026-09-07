@@ -1907,6 +1907,69 @@ pub struct GuildTaskDonateRequest {
     pub items: Vec<GuildTaskDonationItem>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BigActivityRankRequest {
+    pub start: i32,
+}
+
+impl Decode for BigActivityRankRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            start: optional_i32(&fields, 1, "big activity rank has duplicate start")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuildActivityPresentRequest {
+    pub item_id: i32,
+    pub count: i32,
+}
+
+impl Decode for GuildActivityPresentRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let item_id = required_field(&fields, 1, "guild activity is missing item id")?;
+        let count = optional_i32(&fields, 2, "guild activity has duplicate count")?;
+        if item_id <= 0 {
+            return Err(ProtocolError::Invalid("guild activity item id is invalid"));
+        }
+        Ok(Self { item_id, count })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeroAwakenFinishRequest {
+    pub finished: bool,
+}
+
+impl Decode for HeroAwakenFinishRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let finished = optional_i32(&fields, 1, "hero awaken has duplicate finished flag")?;
+        Ok(Self {
+            finished: finished != 0,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeroAwakenRewardRequest {
+    pub milestone: i32,
+}
+
+impl Decode for HeroAwakenRewardRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let milestone = required_field(&fields, 1, "hero awaken is missing milestone")?;
+        if milestone <= 0 {
+            return Err(ProtocolError::Invalid("hero awaken milestone is invalid"));
+        }
+        Ok(Self { milestone })
+    }
+}
+
 impl Decode for GuildTaskDonateRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
