@@ -22,9 +22,35 @@ pub(crate) struct SharedPush {
     pub(crate) payload: Vec<u8>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TypedCoopUser {
+    pub(crate) uid: u64,
+    pub(crate) name: String,
+    pub(crate) head: u32,
+    pub(crate) fashioning: u32,
+    pub(crate) is_ready: bool,
+    pub(crate) enter_time: u32,
+    pub(crate) hero_ids: Vec<i32>,
+    pub(crate) auto_ready: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TypedCoopRoom {
+    pub(crate) room_id: u64,
+    pub(crate) copy_id: i32,
+    pub(crate) owner_id: u64,
+    pub(crate) is_public: bool,
+    pub(crate) capacity: u32,
+    pub(crate) create_time: u32,
+    pub(crate) state: u32,
+    pub(crate) focus: bool,
+    pub(crate) users: Vec<TypedCoopUser>,
+}
+
 #[derive(Debug)]
 pub(crate) struct SharedSocialState {
     pub(crate) rooms: std::collections::BTreeMap<u64, Value>,
+    pub(crate) typed_rooms: std::collections::BTreeMap<u64, TypedCoopRoom>,
     pub(crate) pending_pushes: std::collections::BTreeMap<u64, Vec<(String, Vec<u8>)>>,
     pub(crate) push_tx: broadcast::Sender<SharedPush>,
     #[allow(dead_code)]
@@ -38,6 +64,7 @@ impl Default for SharedSocialState {
         let (push_tx, _) = broadcast::channel(256);
         Self {
             rooms: std::collections::BTreeMap::new(),
+            typed_rooms: std::collections::BTreeMap::new(),
             pending_pushes: std::collections::BTreeMap::new(),
             push_tx,
             match_queue: Vec::new(),

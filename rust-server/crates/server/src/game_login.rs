@@ -1477,6 +1477,19 @@ where
                 result.into_payload()
             }
         }
+        _ if typed_account.is_some() && coop_handler::handles_typed(request.method.as_str()) => {
+            let result = coop_handler::handle_typed(
+                state,
+                typed_account.as_mut().expect("typed co-op account"),
+                request.method.as_str(),
+                request_args,
+                &mut post_pushes,
+            );
+            if let HandlerResult::Error(error) = &result {
+                handler_error = Some(error.clone());
+            }
+            result.into_payload()
+        }
         _ if method.is_family(MethodFamily::MatchServer)
             || method.is_family(MethodFamily::Room)
             || matches!(
@@ -2550,6 +2563,9 @@ where
 }
 
 fn legacy_only_method(method: &str) -> bool {
+    if coop_handler::handles_typed(method) {
+        return false;
+    }
     if matches!(
         method,
         "copy.AttackBase"
@@ -2764,5 +2780,8 @@ mod route_guard_tests {
         assert!(legacy_only_method("archiveCopy.IsLoad"));
         assert!(!legacy_only_method("player.Login"));
         assert!(!legacy_only_method("copy.GetCopy"));
+        assert!(!legacy_only_method("matchsvr.CreateRoom"));
+        assert!(!legacy_only_method("matchsvr_7.Ready"));
+        assert!(!legacy_only_method("room.StartMatch"));
     }
 }
