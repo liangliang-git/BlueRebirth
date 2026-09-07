@@ -1,11 +1,11 @@
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 pub(super) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
-    post_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let now = current_unix_seconds() as u64;
     let uid = account.character.uid;
@@ -45,11 +45,10 @@ pub(super) fn handle_typed(
                 let excess = account.chat.messages.len() - 100;
                 account.chat.messages.drain(..excess);
             }
-            append_method_push(
-                post_pushes,
+            effects.push_post(Response::raw(
                 "chat.NewMessage",
                 chat_message_payload_typed(account, &entry),
-            );
+            ));
             let mut response = Vec::new();
             append_bytes_field(&mut response, 1, message.as_bytes());
             reply(method, response)
@@ -243,17 +242,17 @@ mod tests {
         let mut args = Vec::new();
         append_varint_field(&mut args, 1, 3);
         append_bytes_field(&mut args, 3, b"hello");
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
-        let result = handle_typed(&mut account, "chat.SendMessage", &args, &mut pushes);
+        let result = handle_typed(&mut account, "chat.SendMessage", &args, &mut effects);
 
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert_eq!(account.chat.messages.len(), 1);
         assert_eq!(account.chat.messages[0].message, "hello");
-        assert_eq!(pushes.len(), 1);
-        assert_eq!(
-            TMessageCodec::decode_response(&pushes[0]).unwrap().method,
-            "chat.NewMessage"
-        );
+        let (pre, post, error) = effects.into_parts();
+        assert!(pre.is_empty());
+        assert_eq!(post.len(), 1);
+        assert_eq!(post[0].method, "chat.NewMessage");
+        assert!(error.is_none());
     }
 }

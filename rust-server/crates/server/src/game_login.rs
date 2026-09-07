@@ -891,16 +891,23 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::Chat) => {
+            let mut chat_effects = ResponseEffects::default();
             let result = if let Some(account) = typed_account.as_mut() {
                 chat_handler::handle_typed(
                     account,
                     request.method.as_str(),
                     request_args,
-                    &mut post_pushes,
+                    &mut chat_effects,
                 )
             } else {
                 HandlerResult::Error(GameError::InvalidRequest("chat requires typed account"))
             };
+            apply_response_effects(
+                chat_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -1597,13 +1604,14 @@ where
             result.into_payload()
         }
         "dailycopy.GetData" | "dailycopy.SelectEx" => {
+            let mut daily_copy_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 let result = daily_copy_handler::handle_typed(
                     typed,
                     chapter_catalog,
                     request.method.as_str(),
                     request_args,
-                    &mut post_pushes,
+                    &mut daily_copy_effects,
                 );
                 if matches!(result, HandlerResult::PushOnly | HandlerResult::Error(_)) {
                     #[cfg(test)]
@@ -1621,6 +1629,12 @@ where
                     "daily copy request requires typed account",
                 ))
             };
+            apply_response_effects(
+                daily_copy_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -1728,18 +1742,25 @@ where
             payload
         }
         _ if method.is_family(MethodFamily::TalentTree) => {
+            let mut talent_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 talent_handler::handle_typed(
                     typed,
                     request.method.as_str(),
                     request_args,
-                    &mut pre_pushes,
+                    &mut talent_effects,
                 )
             } else {
                 HandlerResult::Error(GameError::InvalidRequest(
                     "talent tree requires typed account",
                 ))
             };
+            apply_response_effects(
+                talent_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }

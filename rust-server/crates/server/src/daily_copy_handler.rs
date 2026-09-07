@@ -1,6 +1,6 @@
 use super::catalog::ChapterCatalog;
 use super::common::error::GameError;
-use super::common::response::HandlerResult;
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 pub(super) fn handle_typed(
@@ -8,7 +8,7 @@ pub(super) fn handle_typed(
     chapter_catalog: Option<&ChapterCatalog>,
     method: &str,
     request_args: &[u8],
-    post_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     if !matches!(method, "dailycopy.GetData" | "dailycopy.SelectEx") {
         return HandlerResult::Empty;
@@ -70,7 +70,7 @@ pub(super) fn handle_typed(
         &[],
         &[],
     );
-    append_method_push(post_pushes, "dailycopy.UpdateDailyCopyData", payload);
+    effects.push_post(Response::raw("dailycopy.UpdateDailyCopyData", payload));
     HandlerResult::PushOnly
 }
 
@@ -86,16 +86,18 @@ mod tests {
         let mut args = Vec::new();
         append_varint_field(&mut args, 1, 1);
         append_varint_field(&mut args, 2, 1);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         assert!(matches!(
-            handle_typed(&mut account, None, "dailycopy.SelectEx", &args, &mut pushes,),
+            handle_typed(&mut account, None, "dailycopy.SelectEx", &args, &mut effects,),
             HandlerResult::PushOnly
         ));
         let chapter = blueoath_domain::ChapterId::new(1).unwrap();
         assert_eq!(account.daily_copy.select_ex.get(&chapter), Some(&true));
         assert_eq!(account.daily_copy.challenge_times.get(&chapter), Some(&0));
-        assert_eq!(pushes.len(), 1);
-        assert!(!pushes[0].is_empty());
+        let (pre, post, error) = effects.into_parts();
+        assert!(pre.is_empty());
+        assert_eq!(post.len(), 1);
+        assert!(error.is_none());
     }
 }
