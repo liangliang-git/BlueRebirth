@@ -30,6 +30,8 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "activitybirthday.BirthdayRefresh"
             | "activitybirthday.UpdateBirthdayInfo"
             | "activitybirthday.FeedBirthdayCake"
+            | "activitybirthday.MakeBirthdayCake"
+            | "activitybirthday.GetCakeAffairReward"
             | "activityfashion.PushActivityFashionInfo"
             | "activitycodeexchange.UpdateActivityCodeExgInfo"
             | "activitycodeexchange.ExchangeCode"
@@ -57,6 +59,8 @@ pub(super) fn handle_typed(
         method,
         "activityextract.Draw"
             | "activityextractur.Draw"
+            | "activitybirthday.MakeBirthdayCake"
+            | "activitybirthday.GetCakeAffairReward"
             | "activityVideo.SetActivityVideo"
             | "activitycodeexchange.ExchangeCode"
             | "activitycodeexchange.ExchangeReward"
@@ -65,6 +69,9 @@ pub(super) fn handle_typed(
         return match method {
             "activityextract.Draw" | "activityextractur.Draw" => {
                 handle_typed_extract_draw(account, method, request_args)
+            }
+            "activitybirthday.MakeBirthdayCake" | "activitybirthday.GetCakeAffairReward" => {
+                handle_typed_birthday_reward(account, method, request_args)
             }
             "activityVideo.SetActivityVideo" => handle_typed_video_set(account, request_args),
             "activitycodeexchange.ExchangeCode" | "activitycodeexchange.ExchangeReward" => {
@@ -452,6 +459,87 @@ fn handle_typed_extract_draw(
         typed_reply(method, extract_ur_draw_ret_payload(&selected_ids))
     } else {
         typed_reply(method, extract_draw_ret_payload(&granted))
+    }
+}
+
+fn handle_typed_birthday_reward(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
+    match method {
+        "activitybirthday.MakeBirthdayCake" => {
+            let formula = decode_varint_field(request_args, 1);
+            if formula <= 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "birthday cake formula is invalid",
+                ));
+            }
+            let Some(reward) = birthday_formula_reward(catalog, formula) else {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "birthday cake formula is not configured",
+                ));
+            };
+            if !task_state::can_grant_typed_task_reward(account, &reward) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "birthday cake reward is unsupported",
+                ));
+            }
+            if !task_state::grant_typed_task_reward(account, &reward) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "birthday cake reward is unsupported",
+                ));
+            }
+            let cake = account
+                .activities
+                .progress
+                .entry(activity_key("activityBirthday", "cake"))
+                .or_default();
+            *cake = cake.saturating_add(1);
+            account.activities.progress.insert(
+                activity_key("activityBirthday", "lastCakeFormula"),
+                formula.max(0) as u64,
+            );
+            typed_reply(method, typed_birthday_payload(&account.activities.progress))
+        }
+        "activitybirthday.GetCakeAffairReward" => {
+            let level = decode_varint_field(request_args, 1).max(0) as u64;
+            if level == 0 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "birthday affair level is invalid",
+                ));
+            }
+            let claim_key = activity_key("activityBirthday", &format!("claimedAffair:{level}"));
+            if account.activities.progress.contains_key(&claim_key) {
+                return typed_reply(method, typed_birthday_payload(&account.activities.progress));
+            }
+            let Some(reward_id) = birthday_affair_reward_id(catalog, level as i32) else {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "birthday affair reward is not configured",
+                ));
+            };
+            let rewards = catalog
+                .rewards_by_id
+                .get(&reward_id)
+                .cloned()
+                .unwrap_or_default();
+            if rewards.is_empty() || !task_state::can_grant_typed_task_rewards(account, &rewards) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "birthday affair reward is unsupported",
+                ));
+            }
+            for reward in &rewards {
+                if !task_state::grant_typed_task_reward(account, reward) {
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "birthday affair reward is unsupported",
+                    ));
+                }
+            }
+            account.activities.progress.insert(claim_key, 1);
+            typed_reply(method, typed_birthday_payload(&account.activities.progress))
+        }
+        _ => HandlerResult::Error(GameError::InvalidRequest("birthday method is unsupported")),
     }
 }
 
@@ -3042,5 +3130,11 @@ mod tests {
                 .get("activity:activityCodeExchange:receipt:55:count"),
             Some(&2)
         );
+        let mut cake = Vec::new();
+        append_varint_field(&mut cake, 1, 1);
+        assert!(matches!(
+            handle_typed(&mut account, "activitybirthday.MakeBirthdayCake", &cake),
+            HandlerResult::Error(_)
+        ));
     }
 }
