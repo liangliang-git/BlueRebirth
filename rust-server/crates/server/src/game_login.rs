@@ -1296,23 +1296,43 @@ where
                 }
             };
             let copy_type = copy_request_type(request_args);
-            let passed = account_view
-                .map(|account| match copy_type {
-                    2 => completed_copy_ids(account, "seaProgress"),
-                    _ => completed_copy_ids(account, "copyProgress"),
+            let passed = typed_account
+                .as_deref()
+                .map(|account| {
+                    account
+                        .battle
+                        .passed_copies
+                        .iter()
+                        .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
+                        .collect::<Vec<_>>()
                 })
-                .unwrap_or_default();
+                .unwrap_or_else(|| {
+                    account_view
+                        .map(|account| match copy_type {
+                            2 => completed_copy_ids(account, "seaProgress"),
+                            _ => completed_copy_ids(account, "copyProgress"),
+                        })
+                        .unwrap_or_default()
+                });
             Some(match copy_type {
                 2 => {
-                    let pass_counts = account_view
-                        .map(|account| completed_copy_counts(account, "seaProgress"))
-                        .unwrap_or_default();
+                    let pass_counts = if typed_account.is_some() {
+                        Vec::new()
+                    } else {
+                        account_view
+                            .map(|account| completed_copy_counts(account, "seaProgress"))
+                            .unwrap_or_default()
+                    };
                     CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
                         &catalog.sea,
                         copy_progress_max_or_initial(&catalog.sea, &passed, catalog.sea_initial),
                         &passed,
                         &pass_counts,
-                        account_view.map(sea_difficulty_for_account).unwrap_or(1),
+                        if typed_account.is_some() {
+                            1
+                        } else {
+                            account_view.map(sea_difficulty_for_account).unwrap_or(1)
+                        },
                     )
                 }
                 33 => CopyInfoCodec::encode(
