@@ -352,12 +352,17 @@ fn typed_building_projection_reads_normalized_building_rows() {
     account.buildings.levels.insert(9, 4);
     account.buildings.template_ids.insert(9, 41);
     account.buildings.land_indices.insert(9, 6);
+    account
+        .buildings
+        .hero_assignments
+        .insert(9, vec![blueoath_domain::HeroId::new(1).unwrap()]);
 
     let building = building_info_from_typed_account(&account, 123);
     assert_eq!(building.buildings.len(), 1);
     assert_eq!(building.buildings[0].id, 9);
     assert_eq!(building.buildings[0].template_id, 41);
     assert_eq!(building.buildings[0].level, 4);
+    assert_eq!(building.buildings[0].hero_ids, vec![1]);
     assert_eq!(building.lands[0].index, 6);
 }
 
@@ -375,6 +380,7 @@ fn typed_building_mutations_update_normalized_state() {
         &add_args,
         123,
         &mut pushes,
+        None,
     );
     assert!(matches!(
         result,
@@ -385,6 +391,26 @@ fn typed_building_mutations_update_normalized_state() {
     assert_eq!(account.buildings.land_indices.get(&3), Some(&9));
     assert_eq!(pushes.len(), 1);
 
+    let mut assignment_args = Vec::new();
+    append_varint_field(&mut assignment_args, 1, 2);
+    append_varint_field(&mut assignment_args, 2, 1);
+    let result = super::handle_typed_building(
+        &mut account,
+        "building.SetHero",
+        &assignment_args,
+        124,
+        &mut pushes,
+        None,
+    );
+    assert!(matches!(
+        result,
+        super::common::response::HandlerResult::PushOnly
+    ));
+    assert_eq!(
+        account.buildings.hero_assignments.get(&2),
+        Some(&vec![blueoath_domain::HeroId::new(1).unwrap()])
+    );
+
     let mut level_args = Vec::new();
     append_varint_field(&mut level_args, 1, 3);
     let result = super::handle_typed_building(
@@ -393,6 +419,7 @@ fn typed_building_mutations_update_normalized_state() {
         &level_args,
         124,
         &mut pushes,
+        None,
     );
     assert!(matches!(
         result,

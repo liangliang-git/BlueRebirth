@@ -177,7 +177,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 11);
+    assert_eq!(version, 12);
     assert_eq!(state_json_columns, 0);
     for column in ["class_id", "create_time", "message"] {
         let count: i64 = connection
@@ -379,6 +379,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
     account.buildings.levels.insert(11, 6);
     account.buildings.template_ids.insert(11, 41);
     account.buildings.land_indices.insert(11, 6);
+    account.buildings.hero_assignments.insert(11, vec![hero_id]);
     account
         .inventory
         .items
@@ -437,6 +438,10 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(loaded.buildings.levels.get(&11), Some(&6));
     assert_eq!(loaded.buildings.template_ids.get(&11), Some(&41));
     assert_eq!(loaded.buildings.land_indices.get(&11), Some(&6));
+    assert_eq!(
+        loaded.buildings.hero_assignments.get(&11),
+        Some(&vec![hero_id])
+    );
     assert_eq!(
         loaded.inventory.items.get(&TemplateId::new(30001).unwrap()),
         Some(&17)

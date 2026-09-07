@@ -607,6 +607,47 @@ impl ProfileStore {
                 non_negative_u32(land_index, "building land index")?,
             );
         }
+        let mut statement = connection.prepare(
+            "SELECT building_id, position, hero_id
+             FROM building_hero_assignments
+             WHERE profile_id = ?1 ORDER BY building_id, position",
+        )?;
+        let assignments = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (building_value, position, hero_value) in assignments {
+            let building_id = positive_u64(building_value, "building assignment id")?;
+            let position = usize::try_from(position).map_err(|_| {
+                StorageError::InvalidTypedAccount(
+                    "building assignment position is invalid".to_owned(),
+                )
+            })?;
+            let hero_id = positive_hero_id(hero_value, "building assignment hero id")?;
+            if !account.buildings.levels.contains_key(&building_id) {
+                return Err(StorageError::InvalidTypedAccount(
+                    "building assignment references missing building".to_owned(),
+                ));
+            }
+            let members = account
+                .buildings
+                .hero_assignments
+                .entry(building_id)
+                .or_default();
+            if members.len() <= position {
+                members.resize(
+                    position + 1,
+                    HeroId::new(1)
+                        .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?,
+                );
+            }
+            members[position] = hero_id;
+        }
 
         if let Some((chapter_value, copy_value, current_fleet, started_at, expires_at, revision)) =
             connection
@@ -1121,6 +1162,21 @@ impl ProfileStore {
                 ],
             )?;
         }
+        for (building_id, hero_ids) in &account.buildings.hero_assignments {
+            for (position, hero_id) in hero_ids.iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO building_hero_assignments(
+                        profile_id, building_id, position, hero_id
+                     ) VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        profile.id.as_str(),
+                        typed_i64(*building_id, "building assignment id")?,
+                        typed_i64(position, "building assignment position")?,
+                        typed_i64(hero_id.get(), "building assignment hero id")?,
+                    ],
+                )?;
+            }
+        }
         if let Some(session) = &account.battle.active {
             transaction.execute(
                 "INSERT INTO battle_sessions(
@@ -1342,6 +1398,7 @@ fn clear_normalized_account(
 ) -> Result<(), StorageError> {
     for table in [
         "task_claims",
+        "building_hero_assignments",
         "preset_fleet_members",
         "preset_fleets",
         "preset_fleet_meta",
@@ -1955,6 +2012,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0009_chat_state.sql"),
     include_str!("../../../migrations/0010_building_template_id.sql"),
     include_str!("../../../migrations/0011_preset_fleets.sql"),
+    include_str!("../../../migrations/0012_building_hero_assignments.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

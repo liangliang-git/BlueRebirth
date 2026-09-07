@@ -132,6 +132,7 @@ where
     let request = RequestContext::from(TMessageCodec::decode_request(&frame.payload)?);
     let request_args = request.args.as_slice();
     if let (Some(typed), Some(legacy)) = (typed_account.as_deref_mut(), account_view) {
+        sync_typed_building_assignments(typed, legacy);
         sync_typed_preset_fleet_state(typed, legacy);
         sync_typed_daily_copy_state(typed, legacy, current_unix_seconds());
         sync_typed_task_state(typed, legacy);
@@ -1084,6 +1085,7 @@ where
                     request_args,
                     current_unix_seconds(),
                     &mut pre_pushes,
+                    catalogs.buildings,
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result

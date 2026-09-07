@@ -675,6 +675,14 @@ pub(super) fn building_info_from_typed_account(
                 )
                 .ok()?,
                 level: i32::try_from(*level).ok()?,
+                hero_ids: account
+                    .buildings
+                    .hero_assignments
+                    .get(building_id)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|hero_id| u32::try_from(hero_id.get()).ok())
+                    .collect(),
                 status: 1,
                 last_update_time: i64::from(now),
                 last_build_update_time: i64::from(now),
@@ -708,6 +716,36 @@ pub(super) fn building_info_from_typed_account(
         electric_max: 100,
         worker_update_time: i64::from(now),
     }
+}
+
+pub(super) fn sync_typed_building_assignments(
+    account: &mut blueoath_domain::AccountState,
+    legacy: &Value,
+) -> bool {
+    let mut next = std::collections::BTreeMap::new();
+    if let Some(buildings) = legacy
+        .get("building")
+        .and_then(|building| building.get("buildings"))
+        .and_then(Value::as_array)
+    {
+        for building in buildings {
+            let Some(building_id) = json_i32(building, "id").and_then(|id| u64::try_from(id).ok())
+            else {
+                continue;
+            };
+            let hero_ids = json_i32_array(building, "heroIds")
+                .into_iter()
+                .filter_map(|id| u64::try_from(id).ok())
+                .filter_map(|id| blueoath_domain::HeroId::new(id).ok())
+                .collect::<Vec<_>>();
+            if !hero_ids.is_empty() {
+                next.insert(building_id, hero_ids);
+            }
+        }
+    }
+    let changed = account.buildings.hero_assignments != next;
+    account.buildings.hero_assignments = next;
+    changed
 }
 
 pub(super) fn fleet_info_from_account(account: &Value) -> FleetInfo {

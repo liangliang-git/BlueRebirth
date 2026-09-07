@@ -267,6 +267,8 @@ pub struct BuildingState {
     pub template_ids: BTreeMap<u64, u64>,
     #[serde(default)]
     pub land_indices: BTreeMap<u64, u32>,
+    #[serde(default)]
+    pub hero_assignments: BTreeMap<u64, Vec<HeroId>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -403,6 +405,21 @@ impl AccountState {
                         "equipment references missing hero",
                     ));
                 }
+            }
+        }
+        for (building_id, hero_ids) in &self.buildings.hero_assignments {
+            if !self.buildings.levels.contains_key(building_id) {
+                return Err(DomainError::InvalidState(
+                    "building assignment references missing building",
+                ));
+            }
+            if hero_ids
+                .iter()
+                .any(|hero_id| !self.dock.heroes.contains_key(hero_id))
+            {
+                return Err(DomainError::InvalidState(
+                    "building assignment references missing hero",
+                ));
             }
         }
         Ok(())

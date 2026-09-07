@@ -10,6 +10,7 @@ pub(crate) fn handle_typed(
     request_args: &[u8],
     now: u32,
     pre_pushes: &mut Vec<Vec<u8>>,
+    building_catalog: Option<&BuildingCatalog>,
 ) -> HandlerResult {
     match method {
         "building.UpdateBuildingInfo" => HandlerResult::Reply(Response::raw(
@@ -56,6 +57,23 @@ pub(crate) fn handle_typed(
             HandlerResult::PushOnly
         }
         "building.UpdateHeroAddition" => {
+            append_typed_building_refresh(pre_pushes, account, now);
+            HandlerResult::PushOnly
+        }
+        "building.SetHero" | "building.SetBuildingListHero" => {
+            let assignments = if method == "building.SetHero" {
+                vec![(
+                    decode_varint_field(request_args, 1),
+                    decode_repeated_i32_field(request_args, 2),
+                )]
+            } else {
+                decode_building_assignments(request_args)
+            };
+            if !set_typed_building_assignments(account, &assignments, building_catalog) {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "building assignment is invalid",
+                ));
+            }
             append_typed_building_refresh(pre_pushes, account, now);
             HandlerResult::PushOnly
         }
@@ -118,6 +136,80 @@ fn change_typed_building_level(
         return false;
     }
     *level = u32::try_from(next).unwrap_or(u32::MAX);
+    true
+}
+
+fn set_typed_building_assignments(
+    account: &mut blueoath_domain::AccountState,
+    assignments: &[(i32, Vec<i32>)],
+    catalog: Option<&BuildingCatalog>,
+) -> bool {
+    if assignments.is_empty() {
+        return false;
+    }
+    let mut moving = std::collections::BTreeSet::new();
+    let mut seen_buildings = std::collections::BTreeSet::new();
+    for (building_id, hero_ids) in assignments {
+        let Ok(building_id) = u64::try_from(*building_id) else {
+            return false;
+        };
+        if !seen_buildings.insert(building_id)
+            || !account.buildings.levels.contains_key(&building_id)
+        {
+            return false;
+        }
+        let template_id = account
+            .buildings
+            .template_ids
+            .get(&building_id)
+            .copied()
+            .unwrap_or_default();
+        let level = account
+            .buildings
+            .levels
+            .get(&building_id)
+            .copied()
+            .unwrap_or_default();
+        if hero_ids.len()
+            > building_capacity(
+                i32::try_from(template_id).unwrap_or_default(),
+                i32::try_from(level).unwrap_or_default(),
+                catalog,
+            )
+        {
+            return false;
+        }
+        for hero_id in hero_ids {
+            let Ok(hero_id) = u64::try_from(*hero_id) else {
+                return false;
+            };
+            let Some(hero_id) = blueoath_domain::HeroId::new(hero_id).ok() else {
+                return false;
+            };
+            if !account.dock.heroes.contains_key(&hero_id) || !moving.insert(hero_id) {
+                return false;
+            }
+        }
+    }
+    for hero_ids in account.buildings.hero_assignments.values_mut() {
+        hero_ids.retain(|hero_id| !moving.contains(hero_id));
+    }
+    for (building_id, hero_ids) in assignments {
+        let building_id = u64::try_from(*building_id).unwrap_or_default();
+        let converted = hero_ids
+            .iter()
+            .filter_map(|hero_id| u64::try_from(*hero_id).ok())
+            .filter_map(|hero_id| blueoath_domain::HeroId::new(hero_id).ok())
+            .collect();
+        account
+            .buildings
+            .hero_assignments
+            .insert(building_id, converted);
+    }
+    account
+        .buildings
+        .hero_assignments
+        .retain(|_, hero_ids| !hero_ids.is_empty());
     true
 }
 
