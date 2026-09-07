@@ -136,11 +136,6 @@ where
 
     let request = RequestContext::from(TMessageCodec::decode_request(&frame.payload)?);
     let request_args = request.args.as_slice();
-    if let (Some(typed), Some(legacy)) = (typed_account.as_deref_mut(), account_view) {
-        sync_typed_building_assignments(typed, legacy);
-        sync_typed_preset_fleet_state(typed, legacy);
-        sync_typed_daily_copy_state(typed, legacy, current_unix_seconds());
-    }
     if std::env::var_os("BLUEOATH_TRACE_METHODS").is_some() {
         eprintln!(
             "game-login method={} args={} hex={} f1={} f2={} f3={}",
