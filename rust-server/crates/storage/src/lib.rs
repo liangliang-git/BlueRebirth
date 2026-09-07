@@ -939,6 +939,35 @@ impl ProfileStore {
                 if let Ok(root) = progress_kind.parse::<u64>() {
                     account.talents.active.insert(root, value);
                 }
+            } else if activity_id == "sportsMeet" {
+                match progress_kind.as_str() {
+                    "tickCount" => {
+                        account.sports_meet.tick_count = u32::try_from(value).map_err(|_| {
+                            StorageError::InvalidTypedAccount(
+                                "sports meet tick count is too large".to_owned(),
+                            )
+                        })?;
+                    }
+                    "points" => account.sports_meet.points = value,
+                    key if key.starts_with("free:") => {
+                        if let Ok(copy_id) = key[5..].parse::<u64>() {
+                            account.sports_meet.free_counts.insert(
+                                copy_id,
+                                u32::try_from(value).map_err(|_| {
+                                    StorageError::InvalidTypedAccount(
+                                        "sports meet free count is too large".to_owned(),
+                                    )
+                                })?,
+                            );
+                        }
+                    }
+                    key if key.starts_with("received:") => {
+                        if let Ok(points) = key[9..].parse::<u64>() {
+                            account.sports_meet.received_points.insert(points);
+                        }
+                    }
+                    _ => {}
+                }
             } else {
                 account
                     .activities
@@ -1841,6 +1870,40 @@ impl ProfileStore {
                     profile.id.as_str(),
                     root.to_string(),
                     typed_i64(*active, "talent state")?,
+                    timestamp(),
+                ],
+            )?;
+        }
+        let mut sports_progress = vec![
+            (
+                "tickCount".to_owned(),
+                u64::from(account.sports_meet.tick_count),
+            ),
+            ("points".to_owned(), account.sports_meet.points),
+        ];
+        sports_progress.extend(
+            account
+                .sports_meet
+                .free_counts
+                .iter()
+                .map(|(copy_id, count)| (format!("free:{copy_id}"), u64::from(*count))),
+        );
+        sports_progress.extend(
+            account
+                .sports_meet
+                .received_points
+                .iter()
+                .map(|points| (format!("received:{points}"), 1)),
+        );
+        for (progress_kind, value) in sports_progress {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'sportsMeet', ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    progress_kind,
+                    typed_i64(value, "sports meet state")?,
                     timestamp(),
                 ],
             )?;

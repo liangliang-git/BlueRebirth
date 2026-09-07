@@ -889,21 +889,21 @@ where
         _ if method.is_family(MethodFamily::SportsMeet)
             || method.is_family(MethodFamily::SportsMeetRank) =>
         {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            let result = if let Some(typed) = typed_account.as_mut() {
+                let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
+                sportsmeet_handler::handle_typed(
+                    state,
+                    typed,
+                    catalog,
+                    request.method.as_str(),
+                    request_args,
+                    &mut pre_pushes,
+                )
+            } else {
+                HandlerResult::Error(GameError::InvalidRequest(
+                    "sports meet requires typed account",
+                ))
             };
-            let result =
-                sportsmeet_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -2386,8 +2386,6 @@ fn legacy_only_method(method: &str) -> bool {
             | MethodFamily::MatchServer
             | MethodFamily::Room
             | MethodFamily::ShipTask
-            | MethodFamily::SportsMeet
-            | MethodFamily::SportsMeetRank
             | MethodFamily::Bathroom
             | MethodFamily::Battle
             | MethodFamily::BattlePass

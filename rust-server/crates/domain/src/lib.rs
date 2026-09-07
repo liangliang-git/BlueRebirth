@@ -377,6 +377,14 @@ pub struct TalentState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SportsMeetState {
+    pub tick_count: u32,
+    pub free_counts: BTreeMap<u64, u32>,
+    pub points: u64,
+    pub received_points: BTreeSet<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TowerRewardState {
     pub reward_type: u32,
     pub config_id: u64,
@@ -479,6 +487,8 @@ pub struct AccountState {
     pub invite_score: InviteScoreState,
     #[serde(default)]
     pub talents: TalentState,
+    #[serde(default)]
+    pub sports_meet: SportsMeetState,
     #[serde(default)]
     pub tower: TowerState,
     #[serde(default)]

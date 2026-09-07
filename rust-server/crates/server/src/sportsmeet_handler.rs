@@ -1,54 +1,40 @@
-use serde_json::{json, Value};
-
+use super::catalog::GameplayCatalog;
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
-pub(super) fn handle<'state, 'account, 'scratch>(
-    context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+pub(super) fn handle_typed(
+    server_state: &ServerState,
+    account: &mut blueoath_domain::AccountState,
+    catalog: &GameplayCatalog,
     method: &str,
     request_args: &[u8],
+    pre_pushes: &mut Vec<Vec<u8>>,
 ) -> HandlerResult {
-    let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     match method {
-        "sportsmeet.GetSportsTickCount" => {
-            let Some(account) = context.account.as_deref() else {
-                return HandlerResult::Error(GameError::AccountUnavailable);
-            };
-            reply(method, tick_count_payload(account))
-        }
-        "sportsmeet.GetPointsRewardDetail" => {
-            let Some(account) = context.account.as_deref() else {
-                return HandlerResult::Error(GameError::AccountUnavailable);
-            };
-            reply(method, points_detail_payload(account))
-        }
+        "sportsmeet.GetSportsTickCount" => reply(method, tick_count_payload_typed(account)),
+        "sportsmeet.GetPointsRewardDetail" => reply(method, points_detail_payload_typed(account)),
         "sportsmeet.ReceivePointsReward" => {
             let points = decode_varint_field(request_args, 1);
-            if context.account.is_none() {
-                return HandlerResult::Error(GameError::AccountUnavailable);
-            }
-            reply(
+            receive_points_reward_typed(
+                server_state,
+                account,
+                catalog,
                 method,
-                receive_points_reward(context, catalog, Some(points.max(0))),
+                Some(points.max(0) as u64),
+                pre_pushes,
             )
         }
         "sportsmeet.ReceiveAllPointsReward" => {
-            if context.account.is_none() {
-                return HandlerResult::Error(GameError::AccountUnavailable);
-            }
-            reply(method, receive_points_reward(context, catalog, None))
+            receive_points_reward_typed(server_state, account, catalog, method, None, pre_pushes)
         }
-        "sportsmeetrank.GetOwnerRankData" => {
-            let Some(account) = context.account.as_deref() else {
-                return HandlerResult::Error(GameError::AccountUnavailable);
-            };
-            reply(method, owner_rank_payload(account))
-        }
-        "sportsmeetrank.GetAttackBeeRank" => rank_reply(context, method, RankKind::AttackBee),
-        "sportsmeetrank.GetTrackRank" => rank_reply(context, method, RankKind::Track),
-        "sportsmeetrank.GetSteeplechaseRank" => rank_reply(context, method, RankKind::Steeplechase),
-        _ => HandlerResult::Empty,
+        "sportsmeetrank.GetOwnerRankData" => reply(method, owner_rank_payload_typed(account)),
+        "sportsmeetrank.GetAttackBeeRank" => reply(method, rank_payload_typed(account, 2)),
+        "sportsmeetrank.GetTrackRank" => reply(method, rank_payload_typed(account, 2)),
+        "sportsmeetrank.GetSteeplechaseRank" => reply(method, rank_payload_typed(account, 2)),
+        _ => HandlerResult::Error(GameError::InvalidRequest(
+            "sports meet operation is not supported",
+        )),
     }
 }
 
@@ -56,118 +42,40 @@ fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
     HandlerResult::Reply(Response::raw(method, payload))
 }
 
-fn rank_reply(
-    context: &GameLoginRequestContext<'_, '_, '_>,
-    method: &str,
-    kind: RankKind,
-) -> HandlerResult {
-    let Some(account) = context.account.as_deref() else {
-        return HandlerResult::Error(GameError::AccountUnavailable);
-    };
-    reply(method, rank_payload(account, 2, kind))
-}
-
-fn sports_state_mut(account: &mut Value) -> &mut Value {
-    account
-        .as_object_mut()
-        .expect("account must be an object")
-        .entry("sportsMeet".to_owned())
-        .or_insert_with(|| {
-            json!({
-                "tickCount": 10,
-                "freeCounts": [],
-                "points": 0,
-                "receivedPoints": []
-            })
-        })
-}
-
-fn tick_count_payload(account: &Value) -> Vec<u8> {
-    let state = account.get("sportsMeet").unwrap_or(&Value::Null);
+fn tick_count_payload_typed(account: &blueoath_domain::AccountState) -> Vec<u8> {
     let mut output = Vec::new();
-    for row in state
-        .get("freeCounts")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
+    for (copy_id, free_count) in &account.sports_meet.free_counts {
         let mut encoded = Vec::new();
-        append_varint_field(
-            &mut encoded,
-            1,
-            json_i32(row, "copyId").unwrap_or_default().max(0) as u64,
-        );
-        append_varint_field(
-            &mut encoded,
-            2,
-            json_i32(row, "freeCount").unwrap_or_default().max(0) as u64,
-        );
+        append_varint_field(&mut encoded, 1, *copy_id);
+        append_varint_field(&mut encoded, 2, u64::from(*free_count));
         append_message_field(&mut output, 1, &encoded);
     }
-    append_varint_field(
-        &mut output,
-        2,
-        state
-            .get("tickCount")
-            .and_then(Value::as_i64)
-            .unwrap_or_default()
-            .max(0) as u64,
-    );
+    append_varint_field(&mut output, 2, u64::from(account.sports_meet.tick_count));
     output
 }
 
-fn points_detail_payload(account: &Value) -> Vec<u8> {
-    let state = account.get("sportsMeet").unwrap_or(&Value::Null);
+fn points_detail_payload_typed(account: &blueoath_domain::AccountState) -> Vec<u8> {
     let mut output = Vec::new();
-    append_varint_field(
-        &mut output,
-        1,
-        state
-            .get("points")
-            .and_then(Value::as_i64)
-            .unwrap_or_default()
-            .max(0) as u64,
-    );
-    for point in state
-        .get("receivedPoints")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_i64)
-    {
-        append_varint_field(&mut output, 2, point.max(0) as u64);
+    append_varint_field(&mut output, 1, account.sports_meet.points);
+    for points in &account.sports_meet.received_points {
+        append_varint_field(&mut output, 2, *points);
     }
     output
 }
 
-fn receive_points_reward<'state, 'account, 'scratch>(
-    context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+fn receive_points_reward_typed(
+    server_state: &ServerState,
+    account: &mut blueoath_domain::AccountState,
     catalog: &GameplayCatalog,
-    requested_points: Option<i32>,
-) -> Vec<u8> {
-    let Some(account) = context.account.as_deref_mut() else {
-        return encode_rewards_list(&[]);
-    };
-    let total_points = account
-        .get("sportsMeet")
-        .and_then(|state| state.get("points"))
-        .and_then(Value::as_i64)
-        .unwrap_or_default()
-        .clamp(0, i64::from(i32::MAX)) as i32;
-    let received = account
-        .get("sportsMeet")
-        .and_then(|state| state.get("receivedPoints"))
-        .and_then(Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(Value::as_i64)
-                .filter_map(|value| i32::try_from(value).ok())
-                .collect::<std::collections::HashSet<_>>()
-        })
-        .unwrap_or_default();
+    method: &str,
+    requested_points: Option<u64>,
+    pre_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
     let points_to_receive = if let Some(points) = requested_points {
-        if points <= 0 || points > total_points || received.contains(&points) {
+        if points == 0
+            || points > account.sports_meet.points
+            || account.sports_meet.received_points.contains(&points)
+        {
             Vec::new()
         } else {
             vec![points]
@@ -177,15 +85,16 @@ fn receive_points_reward<'state, 'account, 'scratch>(
             .sportsmeet_awards
             .values()
             .filter_map(|row| json_i32(row, "score"))
-            .filter(|score| *score > 0 && *score <= total_points && !received.contains(score))
+            .filter_map(|score| u64::try_from(score).ok())
+            .filter(|score| {
+                *score <= account.sports_meet.points
+                    && !account.sports_meet.received_points.contains(score)
+            })
             .collect::<Vec<_>>();
         points.sort_unstable();
         points.dedup();
         points
     };
-    if points_to_receive.is_empty() {
-        return encode_rewards_list(&[]);
-    }
     let configured = points_to_receive
         .into_iter()
         .filter_map(|points| {
@@ -193,46 +102,50 @@ fn receive_points_reward<'state, 'account, 'scratch>(
             (!rewards.is_empty()).then_some((points, rewards))
         })
         .collect::<Vec<_>>();
-    if configured.is_empty() {
-        return encode_rewards_list(&[]);
+    let all_rewards = configured
+        .iter()
+        .flat_map(|(_, rewards)| rewards.iter().copied())
+        .collect::<Vec<_>>();
+    if all_rewards.is_empty() || !can_grant_typed_task_rewards(account, &all_rewards) {
+        return reply(method, encode_rewards_list(&[]));
     }
-    let state = sports_state_mut(account);
-    let received_points = state
-        .get_mut("receivedPoints")
-        .and_then(Value::as_array_mut)
-        .expect("received sports points array");
-    for (points, _) in &configured {
-        received_points.push(json!(points));
+    let points = configured
+        .iter()
+        .map(|(points, _)| *points)
+        .collect::<Vec<_>>();
+    for point in points {
+        account.sports_meet.received_points.insert(point);
     }
     let mut rewards = Vec::new();
-    for (_, configured_rewards) in configured {
-        rewards.extend(configured_rewards.into_iter().map(|reward| {
-            grant_reward(
-                account,
-                reward,
-                current_unix_seconds(),
-                context.catalogs.fashion,
-            )
-        }));
+    for reward in all_rewards {
+        if grant_typed_task_reward(account, &reward) {
+            rewards.push(reward);
+        } else {
+            return HandlerResult::Error(GameError::InvalidState(
+                "sports meet reward could not be granted",
+            ));
+        }
     }
     append_method_push(
-        context.pre_pushes,
+        pre_pushes,
         "user.UpdateUserInfo",
-        UserInfoCodec::encode(&user_info_from_account(context.state, Some(account))),
+        UserInfoCodec::encode(&user_info_from_typed_account(server_state, account)),
     );
     append_method_push(
-        context.pre_pushes,
+        pre_pushes,
         "bag.UpdateBagData",
-        BagInfoCodec::encode(&bag_info_from_account(account)),
+        BagInfoCodec::encode(&bag_info_from_typed_account(account)),
     );
-    encode_rewards_list(&rewards)
+    reply(method, encode_rewards_list(&rewards))
 }
 
-fn sportsmeet_rewards(catalog: &GameplayCatalog, points: i32) -> Vec<ShopReward> {
+fn sportsmeet_rewards(catalog: &GameplayCatalog, points: u64) -> Vec<ShopReward> {
     catalog
         .sportsmeet_awards
         .values()
-        .find(|row| json_i32(row, "score") == Some(points))
+        .find(|row| {
+            json_i32(row, "score").and_then(|value| u64::try_from(value).ok()) == Some(points)
+        })
         .and_then(|row| {
             json_i32(row, "rewards")
                 .or_else(|| json_i32(row, "reward"))
@@ -242,88 +155,42 @@ fn sportsmeet_rewards(catalog: &GameplayCatalog, points: i32) -> Vec<ShopReward>
         .unwrap_or_default()
 }
 
-fn owner_rank_payload(account: &Value) -> Vec<u8> {
+fn owner_rank_payload_typed(_account: &blueoath_domain::AccountState) -> Vec<u8> {
     let mut output = Vec::new();
-    append_message_field(&mut output, 1, &owner_rank_node(1, 0, 0));
-    append_message_field(&mut output, 2, &owner_rank_node(1, 0, 0));
-    append_message_field(&mut output, 3, &owner_rank_node(1, 0, 0));
-    let _ = account;
+    for _ in 0..3 {
+        append_message_field(&mut output, 1, &owner_rank_node(1, 0, 0));
+    }
     output
 }
 
-fn owner_rank_node(rank: i32, score: i32, copy_id: i32) -> Vec<u8> {
+fn owner_rank_node(rank: u64, score: u64, copy_id: u64) -> Vec<u8> {
     let mut output = Vec::new();
-    append_varint_field(&mut output, 1, rank.max(0) as u64);
-    append_varint_field(&mut output, 2, score.max(0) as u64);
-    append_varint_field(&mut output, 3, copy_id.max(0) as u64);
+    append_varint_field(&mut output, 1, rank);
+    append_varint_field(&mut output, 2, score);
+    append_varint_field(&mut output, 3, copy_id);
     output
 }
 
-#[derive(Clone, Copy)]
-enum RankKind {
-    AttackBee,
-    Track,
-    Steeplechase,
-}
-
-fn rank_payload(account: &Value, rank: i32, kind: RankKind) -> Vec<u8> {
-    let uid = account
-        .get("character")
-        .and_then(|value| json_u64(value, "uid"))
-        .unwrap_or(1);
-    let mut node = Vec::new();
-    append_varint_field(&mut node, 1, uid);
-    append_varint_field(&mut node, 2, 0);
-    append_varint_field(&mut node, 3, rank.max(0) as u64);
+fn rank_payload_typed(account: &blueoath_domain::AccountState, rank: u64) -> Vec<u8> {
+    let node = owner_rank_node(account.character.uid, 0, rank);
     let mut output = Vec::new();
     append_message_field(&mut output, 1, &node);
     append_message_field(&mut output, 2, &node);
-    let _ = kind;
     output
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::common::response::HandlerResult;
-
     use super::*;
 
     #[test]
-    fn handler_exposes_typed_result() {
-        let _: for<'state, 'account, 'scratch> fn(
-            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
-            &str,
-            &[u8],
-        ) -> HandlerResult = handle;
-    }
-
-    #[test]
-    fn points_reward_is_idempotent() {
-        let mut account =
-            json!({"sportsMeet": {"points": 20, "receivedPoints": []}, "character": {"gold": 0}});
+    fn typed_sports_rewards_are_idempotent() {
         let state = ServerState::new("sports", "Captain", "1.4.0");
-        let mut pre = Vec::new();
-        let mut post = Vec::new();
-        let mut handler_error = None;
-        let mut details = None;
-        let mut rewards = Vec::new();
-        let mut hero_ids = Vec::new();
-        let mut mvp = None;
-        let mut wrecked = std::collections::HashSet::new();
-        let mut account_slot = Some(&mut account);
-        let mut ctx = GameLoginRequestContext {
-            state: &state,
-            account: &mut account_slot,
-            catalogs: GameLoginCatalogs::empty(),
-            pre_pushes: &mut pre,
-            post_pushes: &mut post,
-            handler_error: &mut handler_error,
-            pass_details: &mut details,
-            pass_rewards: &mut rewards,
-            pass_hero_ids: &mut hero_ids,
-            pass_mvp_hero_id: &mut mvp,
-            pass_shipwrecked_ids: &mut wrecked,
-        };
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("sports").unwrap(),
+            "Sports",
+        );
+        account.sports_meet.points = 20;
         let mut catalog = GameplayCatalog::default();
         catalog
             .sportsmeet_awards
@@ -337,9 +204,29 @@ mod tests {
                 instance_id: 0,
             }],
         );
-        let first = receive_points_reward(&mut ctx, &catalog, Some(20));
-        assert!(!first.is_empty());
-        let second = receive_points_reward(&mut ctx, &catalog, Some(20));
-        assert!(second.is_empty());
+        let mut pushes = Vec::new();
+        assert!(matches!(
+            handle_typed(
+                &state,
+                &mut account,
+                &catalog,
+                "sportsmeet.ReceivePointsReward",
+                &[8, 20],
+                &mut pushes,
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert!(account.sports_meet.received_points.contains(&20));
+        assert!(matches!(
+            handle_typed(
+                &state,
+                &mut account,
+                &catalog,
+                "sportsmeet.ReceivePointsReward",
+                &[8, 20],
+                &mut pushes,
+            ),
+            HandlerResult::Reply(_)
+        ));
     }
 }
