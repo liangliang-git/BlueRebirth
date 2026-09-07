@@ -930,6 +930,24 @@ impl ProfileStore {
         })? {
             account.chat.barrages.push(row?);
         }
+        let mut statement = connection.prepare(
+            "SELECT activity_id, progress_kind, value
+             FROM activity_progress WHERE profile_id = ?1
+             ORDER BY activity_id, progress_kind",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })? {
+            let (activity_id, progress_kind, value) = row?;
+            account.activities.progress.insert(
+                format!("{activity_id}\u{1f}{progress_kind}"),
+                non_negative_u64(value, "activity progress")?,
+            );
+        }
         account
             .validate()
             .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
@@ -1516,6 +1534,21 @@ impl ProfileStore {
                     ],
                 )?;
             }
+        }
+        for (key, value) in &account.activities.progress {
+            let (activity_id, progress_kind) = key.split_once('\u{1f}').unwrap_or((key, "value"));
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    profile.id.as_str(),
+                    activity_id,
+                    progress_kind,
+                    typed_i64(*value, "activity progress")?,
+                    timestamp(),
+                ],
+            )?;
         }
         transaction.execute(
             "INSERT INTO account_revisions(profile_id, revision, updated_utc)

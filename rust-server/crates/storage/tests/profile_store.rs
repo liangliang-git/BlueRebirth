@@ -419,6 +419,10 @@ fn typed_repository_transaction_commits_domain_mutation() {
         .inventory
         .items
         .insert(TemplateId::new(30001).unwrap(), 17);
+    account
+        .activities
+        .progress
+        .insert("spring\u{1f}merits".to_owned(), 33);
     account.battle.active = Some(BattleSession {
         chapter_id: ChapterId::new(3).unwrap(),
         copy_id: CopyId::new(300).unwrap(),
@@ -483,6 +487,10 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(
         loaded.inventory.items.get(&TemplateId::new(30001).unwrap()),
         Some(&17)
+    );
+    assert_eq!(
+        loaded.activities.progress.get("spring\u{1f}merits"),
+        Some(&33)
     );
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
