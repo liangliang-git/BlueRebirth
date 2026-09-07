@@ -1,9 +1,12 @@
 #![allow(dead_code)]
 
-use serde_json::{json, Value};
+#[cfg(test)]
+use serde_json::json;
+use serde_json::Value;
 
 use super::*;
 
+#[cfg(test)]
 pub(super) fn study_skill_state(account: &mut Value, hero_id: u64, skill_id: i32) -> bool {
     if hero_id == 0 || skill_id <= 0 {
         return false;
@@ -42,6 +45,7 @@ pub(super) fn study_skill_state(account: &mut Value, hero_id: u64, skill_id: i32
 
 /// TStopStudyPSkillArg contains only HeroId. Resolve the active study row so
 /// CancelStudyPSkill and EndStudyPSkill operate on the client protocol shape.
+#[cfg(test)]
 pub(super) fn resolve_study_skill_id(
     account: &Value,
     hero_id: u64,
@@ -101,6 +105,7 @@ pub(super) fn study_info_payload(account: &Value, now: u32) -> Vec<u8> {
     out
 }
 
+#[cfg(test)]
 pub(super) fn start_study_state(
     account: &mut Value,
     hero_id: u64,
