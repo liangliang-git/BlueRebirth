@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
 use thiserror::Error;
@@ -77,6 +77,21 @@ fn decode_repeated_message_fields(
         }
     }
     Ok(messages)
+}
+
+fn decode_coop_hero_ids(payload: &[u8]) -> Result<Vec<u64>, ProtocolError> {
+    let mut hero_ids = Vec::new();
+    for list in decode_repeated_message_fields(payload, 4)? {
+        let fields = decode_varint_fields(&list)?;
+        hero_ids.extend(fields.get(&1).into_iter().flatten().copied());
+    }
+    if hero_ids.len() > 6
+        || hero_ids.contains(&0)
+        || hero_ids.iter().collect::<BTreeSet<_>>().len() != hero_ids.len()
+    {
+        return Err(ProtocolError::Invalid("co-op hero list is invalid"));
+    }
+    Ok(hero_ids)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2005,6 +2020,145 @@ impl Decode for ActivityExtractDrawRequest {
             ));
         }
         Ok(Self { draw_id, num })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoopRoomIdRequest {
+    pub room_id: u64,
+}
+
+impl Decode for CoopRoomIdRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let room_id = required_u64(&fields, 1, "co-op is missing room id")?;
+        if room_id == 0 {
+            return Err(ProtocolError::Invalid("co-op room id is invalid"));
+        }
+        Ok(Self { room_id })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoopCreateRoomRequest {
+    pub copy_id: i32,
+    pub hero_ids: Vec<u64>,
+}
+
+impl Decode for CoopCreateRoomRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let copy_id = required_field(&fields, 2, "co-op is missing copy id")?;
+        let hero_ids = decode_coop_hero_ids(payload)?;
+        if copy_id <= 0 || hero_ids.is_empty() {
+            return Err(ProtocolError::Invalid("co-op create request is invalid"));
+        }
+        Ok(Self { copy_id, hero_ids })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoopRoomHeroesRequest {
+    pub room_id: u64,
+    pub hero_ids: Vec<u64>,
+}
+
+impl Decode for CoopRoomHeroesRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let room_id = required_u64(&fields, 1, "co-op is missing room id")?;
+        if room_id == 0 {
+            return Err(ProtocolError::Invalid("co-op room id is invalid"));
+        }
+        Ok(Self {
+            room_id,
+            hero_ids: decode_coop_hero_ids(payload)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoopKickRequest {
+    pub room_id: u64,
+    pub kicked_uid: u64,
+}
+
+impl Decode for CoopKickRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let room_id = required_u64(&fields, 1, "co-op is missing room id")?;
+        let kicked_uid = required_u64(&fields, 3, "co-op is missing kicked uid")?;
+        if room_id == 0 || kicked_uid == 0 {
+            return Err(ProtocolError::Invalid("co-op kick request is invalid"));
+        }
+        Ok(Self {
+            room_id,
+            kicked_uid,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoopChangeChapterRequest {
+    pub room_id: u64,
+    pub copy_id: i32,
+}
+
+impl Decode for CoopChangeChapterRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let room_id = required_u64(&fields, 1, "co-op is missing room id")?;
+        let copy_id = required_field(&fields, 2, "co-op is missing copy id")?;
+        if room_id == 0 || copy_id <= 0 {
+            return Err(ProtocolError::Invalid("co-op chapter request is invalid"));
+        }
+        Ok(Self { room_id, copy_id })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoopPasswordRequest {
+    pub room_id: u64,
+    pub password: u64,
+}
+
+impl Decode for CoopPasswordRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let room_id = required_u64(&fields, 1, "co-op is missing room id")?;
+        let password = optional_u64(&fields, 2, "co-op password has duplicate value")?;
+        if room_id == 0 {
+            return Err(ProtocolError::Invalid("co-op room id is invalid"));
+        }
+        Ok(Self { room_id, password })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoopMatchTypeRequest {
+    pub match_type: i32,
+}
+
+impl Decode for CoopMatchTypeRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            match_type: optional_i32(&fields, 1, "match type has duplicate value")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BattleAutoMessageRequest {
+    pub message_id: i32,
+}
+
+impl Decode for BattleAutoMessageRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            message_id: optional_i32(&fields, 1, "battle auto message has duplicate id")?,
+        })
     }
 }
 

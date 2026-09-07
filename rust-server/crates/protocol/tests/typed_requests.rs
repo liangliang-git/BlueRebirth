@@ -1,7 +1,9 @@
 use blueoath_protocol::{
-    ActivityExtractDrawRequest, BigActivityRankRequest, BirthdayFeedRequest, BuildShipRequest,
-    BuildShipRewardRequest, ChangeNameRequest, ChangeWorldChannelRequest, CopyAttackRequest,
-    CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
+    ActivityExtractDrawRequest, BattleAutoMessageRequest, BigActivityRankRequest,
+    BirthdayFeedRequest, BuildShipRequest, BuildShipRewardRequest, ChangeNameRequest,
+    ChangeWorldChannelRequest, CoopChangeChapterRequest, CoopCreateRoomRequest, CoopKickRequest,
+    CoopMatchTypeRequest, CoopPasswordRequest, CoopRoomHeroesRequest, CoopRoomIdRequest,
+    CopyAttackRequest, CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
     DailyCopySelectExRequest, Decode, FriendSearchRequest, FriendTargetRequest,
     GetBarrageByIdRequest, GuildActivityPresentRequest, GuildBoxAnonymousRequest,
     GuildBoxIdRequest, GuildTaskDonateRequest, GuildTaskIdRequest, GuildTaskMemberRequest,
@@ -351,6 +353,59 @@ fn decodes_typed_activity_requests() {
     assert_eq!(
         ActivityExtractDrawRequest::decode(&[0x08, 7, 0x10, 2]).unwrap(),
         ActivityExtractDrawRequest { draw_id: 7, num: 2 }
+    );
+}
+
+#[test]
+fn decodes_typed_coop_requests() {
+    let create = [0x10, 9, 0x22, 4, 0x08, 1, 0x08, 2];
+    assert_eq!(
+        CoopCreateRoomRequest::decode(&create).unwrap(),
+        CoopCreateRoomRequest {
+            copy_id: 9,
+            hero_ids: vec![1, 2],
+        }
+    );
+    let room_heroes = [0x08, 7, 0x22, 2, 0x08, 1];
+    assert_eq!(
+        CoopRoomHeroesRequest::decode(&room_heroes).unwrap(),
+        CoopRoomHeroesRequest {
+            room_id: 7,
+            hero_ids: vec![1],
+        }
+    );
+    assert_eq!(
+        CoopRoomIdRequest::decode(&[0x08, 7]).unwrap(),
+        CoopRoomIdRequest { room_id: 7 }
+    );
+    assert_eq!(
+        CoopKickRequest::decode(&[0x08, 7, 0x18, 9]).unwrap(),
+        CoopKickRequest {
+            room_id: 7,
+            kicked_uid: 9,
+        }
+    );
+    assert_eq!(
+        CoopChangeChapterRequest::decode(&[0x08, 7, 0x10, 9]).unwrap(),
+        CoopChangeChapterRequest {
+            room_id: 7,
+            copy_id: 9,
+        }
+    );
+    assert_eq!(
+        CoopPasswordRequest::decode(&[0x08, 7, 0x10, 3]).unwrap(),
+        CoopPasswordRequest {
+            room_id: 7,
+            password: 3,
+        }
+    );
+    assert_eq!(
+        CoopMatchTypeRequest::decode(&[0x08, 2]).unwrap(),
+        CoopMatchTypeRequest { match_type: 2 }
+    );
+    assert_eq!(
+        BattleAutoMessageRequest::decode(&[0x08, 4]).unwrap(),
+        BattleAutoMessageRequest { message_id: 4 }
     );
 }
 

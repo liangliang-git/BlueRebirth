@@ -46,9 +46,11 @@ fn battle_create_multi_ret(battle_port: u16, battle_id: u64, request_args: &[u8]
     output
 }
 
+#[cfg(test)]
 const ROOM_ID_FIELD: u8 = 1;
+#[cfg(test)]
 const COPY_ID_FIELD: u8 = 2;
-const KICKED_UID_FIELD: u8 = 3;
+#[cfg(test)]
 const HERO_LIST_FIELD: u8 = 4;
 
 pub(super) fn handles_typed(method: &str) -> bool {
@@ -74,11 +76,12 @@ pub(super) fn handle_typed(
     drain_shared_pushes(state, uid, post_pushes);
     match method {
         "matchsvr.CreateRoom" => {
-            let copy_id = decode_varint_field(request_args, COPY_ID_FIELD);
-            if copy_id <= 0 {
-                return HandlerResult::Error(GameError::InvalidRequest("co-op copy is invalid"));
-            }
-            let Some(hero_ids) = typed_coop_hero_ids(account, request_args, true) else {
+            let Ok(request) = CoopCreateRoomRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "co-op create request is invalid",
+                ));
+            };
+            let Some(hero_ids) = typed_coop_hero_ids(account, &request.hero_ids, true) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "co-op hero list is invalid",
                 ));
@@ -97,7 +100,7 @@ pub(super) fn handle_typed(
             }
             let room = TypedCoopRoom {
                 room_id,
-                copy_id,
+                copy_id: request.copy_id,
                 owner_id: uid,
                 is_public: true,
                 capacity: 2,
@@ -111,8 +114,13 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, payload))
         }
         "matchsvr.EnterRoom" => {
-            let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
-            let Some(hero_ids) = typed_coop_hero_ids(account, request_args, false) else {
+            let Ok(request) = CoopRoomHeroesRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "co-op room request is invalid",
+                ));
+            };
+            let room_id = request.room_id;
+            let Some(hero_ids) = typed_coop_hero_ids(account, &request.hero_ids, false) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "co-op hero list is invalid",
                 ));
@@ -145,7 +153,10 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, payload))
         }
         "matchsvr.ExitRoom" | "matchsvr.DismissRoom" | "matchsvr.Leave" => {
-            let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
+            let Ok(request) = CoopRoomIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest("co-op room id is invalid"));
+            };
+            let room_id = request.room_id;
             let mut shared = match state.shared_social.lock() {
                 Ok(shared) => shared,
                 Err(_) => {
@@ -168,7 +179,10 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "matchsvr.Ready" | "matchsvr.Cancel" => {
-            let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
+            let Ok(request) = CoopRoomIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest("co-op room id is invalid"));
+            };
+            let room_id = request.room_id;
             let mut shared = match state.shared_social.lock() {
                 Ok(shared) => shared,
                 Err(_) => {
@@ -190,8 +204,13 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "matchsvr.Kick" => {
-            let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
-            let kicked_uid = decode_varint_u64_field(request_args, KICKED_UID_FIELD);
+            let Ok(request) = CoopKickRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "co-op kick request is invalid",
+                ));
+            };
+            let room_id = request.room_id;
+            let kicked_uid = request.kicked_uid;
             let mut shared = match state.shared_social.lock() {
                 Ok(shared) => shared,
                 Err(_) => {
@@ -213,8 +232,13 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "matchsvr.UploadTactic" | "matchsvr.Deliver" => {
-            let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
-            let Some(hero_ids) = typed_coop_hero_ids(account, request_args, false) else {
+            let Ok(request) = CoopRoomHeroesRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "co-op room request is invalid",
+                ));
+            };
+            let room_id = request.room_id;
+            let Some(hero_ids) = typed_coop_hero_ids(account, &request.hero_ids, false) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "co-op hero list is invalid",
                 ));
@@ -240,7 +264,12 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "matchsvr.SendSetPassWord" => {
-            let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
+            let Ok(request) = CoopPasswordRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "co-op password request is invalid",
+                ));
+            };
+            let room_id = request.room_id;
             let mut shared = match state.shared_social.lock() {
                 Ok(shared) => shared,
                 Err(_) => {
@@ -255,11 +284,14 @@ pub(super) fn handle_typed(
             if !room.users.iter().any(|user| user.uid == uid) {
                 return HandlerResult::Error(GameError::InvalidState("user is not in co-op room"));
             }
-            room.password = decode_varint_u64_field(request_args, 2);
+            room.password = request.password;
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "matchsvr.GetChapterInfo" => {
-            let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
+            let Ok(request) = CoopRoomIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest("co-op room id is invalid"));
+            };
+            let room_id = request.room_id;
             let shared = match state.shared_social.lock() {
                 Ok(shared) => shared,
                 Err(_) => {
@@ -293,7 +325,10 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, output))
         }
         "matchsvr.SwitchRoomPublicState" => {
-            let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
+            let Ok(request) = CoopRoomIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest("co-op room id is invalid"));
+            };
+            let room_id = request.room_id;
             let mut shared = match state.shared_social.lock() {
                 Ok(shared) => shared,
                 Err(_) => {
@@ -317,12 +352,25 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "matchsvr.Start" | "room.StartMatch" => {
-            typed_coop_set_state(state, uid, request_args, 1, method)
+            let Ok(request) = CoopRoomIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest("co-op room id is invalid"));
+            };
+            typed_coop_set_state(state, uid, request.room_id, 1, method)
         }
-        "room.StopMatch" => typed_coop_set_state(state, uid, request_args, 0, method),
+        "room.StopMatch" => {
+            let Ok(request) = CoopRoomIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest("co-op room id is invalid"));
+            };
+            typed_coop_set_state(state, uid, request.room_id, 0, method)
+        }
         "matchsvr.ChangeChapter" => {
-            let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
-            let copy_id = decode_varint_field(request_args, COPY_ID_FIELD);
+            let Ok(request) = CoopChangeChapterRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "co-op chapter request is invalid",
+                ));
+            };
+            let room_id = request.room_id;
+            let copy_id = request.copy_id;
             let mut shared = match state.shared_social.lock() {
                 Ok(shared) => shared,
                 Err(_) => {
@@ -343,12 +391,23 @@ pub(super) fn handle_typed(
             enqueue_typed_room_push(&mut shared, &users, uid, payload);
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
-        "matchsvr.CancelFocus" => typed_coop_set_focus(state, uid, request_args, false, method),
+        "matchsvr.CancelFocus" => {
+            let Ok(request) = CoopRoomIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest("co-op room id is invalid"));
+            };
+            typed_coop_set_focus(state, uid, request.room_id, false, method)
+        }
         "matchsvr.SetAutoReady" => {
-            typed_coop_set_auto_ready(state, uid, request_args, true, method)
+            let Ok(request) = CoopRoomIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest("co-op room id is invalid"));
+            };
+            typed_coop_set_auto_ready(state, uid, request.room_id, true, method)
         }
         "matchsvr.CancelAutoReady" => {
-            typed_coop_set_auto_ready(state, uid, request_args, false, method)
+            let Ok(request) = CoopRoomIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest("co-op room id is invalid"));
+            };
+            typed_coop_set_auto_ready(state, uid, request.room_id, false, method)
         }
         "battle.CreateRoom" => {
             let now = current_unix_seconds();
@@ -372,7 +431,12 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, battle_room_ret(room_id)))
         }
         "battle.JoinRoom" => {
-            let room_id = decode_varint_u64_field(request_args, ROOM_ID_FIELD);
+            let Ok(request) = CoopRoomIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "battle room id is invalid",
+                ));
+            };
+            let room_id = request.room_id;
             let mut shared = match state.shared_social.lock() {
                 Ok(shared) => shared,
                 Err(_) => {
@@ -420,7 +484,12 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "battle.MatchJoin" => {
-            let match_type = decode_varint_field(request_args, 1).max(0) as u32;
+            let Ok(request) = CoopMatchTypeRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "battle match request is invalid",
+                ));
+            };
+            let match_type = request.match_type.max(0) as u32;
             let mut shared = match state.shared_social.lock() {
                 Ok(shared) => shared,
                 Err(_) => {
@@ -454,7 +523,12 @@ pub(super) fn handle_typed(
             }
         }
         "battle.MatchLeave" => {
-            let match_type = decode_varint_field(request_args, 1).max(0) as u32;
+            let Ok(request) = CoopMatchTypeRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "battle match request is invalid",
+                ));
+            };
+            let match_type = request.match_type.max(0) as u32;
             if let Ok(mut shared) = state.shared_social.lock() {
                 shared
                     .typed_match_queue
@@ -463,7 +537,12 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "battle.SendAutoMsg" => {
-            let msg_id = decode_varint_field(request_args, 1).max(0);
+            let Ok(request) = BattleAutoMessageRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "battle auto message request is invalid",
+                ));
+            };
+            let msg_id = request.message_id.max(0);
             let payload = battle_auto_msg_payload(uid, msg_id);
             if let Ok(mut shared) = state.shared_social.lock() {
                 let recipients = shared
@@ -651,10 +730,9 @@ fn typed_coop_user(
 
 fn typed_coop_hero_ids(
     account: &blueoath_domain::AccountState,
-    payload: &[u8],
+    ids: &[u64],
     require_non_empty: bool,
 ) -> Option<Vec<i32>> {
-    let ids = decode_pve_hero_ids(payload);
     if ids.is_empty() && !require_non_empty {
         return Some(
             account
@@ -673,7 +751,7 @@ fn typed_coop_hero_ids(
                 .unwrap_or_default(),
         );
     }
-    if ids.len() > 6 || ids.iter().any(|id| *id <= 0) {
+    if ids.len() > 6 || ids.contains(&0) {
         return None;
     }
     let mut seen = std::collections::BTreeSet::new();
@@ -681,14 +759,12 @@ fn typed_coop_hero_ids(
         return None;
     }
     ids.iter()
-        .all(|id| {
-            account
-                .dock
-                .heroes
-                .keys()
-                .any(|hero| hero.get() == *id as u64)
+        .all(|id| account.dock.heroes.keys().any(|hero| hero.get() == *id))
+        .then(|| {
+            ids.iter()
+                .filter_map(|id| i32::try_from(*id).ok())
+                .collect()
         })
-        .then_some(ids)
 }
 
 pub(crate) fn typed_coop_room_payload(room: &TypedCoopRoom) -> Vec<u8> {
@@ -740,11 +816,10 @@ fn enqueue_typed_room_push(
 fn typed_coop_set_state(
     state: &ServerState,
     uid: u64,
-    payload: &[u8],
+    room_id: u64,
     next_state: u32,
     method: &str,
 ) -> HandlerResult {
-    let room_id = decode_varint_u64_field(payload, ROOM_ID_FIELD);
     let mut shared = match state.shared_social.lock() {
         Ok(shared) => shared,
         Err(_) => {
@@ -767,11 +842,10 @@ fn typed_coop_set_state(
 fn typed_coop_set_focus(
     state: &ServerState,
     uid: u64,
-    payload: &[u8],
+    room_id: u64,
     focus: bool,
     method: &str,
 ) -> HandlerResult {
-    let room_id = decode_varint_u64_field(payload, ROOM_ID_FIELD);
     let mut shared = match state.shared_social.lock() {
         Ok(shared) => shared,
         Err(_) => {
@@ -791,11 +865,10 @@ fn typed_coop_set_focus(
 fn typed_coop_set_auto_ready(
     state: &ServerState,
     uid: u64,
-    payload: &[u8],
+    room_id: u64,
     auto_ready: bool,
     method: &str,
 ) -> HandlerResult {
-    let room_id = decode_varint_u64_field(payload, ROOM_ID_FIELD);
     let mut shared = match state.shared_social.lock() {
         Ok(shared) => shared,
         Err(_) => {
@@ -858,15 +931,6 @@ fn drain_shared_pushes(state: &ServerState, uid: u64, pushes: &mut Vec<Vec<u8>>)
     for (method, payload) in pending {
         append_method_push(pushes, &method, payload);
     }
-}
-
-fn decode_pve_hero_ids(payload: &[u8]) -> Vec<i32> {
-    decode_repeated_message_field(payload, HERO_LIST_FIELD)
-        .into_iter()
-        .flat_map(|list| decode_repeated_varint_field(&list, 1))
-        .filter(|id| *id > 0)
-        .take(6)
-        .collect()
 }
 
 #[cfg(test)]
