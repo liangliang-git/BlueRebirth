@@ -3,7 +3,7 @@ use super::super::config::{
     TypedCoopUser, TypedMatchQueueEntry,
 };
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 fn battle_room_ret(room_id: u64) -> Vec<u8> {
     let mut output = Vec::new();
@@ -65,14 +65,14 @@ pub(super) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
-    post_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let Some(method) = canonical_typed_method(method) else {
         return HandlerResult::Empty;
     };
     let now = current_unix_seconds();
     let uid = account.character.uid.max(1);
-    drain_shared_pushes(state, uid, post_pushes);
+    drain_shared_pushes(state, uid, effects);
     match method {
         "matchsvr.CreateRoom" => {
             let Ok(request) = CoopCreateRoomRequest::decode(request_args) else {
@@ -559,7 +559,7 @@ pub(super) fn handle_typed(
                     );
                 }
             }
-            append_method_push(post_pushes, "battle.receiveAutoMsg", payload);
+            effects.push_post(Response::raw("battle.receiveAutoMsg", payload));
             let mut response = Vec::new();
             append_varint_field(&mut response, 1, 0);
             HandlerResult::Reply(Response::raw(method, response))
@@ -921,7 +921,7 @@ fn enqueue_shared_push(
     });
 }
 
-fn drain_shared_pushes(state: &ServerState, uid: u64, pushes: &mut Vec<Vec<u8>>) {
+fn drain_shared_pushes(state: &ServerState, uid: u64, effects: &mut ResponseEffects) {
     let pending = state
         .shared_social
         .lock()
@@ -929,7 +929,7 @@ fn drain_shared_pushes(state: &ServerState, uid: u64, pushes: &mut Vec<Vec<u8>>)
         .and_then(|mut shared| shared.pending_pushes.remove(&uid))
         .unwrap_or_default();
     for (method, payload) in pending {
-        append_method_push(pushes, &method, payload);
+        effects.push_post(Response::raw(method, payload));
     }
 }
 
@@ -956,7 +956,7 @@ mod typed_tests {
         let mut create = Vec::new();
         append_varint_field(&mut create, COPY_ID_FIELD, 9);
         append_message_field(&mut create, HERO_LIST_FIELD, &hero_list);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         assert!(matches!(
             handle_typed(
@@ -964,7 +964,7 @@ mod typed_tests {
                 &mut account,
                 "matchsvr.CreateRoom",
                 &create,
-                &mut pushes
+                &mut effects
             ),
             HandlerResult::Reply(_)
         ));
@@ -985,7 +985,7 @@ mod typed_tests {
                 &mut account,
                 "matchsvr.Ready",
                 &room_request,
-                &mut pushes
+                &mut effects
             ),
             HandlerResult::Reply(_)
         ));
@@ -1006,12 +1006,12 @@ mod typed_tests {
                 &mut account,
                 "matchsvr.GetRoomList",
                 &[],
-                &mut pushes
+                &mut effects
             ),
             HandlerResult::Reply(_)
         ));
         assert!(matches!(
-            handle_typed(&state, &mut account, "matchsvr_7.Unknown", &[], &mut pushes),
+            handle_typed(&state, &mut account, "matchsvr_7.Unknown", &[], &mut effects),
             HandlerResult::Error(GameError::InvalidRequest(_))
         ));
     }
@@ -1022,10 +1022,10 @@ mod typed_tests {
         let mut first = NewAccountFactory::create(ProfileId::new("battle-1").unwrap(), "First");
         let mut second = NewAccountFactory::create(ProfileId::new("battle-2").unwrap(), "Second");
         second.character.uid = 2;
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         assert!(matches!(
-            handle_typed(&state, &mut first, "battle.CreateRoom", &[], &mut pushes),
+            handle_typed(&state, &mut first, "battle.CreateRoom", &[], &mut effects),
             HandlerResult::Reply(_)
         ));
         let room_id = state
@@ -1040,7 +1040,7 @@ mod typed_tests {
         let mut join = Vec::new();
         append_varint_field(&mut join, ROOM_ID_FIELD, room_id);
         assert!(matches!(
-            handle_typed(&state, &mut second, "battle.JoinRoom", &join, &mut pushes),
+            handle_typed(&state, &mut second, "battle.JoinRoom", &join, &mut effects),
             HandlerResult::Reply(_)
         ));
         assert_eq!(

@@ -1658,12 +1658,19 @@ where
             result.into_payload()
         }
         _ if typed_account.is_some() && coop_handler::handles_typed(request.method.as_str()) => {
+            let mut coop_effects = ResponseEffects::default();
             let result = coop_handler::handle_typed(
                 state,
                 typed_account.as_mut().expect("typed co-op account"),
                 request.method.as_str(),
                 request_args,
+                &mut coop_effects,
+            );
+            apply_response_effects(
+                coop_effects,
+                &mut pre_pushes,
                 &mut post_pushes,
+                &mut handler_error,
             );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
