@@ -1,8 +1,10 @@
 use super::*;
 use crate::config::SharedPush;
-use blueoath_domain::{AccountState, NewAccountFactory, ProfileId};
+use blueoath_domain::{
+    AccountRepository, AccountState, NewAccountFactory, ProfileId, RepositoryError,
+};
 use blueoath_protocol::GameLoginCodec;
-use blueoath_storage::ProfileStore;
+use blueoath_storage::{ProfileStore, StorageError};
 use std::sync::OnceLock;
 
 fn load_or_create_typed_account(
@@ -18,6 +20,31 @@ fn load_or_create_typed_account(
     let mut account = NewAccountFactory::create(profile_id, name.to_owned());
     store.save_typed_account(&mut account)?;
     Ok(account)
+}
+
+fn persist_typed_account(store: &ProfileStore, account: AccountState) -> Result<(), StorageError> {
+    let profile = account.profile.as_ref().ok_or_else(|| {
+        StorageError::InvalidTypedAccount("account profile is required".to_owned())
+    })?;
+    let profile_id = profile.id.clone();
+    let expected_revision = profile.revision;
+    AccountRepository::transact(store, &profile_id, move |current| {
+        let current_revision = current.profile.as_ref().map(|profile| profile.revision);
+        if current_revision != Some(expected_revision) {
+            return Err(blueoath_domain::DomainError::InvalidState(
+                "account revision changed during request",
+            ));
+        }
+        *current = account;
+        Ok(())
+    })
+    .map_err(|error| match error {
+        RepositoryError::Storage(message) => StorageError::InvalidTypedAccount(message),
+        RepositoryError::RevisionConflict { expected, actual } => {
+            StorageError::RevisionConflict { expected, actual }
+        }
+        RepositoryError::Domain(error) => StorageError::InvalidTypedAccount(error.to_string()),
+    })
 }
 
 pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
@@ -402,7 +429,7 @@ where
     .await?;
     if typed_account != typed_account_before {
         let account_store = context.store.clone();
-        tokio::task::spawn_blocking(move || account_store.save_typed_account(&mut typed_account))
+        tokio::task::spawn_blocking(move || persist_typed_account(&account_store, typed_account))
             .await
             .map_err(|error| ServerError::StorageTask(error.to_string()))??;
     }
@@ -676,7 +703,7 @@ async fn build_kcp_wire_responses(
     )
     .await?;
     let account_store = store.clone();
-    tokio::task::spawn_blocking(move || account_store.save_typed_account(&mut typed_account))
+    tokio::task::spawn_blocking(move || persist_typed_account(&account_store, typed_account))
         .await
         .map_err(|error| ServerError::StorageTask(error.to_string()))??;
     let mut responses = Vec::new();
