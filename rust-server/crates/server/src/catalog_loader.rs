@@ -2070,94 +2070,11 @@ pub(super) fn draw_sr_build_reward_with_roll(
     None
 }
 
-pub(super) fn remove_ship_instance(account: &mut Value, hero_id: i32) {
-    if hero_id <= 0 {
-        return;
-    }
-    let equip_ids = account
-        .get("dock")
-        .and_then(|dock| dock.get("heroes"))
-        .and_then(Value::as_array)
-        .and_then(|heroes| {
-            heroes
-                .iter()
-                .find(|hero| json_i32(hero, "heroId") == Some(hero_id))
-        })
-        .and_then(|hero| hero.get("equipSlots"))
-        .and_then(Value::as_array)
-        .map(|slots| slots.iter().filter_map(Value::as_i64).collect::<Vec<_>>())
-        .unwrap_or_default();
-    if let Some(heroes) = account
-        .get_mut("dock")
-        .and_then(|dock| dock.get_mut("heroes"))
-        .and_then(Value::as_array_mut)
-    {
-        heroes.retain(|hero| json_i32(hero, "heroId") != Some(hero_id));
-    }
-    if let Some(items) = account
-        .get_mut("equip")
-        .and_then(|equip| equip.get_mut("items"))
-        .and_then(Value::as_array_mut)
-    {
-        items.retain(|item| {
-            let id = json_i64(item, "equipId").unwrap_or_default();
-            !equip_ids.contains(&id)
-        });
-    }
-}
-
 pub(super) fn build_drop_exists(catalog: &BuildShipCatalog, pool_id: i32) -> bool {
     let Some(extract) = catalog.extract_to_drop.get(&pool_id).copied() else {
         return false;
     };
     !expand_build_drop(catalog, extract).is_empty()
-}
-
-pub(super) fn consume_buildship_cost(
-    account: &mut Value,
-    catalog: &BuildShipCatalog,
-    pool_id: i32,
-    pulls: i32,
-) -> bool {
-    let base = catalog
-        .expend_by_pool
-        .get(&pool_id)
-        .cloned()
-        .unwrap_or_default();
-    let configured = if pulls == 10 {
-        catalog
-            .ten_expend_by_pool
-            .get(&pool_id)
-            .cloned()
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| {
-                base.iter()
-                    .map(|(kind, id, num)| (*kind, *id, num.saturating_mul(pulls)))
-                    .collect()
-            })
-    } else {
-        base.iter()
-            .map(|(kind, id, num)| (*kind, *id, num.saturating_mul(pulls)))
-            .collect()
-    };
-    let mut totals = std::collections::BTreeMap::<(i32, i32), i32>::new();
-    for (kind, id, num) in configured {
-        if kind <= 0 || id <= 0 || num <= 0 {
-            return false;
-        }
-        let entry = totals.entry((kind, id)).or_default();
-        *entry = entry.saturating_add(num);
-    }
-    if totals
-        .iter()
-        .any(|((kind, id), num)| !resource_available(account, *kind, *id, *num))
-    {
-        return false;
-    }
-    for ((kind, id), num) in totals {
-        consume_resource(account, kind, id, num);
-    }
-    true
 }
 
 pub(super) fn load_battle_catalog(client_path: Option<&PathBuf>) -> BattleCatalog {

@@ -788,15 +788,17 @@ where
             }
             result.into_payload()
         }
-        _ if (method.is_family(MethodFamily::Exchange)
-            || method.is_family(MethodFamily::FoodCompose)
-            || method.is_family(MethodFamily::BattlePass)
-            || method.is_family(MethodFamily::ActivityBattlePass))
-            && !extended_handler::handles(request.method.as_str())
-            && !misc_extended_handler::handles(request.method.as_str()) =>
+        _ if typed_account.is_none()
+            && (method.is_family(MethodFamily::Exchange)
+                || method.is_family(MethodFamily::FoodCompose)
+                || method.is_family(MethodFamily::BattlePass)
+                || method.is_family(MethodFamily::ActivityBattlePass)
+                || method.is_family(MethodFamily::WorldEvent)
+                || method.is_family(MethodFamily::Magazine)
+                || method.is_family(MethodFamily::InteractionItem)) =>
         {
             let result = HandlerResult::Error(GameError::InvalidRequest(
-                "misc request requires typed account",
+                "extended request requires typed account",
             ));
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -938,48 +940,6 @@ where
                 request_args,
                 &mut pre_pushes,
             );
-            if let HandlerResult::Error(error) = &result {
-                handler_error = Some(error.clone());
-            }
-            result.into_payload()
-        }
-        _ if extended_handler::handles(request.method.as_str()) => {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-            };
-            let result =
-                extended_handler::handle(&mut context, request.method.as_str(), request_args);
-            if let HandlerResult::Error(error) = &result {
-                handler_error = Some(error.clone());
-            }
-            result.into_payload()
-        }
-        _ if misc_extended_handler::handles(request.method.as_str()) => {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-            };
-            let result =
-                misc_extended_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -1243,20 +1203,9 @@ where
                     &mut pre_pushes,
                 )
             } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                buildship_handler::handle(&mut context, request.method.as_str(), request_args)
+                HandlerResult::Error(GameError::InvalidRequest(
+                    "buildship requires typed account",
+                ))
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
