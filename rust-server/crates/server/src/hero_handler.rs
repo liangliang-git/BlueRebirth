@@ -144,8 +144,7 @@ pub(super) fn handle_typed(
                 hero.level = level;
                 hero.exp = exp;
             }
-            let progress = account.tasks.progress.entry(10).or_default();
-            *progress = progress.saturating_add(1);
+            advance_typed_task_event(account, task_catalog, 10, 1);
             append_method_push(
                 pre_pushes,
                 "hero.UpdateHeroBagData",

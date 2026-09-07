@@ -127,8 +127,7 @@ pub(super) fn handle_typed(
                 target.enhance_level = u32::try_from(level).unwrap_or(u32::MAX);
                 target.enhance_exp = u64::try_from(exp).unwrap_or(u64::MAX);
             }
-            let progress = account.tasks.progress.entry(2726).or_default();
-            *progress = progress.saturating_add(1);
+            advance_typed_task_event(account, task_catalog, 2726, 1);
             append_method_push(
                 pre_pushes,
                 "bag.UpdateBagData",

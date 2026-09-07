@@ -47,6 +47,51 @@ pub(super) fn sync_typed_task_state(
     changed
 }
 
+/// Advance normalized task counters from trusted server-side events.
+pub(super) fn advance_typed_task_event(
+    account: &mut blueoath_domain::AccountState,
+    catalog: Option<&TaskCatalog>,
+    event_type: i32,
+    delta: u64,
+) -> bool {
+    let Some(catalog) = catalog else {
+        return false;
+    };
+    let mut changed = false;
+    for definition in catalog
+        .definitions
+        .iter()
+        .filter(|definition| definition.event_type == event_type)
+    {
+        let task_id = u64::try_from(definition.id).unwrap_or_default();
+        if task_id == 0 {
+            continue;
+        }
+        let current = account
+            .tasks
+            .progress
+            .get(&task_id)
+            .copied()
+            .unwrap_or_default();
+        let next = current
+            .saturating_add(delta)
+            .min(u64::try_from(definition.goal.max(0)).unwrap_or_default());
+        if next <= current {
+            continue;
+        }
+        account.tasks.progress.insert(task_id, next);
+        account.tasks.task_types.insert(
+            task_id,
+            u32::try_from(definition.task_type.max(0)).unwrap_or_default(),
+        );
+        if next >= u64::try_from(definition.goal.max(0)).unwrap_or_default() {
+            account.tasks.completed.insert(task_id);
+        }
+        changed = true;
+    }
+    changed
+}
+
 pub(super) fn complete_task(
     account: &mut Value,
     task_type: i32,
