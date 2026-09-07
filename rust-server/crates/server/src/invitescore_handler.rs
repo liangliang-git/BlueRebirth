@@ -1,11 +1,11 @@
-use super::common::response::HandlerResult;
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 pub(super) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
-    post_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     match method {
         "invitescore.SetInviteStateByType" => {
@@ -23,11 +23,10 @@ pub(super) fn handle_typed(
                 3 => account.invite_score.have_first_battle_win = 1,
                 _ => {}
             }
-            append_method_push(
-                post_pushes,
+            effects.push_post(Response::raw(
                 "invitescore.RefreshInviteScore",
                 invite_payload_typed(account),
-            );
+            ));
             HandlerResult::PushOnly
         }
         "invitescore.CheckAndResetInviteState" => {
@@ -40,11 +39,10 @@ pub(super) fn handle_typed(
                 }
             };
             account.invite_score.record_version = request.version;
-            append_method_push(
-                post_pushes,
+            effects.push_post(Response::raw(
                 "invitescore.RefreshInviteScore",
                 invite_payload_typed(account),
-            );
+            ));
             HandlerResult::PushOnly
         }
         _ => HandlerResult::Empty,
@@ -75,17 +73,17 @@ mod tests {
             blueoath_domain::ProfileId::new("invite").unwrap(),
             "Invite",
         );
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
         assert!(matches!(
             handle_typed(
                 &mut account,
                 "invitescore.SetInviteStateByType",
                 &[8, 1],
-                &mut pushes,
+                &mut effects,
             ),
             HandlerResult::PushOnly
         ));
         assert_eq!(account.invite_score.have_got_ssr, 1);
-        assert_eq!(pushes.len(), 1);
+        assert_eq!(effects.into_parts().1.len(), 1);
     }
 }

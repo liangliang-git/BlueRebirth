@@ -1,5 +1,5 @@
 use super::common::error::GameError;
-use super::common::response::HandlerResult;
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 use blueoath_domain::AccountState;
 
@@ -8,7 +8,7 @@ pub(super) fn handle_typed(
     state: &ServerState,
     method: &str,
     request_args: &[u8],
-    post_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     match method {
@@ -40,7 +40,7 @@ pub(super) fn handle_typed(
                     });
             }
             account.ship_task.current_ship_tid = ship_tid;
-            append_shiptask_typed_push(post_pushes, account);
+            append_shiptask_typed_push(effects, account);
             HandlerResult::PushOnly
         }
         "shiptask.GetAchievementReward" => {
@@ -78,11 +78,10 @@ pub(super) fn handle_typed(
                 for reward in &rewards {
                     let _ = grant_typed_task_reward(account, reward);
                 }
-                append_method_push(
-                    post_pushes,
+                effects.push_post(Response::raw(
                     "user.UpdateUserInfo",
                     UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-                );
+                ));
             }
             if let Some(achievement) =
                 account
@@ -105,7 +104,7 @@ pub(super) fn handle_typed(
                     });
             }
             account.ship_task.current_ship_tid = ship_tid;
-            append_shiptask_typed_push(post_pushes, account);
+            append_shiptask_typed_push(effects, account);
             HandlerResult::PushOnly
         }
         "shiptask.SetCurrentShip" => {
@@ -120,19 +119,18 @@ pub(super) fn handle_typed(
             account.ship_task.current_ship_tid = request.ship_tid;
             account.ship_task.current_hero_template_id = request.hero_template_id;
             account.ship_task.set_ship_time = current_unix_seconds() as u64;
-            append_shiptask_typed_push(post_pushes, account);
+            append_shiptask_typed_push(effects, account);
             HandlerResult::PushOnly
         }
         _ => HandlerResult::Empty,
     }
 }
 
-fn append_shiptask_typed_push(post_pushes: &mut Vec<Vec<u8>>, account: &AccountState) {
-    append_method_push(
-        post_pushes,
+fn append_shiptask_typed_push(effects: &mut ResponseEffects, account: &AccountState) {
+    effects.push_post(Response::raw(
         "shiptask.UpdateShipTaskInfo",
         typed_shiptask_info_payload(account),
-    );
+    ));
 }
 
 fn typed_shiptask_info_payload(account: &AccountState) -> Vec<u8> {
@@ -168,18 +166,18 @@ mod tests {
     #[test]
     fn typed_shiptask_updates_state_and_pushes_info() {
         let mut account = AccountState::default();
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
         let result = handle_typed(
             &mut account,
             &ServerState::new("shiptask", "Captain", "test"),
             "shiptask.GetShipTaskReward",
             &[0x08, 12, 0x10, 3],
-            &mut pushes,
+            &mut effects,
         );
         assert!(matches!(result, HandlerResult::PushOnly));
         assert_eq!(account.ship_task.current_ship_tid, 12);
         assert_eq!(account.ship_task.tasks[0].task_id, 3);
-        assert_eq!(pushes.len(), 1);
+        assert_eq!(effects.into_parts().1.len(), 1);
     }
 
     #[test]

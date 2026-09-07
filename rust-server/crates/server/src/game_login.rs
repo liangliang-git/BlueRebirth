@@ -964,18 +964,25 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::InviteScore) => {
+            let mut invite_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 invitescore_handler::handle_typed(
                     typed,
                     request.method.as_str(),
                     request_args,
-                    &mut post_pushes,
+                    &mut invite_effects,
                 )
             } else {
                 HandlerResult::Error(GameError::InvalidRequest(
                     "invite score requires typed account",
                 ))
             };
+            apply_response_effects(
+                invite_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -1092,19 +1099,26 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::ShipTask) => {
+            let mut shiptask_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 shiptask_handler::handle_typed(
                     typed,
                     state,
                     request.method.as_str(),
                     request_args,
-                    &mut post_pushes,
+                    &mut shiptask_effects,
                 )
             } else {
                 HandlerResult::Error(GameError::InvalidRequest(
                     "ship task requires typed account",
                 ))
             };
+            apply_response_effects(
+                shiptask_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
