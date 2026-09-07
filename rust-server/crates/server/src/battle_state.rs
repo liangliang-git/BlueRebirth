@@ -651,6 +651,7 @@ pub(super) fn battle_enemy_hp_for_client(copy_id: i32, configured_hp: i32) -> i3
     }
 }
 
+#[cfg(test)]
 pub(super) fn battle_attack_payload_with_damage(args: &[u8], damage: u64) -> Vec<u8> {
     let mut output = Vec::new();
     for (field, wanted) in [(1, 1), (2, 2), (3, 3), (4, 4)] {
@@ -683,6 +684,7 @@ pub(super) fn battle_attack_payload_from_request(
     output
 }
 
+#[cfg(test)]
 fn battle_passed_fleet_ids(payload: &[u8]) -> std::collections::HashSet<i64> {
     let fleets = decode_repeated_message_field(payload, 20);
     let fleets = if fleets.is_empty() {
@@ -697,6 +699,7 @@ fn battle_passed_fleet_ids(payload: &[u8]) -> std::collections::HashSet<i64> {
         .collect()
 }
 
+#[cfg(test)]
 fn normalized_battle_passed_fleet_ids(
     session: &Value,
     payload: &[u8],
@@ -734,11 +737,13 @@ fn normalized_battle_passed_fleet_ids(
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn validate_battle_fleet_pass(session: &Value, payload: &[u8]) -> bool {
     let passed_fleet_ids = normalized_battle_passed_fleet_ids(session, payload);
     !passed_fleet_ids.is_empty() && passed_fleet_ids.len() == battle_passed_fleet_ids(payload).len()
 }
 
+#[cfg(test)]
 pub(super) fn mark_battle_fleet_passed(session: &mut Value, payload: &[u8]) -> bool {
     let passed_fleet_ids = normalized_battle_passed_fleet_ids(session, payload);
     if passed_fleet_ids.is_empty()
@@ -782,6 +787,7 @@ pub(super) fn mark_first_battle_fleet_passed(session: &mut Value) -> bool {
     remaining.is_empty()
 }
 
+#[cfg(test)]
 pub(super) fn save_battle_hero_hp(
     account: &mut Value,
     heroes: &[BattleHeroResult],
@@ -816,6 +822,7 @@ pub(super) fn save_battle_hero_hp(
     changed
 }
 
+#[cfg(test)]
 pub(super) fn validate_battle_attack(
     session: &serde_json::Map<String, Value>,
     args: &[u8],
@@ -954,6 +961,7 @@ pub(super) fn copy_progress_max_or_initial(
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 pub(super) fn copy_request_type(payload: &[u8]) -> i32 {
     let requested = decode_varint_field(payload, 1);
     matches!(requested, 2 | 9 | 10 | 24 | 33 | 34)

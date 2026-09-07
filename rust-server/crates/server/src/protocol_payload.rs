@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+#[cfg(test)]
 use blueoath_protocol::Decode;
 
 use super::*;
@@ -130,6 +131,7 @@ pub(super) struct BattlePassResult {
     pub(super) damage: i32,
 }
 
+#[cfg(test)]
 pub(super) fn decode_battle_pass_result(payload: &[u8]) -> BattlePassResult {
     let Ok(request) = blueoath_protocol::CopyPassRequest::decode(payload) else {
         return BattlePassResult::default();
