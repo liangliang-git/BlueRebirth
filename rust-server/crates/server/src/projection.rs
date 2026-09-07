@@ -1137,6 +1137,77 @@ pub(super) fn copy_record_list_from_account(account: &Value, copy_id: i32) -> Co
     CopyRecordList { copy_id, records }
 }
 
+pub(super) fn copy_record_list_from_typed_account(
+    account: &blueoath_domain::AccountState,
+    copy_id: i32,
+) -> CopyRecordList {
+    let records = account
+        .battle
+        .records
+        .iter()
+        .filter(|record| i32::try_from(record.copy_id.get()).ok() == Some(copy_id))
+        .map(|record| CopyRecord {
+            uid: account.character.uid,
+            user_name: account.character.name.clone(),
+            level: i32::try_from(account.character.level).unwrap_or(i32::MAX),
+            pass_time: i32::try_from(record.pass_time).unwrap_or(i32::MAX),
+            secret_id: i32::try_from(record.secret_id).unwrap_or(i32::MAX),
+            strategy_id: i32::try_from(record.strategy_id).unwrap_or(i32::MAX),
+            tactics: record
+                .hero_ids
+                .iter()
+                .filter_map(|hero_id| account.dock.heroes.get(hero_id))
+                .map(|hero| CopyRecordHero {
+                    template_id: i32::try_from(hero.template_id.get()).unwrap_or(i32::MAX),
+                    level: i32::try_from(hero.level).unwrap_or(i32::MAX),
+                    advance_level: 0,
+                    cur_hp: hero.hp,
+                    equips: hero
+                        .equip_slots
+                        .iter()
+                        .flatten()
+                        .filter_map(|equip_id| account.dock.equipments.get(equip_id))
+                        .map(|equip| CopyRecordEquip {
+                            template_id: i32::try_from(equip.template_id.get()).unwrap_or(i32::MAX),
+                            level: i32::try_from(equip.enhance_level).unwrap_or(i32::MAX),
+                            star_level: i32::try_from(equip.star).unwrap_or(i32::MAX),
+                        })
+                        .collect(),
+                    point: 0,
+                })
+                .collect(),
+            power: i32::try_from(record.power).unwrap_or(i32::MAX),
+            record_time: i32::try_from(record.record_time).unwrap_or(i32::MAX),
+            ex_buff: record
+                .ex_buffs
+                .iter()
+                .filter_map(|buff| i32::try_from(*buff).ok())
+                .collect(),
+        })
+        .collect();
+    CopyRecordList { copy_id, records }
+}
+
+pub(super) fn copy_info_response_from_typed_account(
+    account: &blueoath_domain::AccountState,
+    copy_id: i32,
+) -> CopyInfoResponse {
+    let records = copy_record_list_from_typed_account(account, copy_id).records;
+    let first = records.first().cloned();
+    let fast = records
+        .iter()
+        .min_by_key(|record| record.pass_time)
+        .cloned();
+    CopyInfoResponse {
+        max_ex_star: 0,
+        max_ex_star_first: None,
+        max_ex_star_fast: None,
+        first,
+        fast,
+        atk_grad: None,
+    }
+}
+
 pub(super) fn copy_info_response_from_account(account: &Value, copy_id: i32) -> CopyInfoResponse {
     let records = copy_record_list_from_account(account, copy_id).records;
     let first = records.first().cloned();
@@ -1516,6 +1587,28 @@ pub(super) fn daily_copy_progress_from_typed_account(
             })
         })
         .collect()
+}
+
+pub(super) fn daily_copy_snapshot_payload_from_typed_account(
+    account: &blueoath_domain::AccountState,
+    chapter_catalog: Option<&ChapterCatalog>,
+    now: u32,
+) -> Vec<u8> {
+    let fallback;
+    let catalog = match chapter_catalog {
+        Some(catalog) => catalog,
+        None => {
+            fallback = ChapterCatalog::fallback();
+            &fallback
+        }
+    };
+    DailyCopyCodec::encode_with_progress(
+        &catalog.daily_chapters,
+        &catalog.daily_groups,
+        &daily_copy_progress_from_typed_account(account, now),
+        &[],
+        &[],
+    )
 }
 
 pub(super) fn sync_typed_daily_copy_state(

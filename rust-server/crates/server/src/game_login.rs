@@ -1565,27 +1565,13 @@ where
             }
             result.into_payload()
         }
-        "dailycopy.UpdateDailyCopyData" => {
-            if let Some(typed) = typed_account.as_ref() {
-                let fallback_catalog;
-                let catalog = match chapter_catalog {
-                    Some(catalog) => catalog,
-                    None => {
-                        fallback_catalog = ChapterCatalog::fallback();
-                        &fallback_catalog
-                    }
-                };
-                Some(DailyCopyCodec::encode_with_progress(
-                    &catalog.daily_chapters,
-                    &catalog.daily_groups,
-                    &daily_copy_progress_from_typed_account(typed, current_unix_seconds()),
-                    &[],
-                    &[],
-                ))
-            } else {
-                None
-            }
-        }
+        "dailycopy.UpdateDailyCopyData" => typed_account.as_ref().map(|typed| {
+            daily_copy_snapshot_payload_from_typed_account(
+                typed,
+                chapter_catalog,
+                current_unix_seconds(),
+            )
+        }),
         _ if method.is_family(MethodFamily::MopUp) && typed_account.is_some() => {
             let result = battle_handler::handle_typed_mop_up(
                 state,
@@ -1885,8 +1871,17 @@ where
                     &fallback_catalog
                 }
             };
-            let passed = account_view
-                .map(|account| completed_copy_ids(account, "copyProgress"))
+            let passed = typed_account
+                .as_deref()
+                .map(|account| {
+                    account
+                        .battle
+                        .passed_copies
+                        .iter()
+                        .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
+                        .collect::<Vec<_>>()
+                })
+                .or_else(|| account_view.map(|account| completed_copy_ids(account, "copyProgress")))
                 .unwrap_or_default();
             Some(CopyInfoCodec::encode_with_progress(
                 1,
@@ -2506,6 +2501,12 @@ fn legacy_only_method(method: &str) -> bool {
             | "copy.StartBase"
             | "copy.QuitBase"
             | "copy.GetRandomFactors"
+            | "copy.UnLockCopy"
+            | "copy.GetRecord"
+            | "copy.DeleteRecord"
+            | "copy.TacticOn"
+            | "copyinfo.GetCopyInfo"
+            | "dailycopy.CopyEnter"
             | "dailycopy.GetData"
             | "dailycopy.SelectEx"
             | "dailycopy.UpdateDailyCopyData"

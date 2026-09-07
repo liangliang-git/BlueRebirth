@@ -1,10 +1,10 @@
 use blueoath_domain::{
     AccountRepository, AccountState, ActivityTowerState, BathroomHeroState, ChapterId,
     CharacterState, ChatBarrageState, ChatMessageState, ConstructionJobState,
-    ConstructionProjectState, CopyId, CurrencyKind, EquipId, EquipmentState, FleetId, FleetRecord,
-    GuildApplicationState, GuildBoxItemState, GuildMemberState, GuildState, HeroId, HeroState,
-    NewAccountFactory, PresetFleetState, ProfileId, ProfileState, RepositoryError, TemplateId,
-    TowerRewardState,
+    ConstructionProjectState, CopyId, CopyRecordState, CurrencyKind, EquipId, EquipmentState,
+    FleetId, FleetRecord, GuildApplicationState, GuildBoxItemState, GuildMemberState, GuildState,
+    HeroId, HeroState, NewAccountFactory, PresetFleetState, ProfileId, ProfileState,
+    RepositoryError, TemplateId, TowerRewardState,
 };
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -868,6 +868,119 @@ impl ProfileStore {
                     .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
                 account.battle.passed_copies.insert(copy_id);
             }
+        }
+
+        let mut statement = connection.prepare(
+            "SELECT record_index, copy_id, pass_time, secret_id, strategy_id,
+                    power, record_time
+             FROM copy_records WHERE profile_id = ?1 ORDER BY record_index",
+        )?;
+        let records = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (record_index, copy_value, pass_time, secret_id, strategy_id, power, record_time) in
+            records
+        {
+            let expected_index = i64::try_from(account.battle.records.len()).map_err(|_| {
+                StorageError::InvalidTypedAccount("copy record index overflow".to_owned())
+            })?;
+            if record_index != expected_index {
+                return Err(StorageError::InvalidTypedAccount(
+                    "copy record indexes must be contiguous".to_owned(),
+                ));
+            }
+            let copy_id = CopyId::new(positive_u64(copy_value, "copy record copy id")?)
+                .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
+            account.battle.records.push(CopyRecordState {
+                copy_id,
+                hero_ids: Vec::new(),
+                pass_time: non_negative_u64(pass_time, "copy record pass time")?,
+                secret_id: non_negative_u32(secret_id, "copy record secret id")?,
+                strategy_id: non_negative_u32(strategy_id, "copy record strategy id")?,
+                power: non_negative_u32(power, "copy record power")?,
+                record_time: non_negative_u64(record_time, "copy record time")?,
+                ex_buffs: Vec::new(),
+            });
+        }
+        let mut statement = connection.prepare(
+            "SELECT record_index, position, hero_id
+             FROM copy_record_heroes WHERE profile_id = ?1 ORDER BY record_index, position",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })? {
+            let (record_index, position, hero_value) = row?;
+            let record = account
+                .battle
+                .records
+                .get_mut(usize::try_from(record_index).map_err(|_| {
+                    StorageError::InvalidTypedAccount("copy record index is invalid".to_owned())
+                })?)
+                .ok_or_else(|| {
+                    StorageError::InvalidTypedAccount(
+                        "copy record hero references missing record".to_owned(),
+                    )
+                })?;
+            let expected_position = i64::try_from(record.hero_ids.len()).map_err(|_| {
+                StorageError::InvalidTypedAccount("copy record hero position overflow".to_owned())
+            })?;
+            if position != expected_position {
+                return Err(StorageError::InvalidTypedAccount(
+                    "copy record hero positions must be contiguous".to_owned(),
+                ));
+            }
+            record
+                .hero_ids
+                .push(positive_hero_id(hero_value, "copy record hero id")?);
+        }
+        let mut statement = connection.prepare(
+            "SELECT record_index, position, buff_id
+             FROM copy_record_ex_buffs WHERE profile_id = ?1 ORDER BY record_index, position",
+        )?;
+        for row in statement.query_map(params![profile_id.as_str()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })? {
+            let (record_index, position, buff_value) = row?;
+            let record = account
+                .battle
+                .records
+                .get_mut(usize::try_from(record_index).map_err(|_| {
+                    StorageError::InvalidTypedAccount("copy record index is invalid".to_owned())
+                })?)
+                .ok_or_else(|| {
+                    StorageError::InvalidTypedAccount(
+                        "copy record buff references missing record".to_owned(),
+                    )
+                })?;
+            let expected_position = i64::try_from(record.ex_buffs.len()).map_err(|_| {
+                StorageError::InvalidTypedAccount("copy record buff position overflow".to_owned())
+            })?;
+            if position != expected_position {
+                return Err(StorageError::InvalidTypedAccount(
+                    "copy record buff positions must be contiguous".to_owned(),
+                ));
+            }
+            record
+                .ex_buffs
+                .push(non_negative_u32(buff_value, "copy record ex buff")?);
         }
 
         account.chat.channel = connection
@@ -2325,6 +2438,50 @@ impl ProfileStore {
                 ],
             )?;
         }
+        for (record_index, record) in account.battle.records.iter().enumerate() {
+            transaction.execute(
+                "INSERT INTO copy_records(
+                    profile_id, record_index, copy_id, pass_time, secret_id,
+                    strategy_id, power, record_time
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(record_index, "copy record index")?,
+                    typed_i64(record.copy_id.get(), "copy record copy id")?,
+                    typed_i64(record.pass_time, "copy record pass time")?,
+                    typed_i64(record.secret_id, "copy record secret id")?,
+                    typed_i64(record.strategy_id, "copy record strategy id")?,
+                    typed_i64(record.power, "copy record power")?,
+                    typed_i64(record.record_time, "copy record time")?,
+                ],
+            )?;
+            for (position, hero_id) in record.hero_ids.iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO copy_record_heroes(
+                        profile_id, record_index, position, hero_id
+                     ) VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        profile.id.as_str(),
+                        typed_i64(record_index, "copy record index")?,
+                        typed_i64(position, "copy record hero position")?,
+                        typed_i64(hero_id.get(), "copy record hero id")?,
+                    ],
+                )?;
+            }
+            for (position, buff_id) in record.ex_buffs.iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO copy_record_ex_buffs(
+                        profile_id, record_index, position, buff_id
+                     ) VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        profile.id.as_str(),
+                        typed_i64(record_index, "copy record index")?,
+                        typed_i64(position, "copy record buff position")?,
+                        typed_i64(*buff_id, "copy record ex buff")?,
+                    ],
+                )?;
+            }
+        }
         for (building_id, level) in &account.buildings.levels {
             let production = account.buildings.productions.get(building_id);
             transaction.execute(
@@ -3204,6 +3361,9 @@ fn clear_normalized_account(
         "construction_jobs",
         "buildings",
         "daily_copy_progress",
+        "copy_record_ex_buffs",
+        "copy_record_heroes",
+        "copy_records",
         "copy_progress",
         "sea_progress",
         "tower_progress",
@@ -3336,6 +3496,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0018_typed_tower_state.sql"),
     include_str!("../../../migrations/0019_guild_typed_state.sql"),
     include_str!("../../../migrations/0020_guild_box_typed_state.sql"),
+    include_str!("../../../migrations/0021_copy_records_typed_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

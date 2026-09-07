@@ -122,23 +122,216 @@ pub(super) fn handle_typed_with_catalog(
                 ));
             };
             let copy_id = active.copy_id;
+            let hero_ids = active.hero_ids.clone();
+            let started_at = active.started_at;
             let result = decode_battle_pass_result(request_args);
             let grade = if result.grade > 0 { result.grade } else { 3 };
             let first_pass = BattleService::settle(account, copy_id, grade < 9)
                 .map_err(|_| GameError::InvalidState("battle settlement is invalid"));
             match first_pass {
-                Ok(first_pass) => HandlerResult::Reply(Response::raw(
-                    method,
-                    battle_pass_payload_with_rewards(
-                        i32::try_from(copy_id.get()).unwrap_or_default(),
-                        first_pass,
-                        grade,
-                        result.battle_time,
-                        &[],
-                    ),
-                )),
+                Ok(first_pass) => {
+                    account
+                        .battle
+                        .records
+                        .push(blueoath_domain::CopyRecordState {
+                            copy_id,
+                            hero_ids,
+                            pass_time: u64::try_from(result.battle_time).unwrap_or_else(|_| {
+                                u64::from(current_unix_seconds()).saturating_sub(started_at)
+                            }),
+                            secret_id: 0,
+                            strategy_id: 0,
+                            power: 0,
+                            record_time: u64::from(current_unix_seconds()),
+                            ex_buffs: Vec::new(),
+                        });
+                    HandlerResult::Reply(Response::raw(
+                        method,
+                        battle_pass_payload_with_rewards(
+                            i32::try_from(copy_id.get()).unwrap_or_default(),
+                            first_pass,
+                            grade,
+                            result.battle_time,
+                            &[],
+                        ),
+                    ))
+                }
                 Err(error) => HandlerResult::Error(error),
             }
+        }
+        "copy.GetRecord" => {
+            let Ok(request) = CopyRecordRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "copy record request is invalid",
+                ));
+            };
+            HandlerResult::Reply(Response::raw(
+                method,
+                CopyRecordListCodec::encode(&copy_record_list_from_typed_account(
+                    account,
+                    request.copy_id,
+                )),
+            ))
+        }
+        "copy.DeleteRecord" => {
+            let Ok(request) = CopyRecordRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "copy record request is invalid",
+                ));
+            };
+            let Some(position) = account
+                .battle
+                .records
+                .iter()
+                .enumerate()
+                .filter(|(_, record)| record.copy_id.get() == request.copy_id as u64)
+                .map(|(position, _)| position)
+                .nth(request.index as usize)
+            else {
+                return HandlerResult::Error(GameError::InvalidState("copy record is not found"));
+            };
+            account.battle.records.remove(position);
+            HandlerResult::Reply(Response::raw(
+                method,
+                CopyRecordListCodec::encode(&copy_record_list_from_typed_account(
+                    account,
+                    request.copy_id,
+                )),
+            ))
+        }
+        "copy.TacticOn" => {
+            let Ok(request) = CopyRecordRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "copy record request is invalid",
+                ));
+            };
+            let Some(hero_ids) = account
+                .battle
+                .records
+                .iter()
+                .filter(|record| record.copy_id.get() == request.copy_id as u64)
+                .nth(request.index as usize)
+                .map(|record| record.hero_ids.clone())
+                .filter(|hero_ids| !hero_ids.is_empty())
+            else {
+                return HandlerResult::Error(GameError::InvalidState("copy record is not found"));
+            };
+            {
+                let Some(fleet) = account.fleet.fleets.values_mut().next() else {
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "fleet is not configured",
+                    ));
+                };
+                fleet.members = hero_ids;
+            }
+            HandlerResult::Reply(Response::raw(
+                method,
+                FleetInfoCodec::encode(&fleet_info_from_typed_account(account)),
+            ))
+        }
+        "copyinfo.GetCopyInfo" => HandlerResult::Reply(Response::raw(
+            method,
+            CopyInfoCodec::encode_record_response(&copy_info_response_from_typed_account(
+                account,
+                decode_varint_field(request_args, 1),
+            )),
+        )),
+        "dailycopy.CopyEnter" => {
+            let Ok(request) = DailyCopyEnterRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "daily copy enter request is invalid",
+                ));
+            };
+            let known_copy = battle_catalog
+                .map(|catalog| catalog.daily_group_by_copy.contains_key(&request.copy_id))
+                .unwrap_or(request.chapter_id == 1);
+            if request.chapter_id <= 0
+                || request.copy_id <= 0
+                || request.tactic_id <= 0
+                || !known_copy
+            {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "daily copy enter request is invalid",
+                ));
+            }
+            let fleet_id = blueoath_domain::FleetId::new(request.tactic_id as u64).ok();
+            let mut hero_ids = fleet_id
+                .and_then(|fleet_id| account.fleet.fleets.get(&fleet_id))
+                .map(|fleet| fleet.members.clone())
+                .unwrap_or_default();
+            if hero_ids.is_empty() {
+                hero_ids = account.dock.heroes.keys().copied().take(6).collect();
+            }
+            if hero_ids.is_empty()
+                || (battle_catalog.is_some()
+                    && !consume_battle_supply_typed(
+                        account,
+                        battle_catalog,
+                        request.copy_id,
+                        &hero_ids.iter().map(|id| id.get()).collect::<Vec<_>>(),
+                        1,
+                    ))
+            {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "insufficient supply or missing daily tactic",
+                ));
+            }
+            let Ok(chapter_id) = blueoath_domain::ChapterId::new(request.chapter_id as u64) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "daily copy chapter is invalid",
+                ));
+            };
+            let Ok(copy_id) = blueoath_domain::CopyId::new(request.copy_id as u64) else {
+                return HandlerResult::Error(GameError::InvalidRequest("daily copy id is invalid"));
+            };
+            let fleet_id = fleet_id.unwrap_or_else(|| {
+                account
+                    .fleet
+                    .fleets
+                    .keys()
+                    .next()
+                    .copied()
+                    .unwrap_or_else(|| blueoath_domain::FleetId::new(1).unwrap())
+            });
+            let now = u64::from(current_unix_seconds());
+            if BattleService::start(account, chapter_id, copy_id, fleet_id, now).is_err() {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "daily copy battle cannot start",
+                ));
+            }
+            if let Some(active) = account.battle.active.as_mut() {
+                active.expires_at = now.saturating_add(1_800);
+                active.hero_ids = hero_ids.clone();
+                active.remaining_fleet_ids =
+                    battle_session_fleet_ids(request.copy_id, battle_catalog)
+                        .into_iter()
+                        .filter_map(|id| u32::try_from(id).ok())
+                        .collect();
+            }
+            let chapter_id = blueoath_domain::ChapterId::new(request.chapter_id as u64)
+                .expect("validated daily copy chapter");
+            account.daily_copy.reset_day = ((now + 8 * 60 * 60) / 86_400) as u32;
+            account
+                .daily_copy
+                .challenge_times
+                .entry(chapter_id)
+                .and_modify(|times| *times = times.saturating_add(1))
+                .or_insert(1);
+            HandlerResult::Reply(Response::raw(
+                method,
+                daily_copy_enter_payload(&battle_start_payload_from_typed_account(
+                    account,
+                    request.copy_id,
+                    &[hero_ids
+                        .iter()
+                        .filter_map(|id| i32::try_from(id.get()).ok())
+                        .collect()],
+                    battle_catalog,
+                    SHIP_STAT_CATALOG.get(),
+                    ship_stat_multiplier,
+                    BattleStartOptions::default(),
+                )),
+            ))
         }
         "copy.QuitBase" => {
             account.battle.active = None;
@@ -1344,6 +1537,80 @@ mod tests {
             .battle
             .passed_copies
             .contains(&CopyId::new(9).unwrap()));
+        assert_eq!(account.battle.records.len(), 1);
+    }
+
+    #[test]
+    fn typed_copy_records_project_delete_and_apply_to_fleet() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("copy-record").unwrap(), "Battle");
+        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
+        account
+            .battle
+            .records
+            .push(blueoath_domain::CopyRecordState {
+                copy_id: CopyId::new(9).unwrap(),
+                hero_ids: vec![hero_id],
+                pass_time: 12,
+                secret_id: 2,
+                strategy_id: 3,
+                power: 99,
+                record_time: 100,
+                ex_buffs: vec![7],
+            });
+
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, 9);
+        append_varint_field(&mut request, 2, 0);
+        assert!(matches!(
+            handle_typed(&mut account, "copy.GetRecord", &request),
+            HandlerResult::Reply(_)
+        ));
+        assert!(matches!(
+            handle_typed(&mut account, "copy.TacticOn", &request),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account.fleet.fleets.values().next().unwrap().members,
+            vec![hero_id]
+        );
+        assert!(matches!(
+            handle_typed(&mut account, "copy.DeleteRecord", &request),
+            HandlerResult::Reply(_)
+        ));
+        assert!(account.battle.records.is_empty());
+    }
+
+    #[test]
+    fn typed_daily_copy_enter_starts_battle_and_updates_daily_state() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("daily-enter").unwrap(), "Battle");
+        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
+        account.fleet.fleets.insert(
+            FleetId::new(1).unwrap(),
+            blueoath_domain::FleetRecord {
+                formation_id: 2,
+                tactic_id: 3,
+                members: vec![hero_id],
+            },
+        );
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, 1);
+        append_varint_field(&mut request, 2, 1);
+        append_varint_field(&mut request, 3, 1);
+
+        assert!(matches!(
+            handle_typed(&mut account, "dailycopy.CopyEnter", &request),
+            HandlerResult::Reply(_)
+        ));
+        assert!(account.battle.active.is_some());
+        assert_eq!(
+            account
+                .daily_copy
+                .challenge_times
+                .get(&ChapterId::new(1).unwrap()),
+            Some(&1)
+        );
     }
 
     #[test]

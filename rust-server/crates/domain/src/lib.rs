@@ -251,10 +251,24 @@ pub struct BattleSession {
     pub attack_count: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopyRecordState {
+    pub copy_id: CopyId,
+    pub hero_ids: Vec<HeroId>,
+    pub pass_time: u64,
+    pub secret_id: u32,
+    pub strategy_id: u32,
+    pub power: u32,
+    pub record_time: u64,
+    pub ex_buffs: Vec<u32>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BattleProgressState {
     pub active: Option<BattleSession>,
     pub passed_copies: BTreeSet<CopyId>,
+    #[serde(default)]
+    pub records: Vec<CopyRecordState>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

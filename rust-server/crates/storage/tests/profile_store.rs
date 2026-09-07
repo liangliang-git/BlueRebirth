@@ -252,7 +252,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 20);
+    assert_eq!(version, 21);
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
@@ -561,6 +561,19 @@ fn typed_repository_transaction_commits_domain_mutation() {
         hero_ids: vec![hero_id],
         attack_count: 3,
     });
+    account
+        .battle
+        .records
+        .push(blueoath_domain::CopyRecordState {
+            copy_id: CopyId::new(300).unwrap(),
+            hero_ids: vec![hero_id],
+            pass_time: 12,
+            secret_id: 2,
+            strategy_id: 3,
+            power: 99,
+            record_time: 200,
+            ex_buffs: vec![7001],
+        });
     AccountRepository::create(&store, &account).unwrap();
     AccountRepository::transact(&store, &profile_id, |account| {
         account
@@ -701,6 +714,10 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(active.remaining_fleet_ids, vec![1, 2]);
     assert_eq!(active.hero_ids, vec![hero_id]);
     assert_eq!(active.attack_count, 3);
+    assert_eq!(loaded.battle.records[0].hero_ids, vec![hero_id]);
+    assert_eq!(loaded.battle.records[0].ex_buffs, vec![7001]);
+    assert_eq!(loaded.battle.records[0].pass_time, 12);
+    assert_eq!(loaded.battle.records[0].secret_id, 2);
     let _ = std::fs::remove_dir_all(root);
 }
 
