@@ -1,3 +1,4 @@
+use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
@@ -46,13 +47,16 @@ pub(super) fn handle_typed(
             )
         }
         "tower.ReceiveBuff" => {
-            let copy_id = decode_varint_field(request_args, 1);
-            let copy_id_value = u32::try_from(copy_id).ok().filter(|id| *id > 0);
-            if copy_id > 0 {
-                if let Ok(copy_id) = blueoath_domain::CopyId::new(copy_id as u64) {
-                    if !account.tower.save_pass_copy_ids.contains(&copy_id) {
-                        account.tower.save_pass_copy_ids.push(copy_id);
-                    }
+            let Ok(request) = CopyIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "tower copy request is invalid",
+                ));
+            };
+            let copy_id = request.copy_id;
+            let copy_id_value = u32::try_from(copy_id).ok();
+            if let Ok(copy_id) = blueoath_domain::CopyId::new(copy_id as u64) {
+                if !account.tower.save_pass_copy_ids.contains(&copy_id) {
+                    account.tower.save_pass_copy_ids.push(copy_id);
                 }
             }
             reply(method, tower_reward_payload_typed(account, copy_id_value))
@@ -82,7 +86,12 @@ pub(super) fn handle_activity_typed(
             reply(method, activity_tower_payload_typed(account, now))
         }
         "activityTower.ReceiveBuff" => {
-            let copy_id = decode_varint_field(request_args, 1);
+            let Ok(request) = CopyIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "activity tower copy request is invalid",
+                ));
+            };
+            let copy_id = request.copy_id;
             if let Ok(copy_id) = blueoath_domain::CopyId::new(copy_id as u64) {
                 if !account.activity_tower.pass_copy_ids.contains(&copy_id) {
                     account.activity_tower.pass_copy_ids.push(copy_id);
@@ -91,7 +100,12 @@ pub(super) fn handle_activity_typed(
             reply(method, activity_tower_payload_typed(account, now))
         }
         "activityTower.QuickPass" => {
-            let copy_id = decode_varint_field(request_args, 1);
+            let Ok(request) = CopyIdRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "activity tower copy request is invalid",
+                ));
+            };
+            let copy_id = request.copy_id;
             if let Ok(copy_id) = blueoath_domain::CopyId::new(copy_id as u64) {
                 if !account.activity_tower.pass_copy_ids.contains(&copy_id) {
                     account.activity_tower.pass_copy_ids.push(copy_id);
