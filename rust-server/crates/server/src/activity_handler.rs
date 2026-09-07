@@ -14,9 +14,11 @@ pub(super) fn handles_typed(method: &str) -> bool {
         "activityextract.Get"
             | "activityextract.Update"
             | "activityextract.SwitchDraw"
+            | "activityextract.Draw"
             | "activityextractur.Get"
             | "activityextractur.Update"
             | "activityextractur.SwitchDraw"
+            | "activityextractur.Draw"
             | "activitySSR.GetActivitySSRInfo"
             | "activitySSR.ActivitySSRSelect"
             | "activitySSR.ActivitySSRRand"
@@ -53,12 +55,17 @@ pub(super) fn handle_typed(
 ) -> HandlerResult {
     if matches!(
         method,
-        "activityVideo.SetActivityVideo"
+        "activityextract.Draw"
+            | "activityextractur.Draw"
+            | "activityVideo.SetActivityVideo"
             | "activitycodeexchange.ExchangeCode"
             | "activitycodeexchange.ExchangeReward"
             | "activitypapercut.MakePaperCut"
     ) {
         return match method {
+            "activityextract.Draw" | "activityextractur.Draw" => {
+                handle_typed_extract_draw(account, method, request_args)
+            }
             "activityVideo.SetActivityVideo" => handle_typed_video_set(account, request_args),
             "activitycodeexchange.ExchangeCode" | "activitycodeexchange.ExchangeReward" => {
                 handle_typed_code_exchange(account, method, request_args)
@@ -315,6 +322,210 @@ fn handle_typed_code_exchange(
     }
 }
 
+fn handle_typed_extract_draw(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    let draw_id = decode_varint_field(request_args, 1);
+    let num = decode_varint_field(request_args, 2).clamp(1, 10);
+    if draw_id <= 0 {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "activity extract draw id is invalid",
+        ));
+    }
+    let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
+    let ur = method == "activityextractur.Draw";
+    let configs = if ur {
+        &catalog.activity_extract_ur
+    } else {
+        &catalog.activity_extract
+    };
+    let Some(config) = configs.get(&draw_id) else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "activity extract pool is not configured",
+        ));
+    };
+    let Some(cost) = extract_cost(config) else {
+        return HandlerResult::Error(GameError::InvalidState(
+            "activity extract cost is not configured",
+        ));
+    };
+    let entries = config
+        .get("drop_reward_id")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            let row = row.as_array()?;
+            Some((
+                i32::try_from(row.first()?.as_i64()?).ok()?,
+                i32::try_from(row.get(1)?.as_i64()?).ok()?,
+            ))
+        })
+        .filter(|(reward_id, amount)| *reward_id > 0 && *amount > 0)
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        return HandlerResult::Error(GameError::InvalidState(
+            "activity extract reward pool is empty",
+        ));
+    }
+    let total_cost = cost.2.saturating_mul(num);
+    if !typed_activity_can_consume(account, cost.0, cost.1, total_cost) {
+        return HandlerResult::Error(GameError::InvalidState(
+            "activity extract cost is insufficient",
+        ));
+    }
+    let state = if ur {
+        "activityExtractUr"
+    } else {
+        "activityExtract"
+    };
+    let start = account
+        .activities
+        .progress
+        .get(&activity_key(state, "drawCount"))
+        .copied()
+        .unwrap_or_default() as usize;
+    let snapshot = account.clone();
+    if !typed_activity_consume(account, cost.0, cost.1, total_cost) {
+        return HandlerResult::Error(GameError::InvalidState(
+            "activity extract cost is insufficient",
+        ));
+    }
+    let mut granted = Vec::new();
+    let mut selected_ids = Vec::new();
+    for offset in 0..num as usize {
+        let (reward_id, amount) = entries[(start + offset) % entries.len()];
+        selected_ids.push(reward_id);
+        let reward_defs = catalog
+            .rewards_by_id
+            .get(&reward_id)
+            .cloned()
+            .unwrap_or_else(|| {
+                vec![ShopReward {
+                    goods_type: 1,
+                    item_id: reward_id,
+                    num: amount,
+                    instance_id: 0,
+                }]
+            });
+        if !task_state::can_grant_typed_task_rewards(account, &reward_defs) {
+            *account = snapshot;
+            return HandlerResult::Error(GameError::InvalidState(
+                "activity extract reward is unsupported",
+            ));
+        }
+        for reward in reward_defs {
+            if !task_state::grant_typed_task_reward(account, &reward) {
+                *account = snapshot;
+                return HandlerResult::Error(GameError::InvalidState(
+                    "activity extract reward is unsupported",
+                ));
+            }
+            granted.push(reward);
+        }
+        let sequence = start.saturating_add(offset).saturating_add(1) as u64;
+        account.activities.progress.insert(
+            activity_key(state, &format!("reward:{sequence}:id")),
+            reward_id.max(0) as u64,
+        );
+        account.activities.progress.insert(
+            activity_key(state, &format!("reward:{sequence}:num")),
+            amount.max(0) as u64,
+        );
+    }
+    let next = start.saturating_add(num as usize) as u64;
+    account
+        .activities
+        .progress
+        .insert(activity_key(state, "drawCount"), next);
+    account
+        .activities
+        .progress
+        .insert(activity_key(state, "drawId"), draw_id as u64);
+    account
+        .activities
+        .progress
+        .insert(activity_key(state, "realDrawId"), draw_id as u64);
+    if ur {
+        typed_reply(method, extract_ur_draw_ret_payload(&selected_ids))
+    } else {
+        typed_reply(method, extract_draw_ret_payload(&granted))
+    }
+}
+
+fn typed_activity_currency(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
+    Some(match item_id {
+        1 => blueoath_domain::CurrencyKind::Gold,
+        2 => blueoath_domain::CurrencyKind::Diamond,
+        5 => blueoath_domain::CurrencyKind::Supply,
+        30 => blueoath_domain::CurrencyKind::PvePoint,
+        _ => return None,
+    })
+}
+
+fn typed_activity_can_consume(
+    account: &blueoath_domain::AccountState,
+    goods_type: i32,
+    item_id: i32,
+    amount: i32,
+) -> bool {
+    let Ok(amount) = u64::try_from(amount) else {
+        return false;
+    };
+    if goods_type == 5 {
+        return typed_activity_currency(item_id)
+            .is_some_and(|kind| account.resources.amount(kind).get() >= amount);
+    }
+    if matches!(goods_type, 1 | 6) {
+        return blueoath_domain::TemplateId::new(item_id.max(0) as u64)
+            .ok()
+            .is_some_and(|template_id| {
+                account
+                    .inventory
+                    .items
+                    .get(&template_id)
+                    .copied()
+                    .unwrap_or_default()
+                    >= amount
+            });
+    }
+    false
+}
+
+fn typed_activity_consume(
+    account: &mut blueoath_domain::AccountState,
+    goods_type: i32,
+    item_id: i32,
+    amount: i32,
+) -> bool {
+    let Ok(amount) = u64::try_from(amount) else {
+        return false;
+    };
+    if goods_type == 5 {
+        return typed_activity_currency(item_id)
+            .is_some_and(|kind| account.resources.debit(kind, amount).is_ok());
+    }
+    if matches!(goods_type, 1 | 6) {
+        let Some(template_id) = blueoath_domain::TemplateId::new(item_id.max(0) as u64).ok() else {
+            return false;
+        };
+        let Some(current) = account.inventory.items.get_mut(&template_id) else {
+            return false;
+        };
+        if *current < amount {
+            return false;
+        }
+        *current -= amount;
+        if *current == 0 {
+            account.inventory.items.remove(&template_id);
+        }
+        return true;
+    }
+    false
+}
+
 fn handle_typed_paper_cut(
     account: &mut blueoath_domain::AccountState,
     request_args: &[u8],
@@ -524,6 +735,31 @@ fn typed_extract_payload(
         2,
         activity_value(progress, state, "realDrawId"),
     );
+    let mut sequences = std::collections::BTreeSet::new();
+    let prefix = format!("activity:{state}:reward:");
+    for key in progress.keys() {
+        if let Some(sequence) = key
+            .strip_prefix(&prefix)
+            .and_then(|value| value.split_once(':'))
+            .and_then(|(sequence, _)| sequence.parse::<u64>().ok())
+        {
+            sequences.insert(sequence);
+        }
+    }
+    for sequence in sequences {
+        let mut reward = Vec::new();
+        append_varint_field(
+            &mut reward,
+            1,
+            activity_value(progress, state, &format!("reward:{sequence}:id")),
+        );
+        append_varint_field(
+            &mut reward,
+            2,
+            activity_value(progress, state, &format!("reward:{sequence}:num")),
+        );
+        append_message_field(&mut output, 3, &reward);
+    }
     output
 }
 
