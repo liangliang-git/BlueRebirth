@@ -1246,6 +1246,62 @@ impl ProfileStore {
                     }
                     _ => {}
                 }
+            } else if activity_id == "battlePass" || activity_id == "activityBattlePass" {
+                let pass = if activity_id == "battlePass" {
+                    &mut account.battle_pass
+                } else {
+                    &mut account.activity_battle_pass
+                };
+                match progress_kind.as_str() {
+                    "passType" => {
+                        pass.pass_type = non_negative_u32(value as i64, "battle pass type")?
+                    }
+                    "passLevel" => {
+                        pass.pass_level = non_negative_u32(value as i64, "battle pass level")?
+                    }
+                    "passExp" => pass.pass_exp = value,
+                    "curWeekIndex" => {
+                        pass.cur_week_index = non_negative_u32(value as i64, "battle pass week")?
+                    }
+                    "refreshCount" => {
+                        pass.refresh_count = non_negative_u32(value as i64, "battle pass refresh")?
+                    }
+                    "lastRefreshTaskId" => pass.last_refresh_task_id = value,
+                    "lastTaskId" => pass.last_task_id = value,
+                    key if key.starts_with("claimReward:") => {
+                        let mut parts = key.split(':');
+                        let Some(pass_type) = parts
+                            .next()
+                            .and_then(|_| parts.next())
+                            .and_then(|value| value.parse::<u32>().ok())
+                        else {
+                            continue;
+                        };
+                        let Some(level) = parts.next().and_then(|value| value.parse::<u32>().ok())
+                        else {
+                            continue;
+                        };
+                        if value != 0 {
+                            pass.claimed_rewards.insert((pass_type, level));
+                        }
+                    }
+                    key if key.starts_with("claimTask:") => {
+                        if value != 0 {
+                            if let Ok(task_id) = key[10..].parse::<u64>() {
+                                pass.claimed_tasks.insert(task_id);
+                            }
+                        }
+                    }
+                    key if key.starts_with("task:") => {
+                        if let Ok(task_id) = key[5..].parse::<u64>() {
+                            pass.tasks.insert(
+                                task_id,
+                                non_negative_u32(value as i64, "battle pass task")?,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
             } else if activity_id == "buildShip" {
                 let mut parts = progress_kind.split(':');
                 match parts.next() {
@@ -2703,6 +2759,49 @@ impl ProfileStore {
                     timestamp(),
                 ],
             )?;
+        }
+        for (activity_id, pass) in [
+            ("battlePass", &account.battle_pass),
+            ("activityBattlePass", &account.activity_battle_pass),
+        ] {
+            let mut pass_progress = vec![
+                ("passType".to_owned(), u64::from(pass.pass_type)),
+                ("passLevel".to_owned(), u64::from(pass.pass_level)),
+                ("passExp".to_owned(), pass.pass_exp),
+                ("curWeekIndex".to_owned(), u64::from(pass.cur_week_index)),
+                ("refreshCount".to_owned(), u64::from(pass.refresh_count)),
+                ("lastRefreshTaskId".to_owned(), pass.last_refresh_task_id),
+                ("lastTaskId".to_owned(), pass.last_task_id),
+            ];
+            pass_progress.extend(
+                pass.claimed_rewards
+                    .iter()
+                    .map(|(pass_type, level)| (format!("claimReward:{pass_type}:{level}"), 1)),
+            );
+            pass_progress.extend(
+                pass.claimed_tasks
+                    .iter()
+                    .map(|task_id| (format!("claimTask:{task_id}"), 1)),
+            );
+            pass_progress.extend(
+                pass.tasks
+                    .iter()
+                    .map(|(task_id, count)| (format!("task:{task_id}"), u64::from(*count))),
+            );
+            for (progress_kind, value) in pass_progress {
+                transaction.execute(
+                    "INSERT INTO activity_progress(
+                        profile_id, activity_id, progress_kind, value, updated_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        profile.id.as_str(),
+                        activity_id,
+                        progress_kind,
+                        typed_i64(value, "battle pass state")?,
+                        timestamp(),
+                    ],
+                )?;
+            }
         }
         for (pool_id, count) in &account.build_ship.draw_counts {
             transaction.execute(

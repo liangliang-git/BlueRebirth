@@ -981,6 +981,22 @@ where
             }
             result.into_payload()
         }
+        _ if (method.is_family(MethodFamily::BattlePass)
+            || method.is_family(MethodFamily::ActivityBattlePass))
+            && typed_account.is_some() =>
+        {
+            let result = extended_handler::handle_typed_battlepass(
+                state,
+                typed_account.as_mut().expect("typed battle pass account"),
+                request.method.as_str(),
+                request_args,
+                &mut pre_pushes,
+            );
+            if let HandlerResult::Error(error) = &result {
+                handler_error = Some(error.clone());
+            }
+            result.into_payload()
+        }
         _ if extended_handler::handles(request.method.as_str()) => {
             let mut context = GameLoginRequestContext {
                 state,
@@ -2479,11 +2495,9 @@ fn legacy_only_method(method: &str) -> bool {
     }
     matches!(
         GameMethod::parse(method).family(),
-        MethodFamily::ActivityBattlePass
-            | MethodFamily::MatchServer
+        MethodFamily::MatchServer
             | MethodFamily::Room
             | MethodFamily::Battle
-            | MethodFamily::BattlePass
             | MethodFamily::Copy
             | MethodFamily::DailyCopy
             | MethodFamily::Magazine

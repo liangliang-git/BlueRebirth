@@ -15,6 +15,257 @@ pub(super) fn handles(method: &str) -> bool {
     )
 }
 
+pub(super) fn handle_typed_battlepass(
+    state: &ServerState,
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    pre_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    let catalog = gameplay_catalog();
+    let activity = GameMethod::parse(method).is_family(MethodFamily::ActivityBattlePass);
+    match method {
+        "battlepass.UpdateBattlePassInfo" | "activitybattlepass.UpdateBattlePassInfo" => reply(
+            method,
+            typed_battlepass_info_payload(account, catalog, activity),
+        ),
+        "battlepass.GetReward"
+        | "battlepass.GetAllReward"
+        | "activitybattlepass.GetReward"
+        | "activitybattlepass.GetAllReward" => {
+            let pass = typed_battlepass_ref(account, activity);
+            let pass_level = pass.pass_level.max(1) as i32;
+            let pass_type = pass.pass_type.clamp(1, 2) as i32;
+            let levels = if activity {
+                &catalog.battlepass_activity_levels
+            } else {
+                &catalog.battlepass_levels
+            };
+            let targets = if method.ends_with("GetAllReward") {
+                levels
+                    .keys()
+                    .copied()
+                    .filter(|level| *level > 0 && *level <= pass_level)
+                    .collect::<Vec<_>>()
+            } else {
+                vec![decode_varint_field(request_args, 1)]
+            };
+            let mut claims = Vec::<(i32, i32, Vec<ShopReward>)>::new();
+            for level in targets {
+                let Some(config) = levels.get(&level) else {
+                    continue;
+                };
+                if level > pass_level
+                    || typed_battlepass_ref(account, activity)
+                        .claimed_rewards
+                        .contains(&(pass_type as u32, level as u32))
+                {
+                    continue;
+                }
+                let reward_id = if pass_type >= 2 {
+                    json_i32(config, "pay_level_reward").unwrap_or_default()
+                } else {
+                    json_i32(config, "free_level_reward").unwrap_or_default()
+                };
+                let rewards = catalog
+                    .rewards_by_id
+                    .get(&reward_id)
+                    .cloned()
+                    .unwrap_or_default();
+                claims.push((level, pass_type, rewards));
+            }
+            let all_rewards = claims
+                .iter()
+                .flat_map(|(_, _, rewards)| rewards.iter().copied())
+                .collect::<Vec<_>>();
+            if !all_rewards.is_empty() && !can_grant_typed_task_rewards(account, &all_rewards) {
+                return invalid("battle pass reward is unsupported");
+            }
+            for (level, pass_type, rewards) in &claims {
+                for reward in rewards {
+                    let _ = grant_typed_task_reward(account, reward);
+                }
+                typed_battlepass_mut(account, activity)
+                    .claimed_rewards
+                    .insert((*pass_type as u32, *level as u32));
+            }
+            let claimed = claims
+                .iter()
+                .map(|(level, pass_type, _)| (*level, *pass_type))
+                .collect::<Vec<_>>();
+            if !claimed.is_empty() {
+                append_typed_account_refresh_pushes(state, account, pre_pushes);
+            }
+            reply(method, encode_battlepass_reward_response(&claimed))
+        }
+        "battlepass.RefreshRandomTask" | "activitybattlepass.RefreshRandomTask" => {
+            let pass = typed_battlepass_mut(account, activity);
+            pass.last_refresh_task_id = decode_varint_field(request_args, 1).max(0) as u64;
+            pass.refresh_count = pass.refresh_count.saturating_add(1);
+            let payload = typed_battlepass_info_payload(account, catalog, activity);
+            append_method_push(
+                pre_pushes,
+                if activity {
+                    "activitybattlepass.UpdateBattlePassInfo"
+                } else {
+                    "battlepass.UpdateBattlePassInfo"
+                },
+                payload,
+            );
+            HandlerResult::PushOnly
+        }
+        "battlepass.BuyPassType" | "activitybattlepass.BuyPassType" => {
+            typed_battlepass_mut(account, activity).pass_type =
+                decode_varint_field(request_args, 1).clamp(1, 2) as u32;
+            append_typed_battlepass_info_push(account, catalog, activity, pre_pushes);
+            HandlerResult::PushOnly
+        }
+        "battlepass.BuyPassLevel" | "activitybattlepass.BuyPassLevel" => {
+            let levels = decode_varint_field(request_args, 1).max(1);
+            let price = if activity {
+                catalog.battlepass_activity_param.as_ref()
+            } else {
+                catalog.battlepass_param.as_ref()
+            }
+            .and_then(|value| value.get("buy_level_price"))
+            .and_then(Value::as_array)
+            .and_then(|values| {
+                Some((
+                    i32::try_from(values.first()?.as_i64()?).ok()?,
+                    i32::try_from(values.get(1)?.as_i64()?).ok()?,
+                ))
+            });
+            if let Some((currency_id, price_per_level)) = price {
+                let cost = price_per_level.saturating_mul(levels);
+                if !can_consume_typed(account, 5, currency_id, cost) {
+                    return invalid("battle pass level cost is insufficient");
+                }
+                consume_typed(account, 5, currency_id, cost);
+            }
+            let pass = typed_battlepass_mut(account, activity);
+            pass.pass_level = pass.pass_level.max(1).saturating_add(levels as u32).max(1);
+            append_typed_battlepass_info_push(account, catalog, activity, pre_pushes);
+            HandlerResult::PushOnly
+        }
+        "battlepass.RecieveTaskReward" | "activitybattlepass.RecieveTaskReward" => {
+            let task_id = decode_varint_field(request_args, 1).max(0) as u64;
+            let tasks = if activity {
+                &catalog.battlepass_activity_tasks
+            } else {
+                &catalog.battlepass_tasks
+            };
+            let pass = typed_battlepass_mut(account, activity);
+            if pass.claimed_tasks.insert(task_id) {
+                if let Some(config) = tasks.get(&(task_id as i32)) {
+                    pass.pass_exp = pass.pass_exp.saturating_add(
+                        json_i32(config, "battlepass_exp")
+                            .unwrap_or_default()
+                            .max(0) as u64,
+                    );
+                }
+            }
+            pass.last_task_id = task_id;
+            append_typed_battlepass_info_push(account, catalog, activity, pre_pushes);
+            append_typed_account_refresh_pushes(state, account, pre_pushes);
+            HandlerResult::PushOnly
+        }
+        _ => HandlerResult::Empty,
+    }
+}
+
+fn typed_battlepass_ref(
+    account: &blueoath_domain::AccountState,
+    activity: bool,
+) -> &blueoath_domain::BattlePassState {
+    if activity {
+        &account.activity_battle_pass
+    } else {
+        &account.battle_pass
+    }
+}
+
+fn typed_battlepass_mut(
+    account: &mut blueoath_domain::AccountState,
+    activity: bool,
+) -> &mut blueoath_domain::BattlePassState {
+    if activity {
+        &mut account.activity_battle_pass
+    } else {
+        &mut account.battle_pass
+    }
+}
+
+fn append_typed_battlepass_info_push(
+    account: &blueoath_domain::AccountState,
+    catalog: &GameplayCatalog,
+    activity: bool,
+    pre_pushes: &mut Vec<Vec<u8>>,
+) {
+    append_method_push(
+        pre_pushes,
+        if activity {
+            "activitybattlepass.UpdateBattlePassInfo"
+        } else {
+            "battlepass.UpdateBattlePassInfo"
+        },
+        typed_battlepass_info_payload(account, catalog, activity),
+    );
+}
+
+fn append_typed_account_refresh_pushes(
+    state: &ServerState,
+    account: &blueoath_domain::AccountState,
+    pre_pushes: &mut Vec<Vec<u8>>,
+) {
+    append_method_push(
+        pre_pushes,
+        "user.UpdateUserInfo",
+        UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+    );
+    append_method_push(
+        pre_pushes,
+        "bag.UpdateBagData",
+        BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+    );
+}
+
+fn typed_battlepass_info_payload(
+    account: &blueoath_domain::AccountState,
+    catalog: &GameplayCatalog,
+    activity: bool,
+) -> Vec<u8> {
+    let pass = typed_battlepass_ref(account, activity);
+    let levels = if activity {
+        &catalog.battlepass_activity_levels
+    } else {
+        &catalog.battlepass_levels
+    };
+    let mut output = Vec::new();
+    append_varint_field(&mut output, 1, pass.pass_type.clamp(1, 2) as u64);
+    append_varint_field(&mut output, 2, pass.pass_level.max(1) as u64);
+    append_varint_field(&mut output, 3, pass.pass_exp);
+    for level in levels.keys().copied().filter(|level| *level > 0) {
+        let mut reward = Vec::new();
+        append_varint_field(&mut reward, 1, level as u64);
+        append_varint_field(
+            &mut reward,
+            2,
+            u64::from(pass.claimed_rewards.contains(&(1, level as u32))),
+        );
+        append_message_field(&mut output, 4, &reward);
+        let mut advanced = Vec::new();
+        append_varint_field(&mut advanced, 1, level as u64);
+        append_varint_field(
+            &mut advanced,
+            2,
+            u64::from(pass.claimed_rewards.contains(&(2, level as u32))),
+        );
+        append_message_field(&mut output, 5, &advanced);
+    }
+    append_varint_field(&mut output, 6, pass.cur_week_index.max(1) as u64);
+    output
+}
+
 pub(super) fn handle_typed_exchange(
     state: &ServerState,
     account: &mut blueoath_domain::AccountState,
@@ -1246,6 +1497,7 @@ fn world_event_user_stage_payload(account: &Value) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use crate::common::response::HandlerResult;
+    use blueoath_domain::AccountState;
 
     use super::*;
 
@@ -1256,5 +1508,23 @@ mod tests {
             &str,
             &[u8],
         ) -> HandlerResult = handle;
+    }
+
+    #[test]
+    fn typed_battlepass_task_claim_updates_state_and_pushes() {
+        let mut account = AccountState::default();
+        let state = ServerState::new("battle-pass", "Captain", "test");
+        let mut pushes = Vec::new();
+        let result = handle_typed_battlepass(
+            &state,
+            &mut account,
+            "battlepass.RecieveTaskReward",
+            &[0x08, 101],
+            &mut pushes,
+        );
+        assert!(matches!(result, HandlerResult::PushOnly));
+        assert!(account.battle_pass.claimed_tasks.contains(&101));
+        assert_eq!(account.battle_pass.last_task_id, 101);
+        assert_eq!(pushes.len(), 3);
     }
 }

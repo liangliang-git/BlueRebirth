@@ -506,6 +506,13 @@ fn typed_repository_transaction_commits_domain_mutation() {
         .entry(5001)
         .or_default()
         .insert(3);
+    account.battle_pass.pass_type = 2;
+    account.battle_pass.pass_level = 7;
+    account.battle_pass.pass_exp = 19;
+    account.battle_pass.claimed_rewards.insert((2, 3));
+    account.battle_pass.claimed_tasks.insert(101);
+    account.battle_pass.tasks.insert(101, 4);
+    account.activity_battle_pass.pass_level = 5;
     account
         .ship_task
         .tasks
@@ -647,6 +654,13 @@ fn typed_repository_transaction_commits_domain_mutation() {
         .claimed_stages_by_event
         .get(&5001)
         .is_some_and(|stages| stages.contains(&3)));
+    assert_eq!(loaded.battle_pass.pass_type, 2);
+    assert_eq!(loaded.battle_pass.pass_level, 7);
+    assert_eq!(loaded.battle_pass.pass_exp, 19);
+    assert!(loaded.battle_pass.claimed_rewards.contains(&(2, 3)));
+    assert!(loaded.battle_pass.claimed_tasks.contains(&101));
+    assert_eq!(loaded.battle_pass.tasks.get(&101), Some(&4));
+    assert_eq!(loaded.activity_battle_pass.pass_level, 5);
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())

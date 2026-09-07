@@ -510,6 +510,37 @@ pub struct WorldEventState {
     pub claimed_stages_by_event: BTreeMap<u64, BTreeSet<u64>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BattlePassState {
+    pub pass_type: u32,
+    pub pass_level: u32,
+    pub pass_exp: u64,
+    pub cur_week_index: u32,
+    pub claimed_rewards: BTreeSet<(u32, u32)>,
+    pub claimed_tasks: BTreeSet<u64>,
+    pub tasks: BTreeMap<u64, u32>,
+    pub refresh_count: u32,
+    pub last_refresh_task_id: u64,
+    pub last_task_id: u64,
+}
+
+impl Default for BattlePassState {
+    fn default() -> Self {
+        Self {
+            pass_type: 1,
+            pass_level: 1,
+            pass_exp: 0,
+            cur_week_index: 1,
+            claimed_rewards: BTreeSet::new(),
+            claimed_tasks: BTreeSet::new(),
+            tasks: BTreeMap::new(),
+            refresh_count: 0,
+            last_refresh_task_id: 0,
+            last_task_id: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InviteScoreState {
     pub have_got_ssr: u64,
@@ -681,6 +712,10 @@ pub struct AccountState {
     pub food_compose: FoodComposeState,
     #[serde(default)]
     pub world_event: WorldEventState,
+    #[serde(default)]
+    pub battle_pass: BattlePassState,
+    #[serde(default)]
+    pub activity_battle_pass: BattlePassState,
     #[serde(default)]
     pub exchange_times: BTreeMap<u64, u32>,
     #[serde(default)]
