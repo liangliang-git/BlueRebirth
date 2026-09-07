@@ -303,6 +303,23 @@ impl ProfileStore {
         }
 
         let mut statement = connection.prepare(
+            "SELECT template_id, amount
+             FROM inventory WHERE profile_id = ?1 ORDER BY template_id",
+        )?;
+        let inventory = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (template_value, amount) in inventory {
+            let template_id = positive_template_id(template_value, "inventory template id")?;
+            account
+                .inventory
+                .items
+                .insert(template_id, non_negative_u64(amount, "inventory amount")?);
+        }
+
+        let mut statement = connection.prepare(
             "SELECT hero_id, slot_index, equip_id
              FROM hero_equip_slots WHERE profile_id = ?1 ORDER BY hero_id, slot_index",
         )?;
@@ -723,6 +740,17 @@ impl ProfileStore {
                 typed_i64(account.chat.channel, "chat channel")?
             ],
         )?;
+        for (template_id, amount) in &account.inventory.items {
+            transaction.execute(
+                "INSERT INTO inventory(profile_id, template_id, amount)
+                 VALUES (?1, ?2, ?3)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(template_id.get(), "inventory template id")?,
+                    typed_i64(*amount, "inventory amount")?,
+                ],
+            )?;
+        }
         for message in &account.chat.messages {
             transaction.execute(
                 "INSERT INTO chat_messages(

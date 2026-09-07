@@ -279,6 +279,13 @@ where
                 .unwrap_or_else(|| fleet_info_from_account(account_view.unwrap_or(&Value::Null)));
             Some(FleetInfoCodec::encode(&fleet))
         }
+        "bag.GetBagInfo" => {
+            let bag = typed_account
+                .as_deref()
+                .map(bag_info_from_typed_account)
+                .unwrap_or_else(|| bag_info_from_account(account_view.unwrap_or(&Value::Null)));
+            Some(BagInfoCodec::encode(&bag))
+        }
         "tactic.SetHerosTactic" => {
             let fleet = decode_fleet_info(request_args);
             if let Some(account) = account.as_deref_mut() {

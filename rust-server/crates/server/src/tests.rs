@@ -5,8 +5,9 @@ use super::{
     add_bag_item, add_building_state, adjust_character_i64, advance_task_event,
     advance_task_event_with_param, append_bytes_field, append_message_field, append_varint_field,
     apply_hero_breakdown_rewards, apply_mail_reward, apply_shop_good, apply_strategy_state,
-    apply_talent_change, auto_select_enhancement_materials, bag_info_from_account, bag_item_count,
-    bathroom_info_payload, battle_attack_payload_with_damage, battle_copy_passed, battle_enemy_ids,
+    apply_talent_change, auto_select_enhancement_materials, bag_info_from_account,
+    bag_info_from_typed_account, bag_item_count, bathroom_info_payload,
+    battle_attack_payload_with_damage, battle_copy_passed, battle_enemy_ids,
     battle_pass_payload_with_experience, battle_pass_payload_with_rewards,
     battle_position_fleet_id, battle_session_fleet_ids, battle_start_payload, bootstrap_response,
     building_info_from_account, buildship_info_payload, change_building_level,
@@ -48,7 +49,7 @@ use super::{
     SupportCatalog, SupportFleetItem, TalentCatalog, TalentNode, TaskCatalog, TaskDefinition,
     UserInfoCodec, DEFAULT_GUILD_ID, GUILD_MEMBER,
 };
-use blueoath_domain::{FleetId, FleetRecord, HeroId, NewAccountFactory, ProfileId};
+use blueoath_domain::{FleetId, FleetRecord, HeroId, NewAccountFactory, ProfileId, TemplateId};
 use blueoath_protocol::{
     CopyRecordListCodec, EquipListCodec, FashionInfo, FashionList, HeroBagCodec, PresetFleet,
     PresetFleetCodec, PresetFleetInfo, TMessageCodec, TRequest,
@@ -136,6 +137,27 @@ fn typed_fleet_projection_reads_normalized_fleet_rows() {
     assert_eq!(fleet.tactics[0].hero_ids, vec![101, 102]);
     assert_eq!(fleet.tactics[0].strategy_id, 11);
     assert_eq!(fleet.tactics[0].formation_id, 7);
+}
+
+#[test]
+fn typed_bag_projection_reads_normalized_inventory_rows() {
+    let mut account = NewAccountFactory::create(ProfileId::new("typed-bag").unwrap(), "Bag");
+    account
+        .inventory
+        .items
+        .insert(TemplateId::new(30001).unwrap(), 17);
+
+    let bag = bag_info_from_typed_account(&account);
+    assert_eq!(bag.bag_type, 1);
+    assert_eq!(bag.bag_size, 100);
+    assert_eq!(
+        bag.items
+            .iter()
+            .find(|item| item.template_id == 30001)
+            .map(|item| item.num),
+        Some(17)
+    );
+    assert!(bag.items.iter().any(|item| item.template_id == 10182));
 }
 
 #[test]

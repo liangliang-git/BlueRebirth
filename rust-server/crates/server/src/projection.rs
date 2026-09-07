@@ -3,6 +3,12 @@ use serde_json::Value;
 
 use super::*;
 
+const ZERO_TRACKED_BAG_ITEMS: &[i32] = &[
+    10182, 10185, 10187, // skill books
+    10007, 10181, 12201, // construction/draw tickets
+    10029, 10030, 10031, // construction resources
+];
+
 pub(super) fn json_i64_any(value: &Value) -> i64 {
     value.as_i64().unwrap_or_default()
 }
@@ -243,11 +249,6 @@ pub(super) fn bag_info_from_account(account: &Value) -> BagInfo {
     // Keep zero-count rows for consumables whose client widgets cache the last
     // value.  This also repairs snapshots created before zero tombstones were
     // persisted: client receives explicit deletion markers on next refresh.
-    const ZERO_TRACKED_ITEMS: &[i32] = &[
-        10182, 10185, 10187, // skill books
-        10007, 10181, 12201, // construction/draw tickets
-        10029, 10030, 10031, // construction resources
-    ];
     let bag = account.get("bag");
     let mut items = bag
         .and_then(|value| value.get("items"))
@@ -259,7 +260,7 @@ pub(super) fn bag_info_from_account(account: &Value) -> BagInfo {
             num: json_i32(item, "num").unwrap_or_default(),
         })
         .collect::<Vec<_>>();
-    for template_id in ZERO_TRACKED_ITEMS {
+    for template_id in ZERO_TRACKED_BAG_ITEMS {
         if !items.iter().any(|item| item.template_id == *template_id) {
             items.push(BagGrid {
                 template_id: *template_id,
@@ -272,6 +273,33 @@ pub(super) fn bag_info_from_account(account: &Value) -> BagInfo {
         bag_size: bag
             .and_then(|value| json_i32(value, "bagSize"))
             .unwrap_or(100),
+        items,
+    }
+}
+
+pub(super) fn bag_info_from_typed_account(account: &blueoath_domain::AccountState) -> BagInfo {
+    let mut items = account
+        .inventory
+        .items
+        .iter()
+        .filter_map(|(template_id, amount)| {
+            Some(BagGrid {
+                template_id: i32::try_from(template_id.get()).ok()?,
+                num: i32::try_from(*amount).unwrap_or(i32::MAX),
+            })
+        })
+        .collect::<Vec<_>>();
+    for template_id in ZERO_TRACKED_BAG_ITEMS {
+        if !items.iter().any(|item| item.template_id == *template_id) {
+            items.push(BagGrid {
+                template_id: *template_id,
+                num: 0,
+            });
+        }
+    }
+    BagInfo {
+        bag_type: 1,
+        bag_size: 100,
         items,
     }
 }

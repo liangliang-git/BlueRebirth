@@ -187,6 +187,11 @@ pub struct DockState {
     pub equipments: BTreeMap<EquipId, EquipmentState>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InventoryState {
+    pub items: BTreeMap<TemplateId, u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EquipmentState {
     pub id: EquipId,
@@ -314,6 +319,8 @@ pub struct ProfileState {
 pub struct AccountState {
     pub profile: Option<ProfileState>,
     pub resources: ResourceLedger,
+    #[serde(default)]
+    pub inventory: InventoryState,
     #[serde(default)]
     pub character: CharacterState,
     #[serde(default)]
