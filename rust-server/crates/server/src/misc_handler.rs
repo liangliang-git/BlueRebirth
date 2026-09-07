@@ -235,24 +235,13 @@ pub(super) fn handle<'state, 'account, 'scratch>(
         | "sportsmeet.ReceiveAllPointsReward"
         | "sportsmeetrank.GetOwnerRankData"
         | "worldevent.StageReward"
-        | "worldeventrank.Rank" => {
-            record_compat_route(account, method, request_args);
-            HandlerResult::PushOnly
-        }
-        m if handles(m) => {
-            record_compat_route(account, m, request_args);
-            HandlerResult::PushOnly
-        }
+        | "worldeventrank.Rank" => HandlerResult::PushOnly,
+        m if handles(m) => HandlerResult::PushOnly,
         m if matches!(
             GameMethod::parse(m).family(),
             MethodFamily::BattlePass | MethodFamily::ActivityBattlePass
         ) =>
         {
-            account["lastBattlePassAction"] = json!({
-                "method": m,
-                "args": request_args,
-                "time": current_unix_seconds(),
-            });
             HandlerResult::PushOnly
         }
         _ => HandlerResult::Empty,
@@ -265,22 +254,6 @@ fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
 
 fn invalid(message: &'static str) -> HandlerResult {
     HandlerResult::Error(GameError::InvalidRequest(message))
-}
-
-fn record_compat_route(account: &mut Value, method: &str, request_args: &[u8]) {
-    let calls = account
-        .as_object_mut()
-        .expect("account must be an object")
-        .entry("compatRouteCalls".to_owned())
-        .or_insert_with(|| json!([]));
-    calls
-        .as_array_mut()
-        .expect("compat route calls must be an array")
-        .push(json!({
-            "method": method,
-            "args": request_args,
-            "time": current_unix_seconds(),
-        }));
 }
 
 fn copy_reward_times_payload(chapter_id: i32, reward_time: i64) -> Vec<u8> {

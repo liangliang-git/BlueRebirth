@@ -1451,18 +1451,10 @@ where
         }
         _ => None,
     };
-    // Every route emitted by JP client must complete its callback. Some legacy
-    // routes have no local state model yet; persist call for later parity work
-    // and return valid empty protobuf payload instead of dropping response.
+    // Every known route must complete its callback. Unsupported routes return an
+    // empty protobuf payload without mutating account state.
     if ret.is_none() {
         if method.is_known() {
-            if let Some(account) = account.as_deref_mut() {
-                account["lastCompatRoute"] = json!({
-                    "method": request.method,
-                    "args": request_args,
-                    "time": current_unix_seconds(),
-                });
-            }
             ret = Some(Vec::new());
         } else {
             let error = GameError::UnknownMethod(request.method.clone());
