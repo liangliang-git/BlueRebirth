@@ -497,6 +497,12 @@ pub struct ShipTaskState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoodComposeState {
+    pub recipes: BTreeMap<u64, u32>,
+    pub last_recipe_id: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InviteScoreState {
     pub have_got_ssr: u64,
     pub have_got_fashion: u64,
@@ -663,6 +669,8 @@ pub struct AccountState {
     pub adventure: AdventureState,
     #[serde(default)]
     pub ship_task: ShipTaskState,
+    #[serde(default)]
+    pub food_compose: FoodComposeState,
     #[serde(default)]
     pub exchange_times: BTreeMap<u64, u32>,
     #[serde(default)]

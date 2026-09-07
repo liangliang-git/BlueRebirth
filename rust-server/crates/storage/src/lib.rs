@@ -1196,6 +1196,22 @@ impl ProfileStore {
                         })?,
                     );
                 }
+            } else if activity_id == "foodCompose" {
+                match progress_kind.as_str() {
+                    "lastRecipeId" => account.food_compose.last_recipe_id = value,
+                    key => {
+                        if let Ok(recipe_id) = key.parse::<u64>() {
+                            account.food_compose.recipes.insert(
+                                recipe_id,
+                                u32::try_from(value).map_err(|_| {
+                                    StorageError::InvalidTypedAccount(
+                                        "food compose count is too large".to_owned(),
+                                    )
+                                })?,
+                            );
+                        }
+                    }
+                }
             } else if activity_id == "buildShip" {
                 let mut parts = progress_kind.split(':');
                 match parts.next() {
@@ -2595,6 +2611,30 @@ impl ProfileStore {
                     profile.id.as_str(),
                     id.to_string(),
                     typed_i64(u64::from(*count), "exchange count")?,
+                    timestamp(),
+                ],
+            )?;
+        }
+        let mut food_progress = vec![(
+            "lastRecipeId".to_owned(),
+            account.food_compose.last_recipe_id,
+        )];
+        food_progress.extend(
+            account
+                .food_compose
+                .recipes
+                .iter()
+                .map(|(id, count)| (id.to_string(), u64::from(*count))),
+        );
+        for (progress_kind, value) in food_progress {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'foodCompose', ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    progress_kind,
+                    typed_i64(value, "food compose state")?,
                     timestamp(),
                 ],
             )?;

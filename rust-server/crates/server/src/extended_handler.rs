@@ -91,6 +91,119 @@ pub(super) fn handle_typed_exchange(
     }
 }
 
+pub(super) fn handle_typed_food_compose(
+    state: &ServerState,
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    pre_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
+    let catalog = gameplay_catalog();
+    match method {
+        "foodCompose.GetFoodComposeData" | "foodCompose.GetFoodCompose" => {
+            reply(method, typed_food_info_payload(account, catalog))
+        }
+        "foodCompose.FoodCompose" => {
+            let material_ids = decode_repeated_varint_field(request_args, 1);
+            let recipe_id = catalog
+                .food_recipes
+                .iter()
+                .find(|(_, recipe)| {
+                    let mut configured = recipe_material_ids(recipe);
+                    if configured.len() != material_ids.len() {
+                        return false;
+                    }
+                    configured.sort_unstable();
+                    let mut requested = material_ids.clone();
+                    requested.sort_unstable();
+                    !requested.is_empty() && configured == requested
+                })
+                .map(|(id, _)| *id)
+                .unwrap_or_else(|| decode_varint_field(request_args, 2));
+            let Some(recipe) = catalog.food_recipes.get(&recipe_id) else {
+                return invalid("food recipe was not found");
+            };
+            let materials = reward_triplets(recipe, "material");
+            if materials.is_empty()
+                || materials
+                    .iter()
+                    .any(|(kind, item, amount)| !can_consume_typed(account, *kind, *item, *amount))
+            {
+                return invalid("food materials are insufficient");
+            }
+            let reward_id = recipe
+                .get("reward")
+                .and_then(Value::as_array)
+                .and_then(|values| values.first())
+                .and_then(Value::as_i64)
+                .and_then(|value| i32::try_from(value).ok())
+                .unwrap_or_default();
+            let rewards = catalog
+                .rewards_by_id
+                .get(&reward_id)
+                .cloned()
+                .unwrap_or_default();
+            if rewards.is_empty() || !can_grant_typed_task_rewards(account, &rewards) {
+                return invalid("food reward is unsupported");
+            }
+            for (kind, item, amount) in materials {
+                consume_typed(account, kind, item, amount);
+            }
+            for reward in &rewards {
+                let _ = grant_typed_task_reward(account, reward);
+            }
+            let recipe_key = recipe_id.max(0) as u64;
+            account.food_compose.last_recipe_id = recipe_key;
+            account
+                .food_compose
+                .recipes
+                .entry(recipe_key)
+                .and_modify(|count| *count = count.saturating_add(1))
+                .or_insert(1);
+            append_method_push(
+                pre_pushes,
+                "user.UpdateUserInfo",
+                UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            reply(
+                "foodCompose.FoodCompose",
+                food_reward_payload(recipe_id, &rewards),
+            )
+        }
+        _ => HandlerResult::Empty,
+    }
+}
+
+fn typed_food_info_payload(
+    account: &blueoath_domain::AccountState,
+    catalog: &GameplayCatalog,
+) -> Vec<u8> {
+    let mut output = Vec::new();
+    for id in catalog.food_recipes.keys().copied() {
+        let mut row = Vec::new();
+        append_varint_field(&mut row, 1, id.max(0) as u64);
+        append_varint_field(
+            &mut row,
+            2,
+            account
+                .food_compose
+                .recipes
+                .get(&(id.max(0) as u64))
+                .copied()
+                .unwrap_or_default() as u64,
+        );
+        append_varint_field(&mut row, 3, 0);
+        append_message_field(&mut output, 1, &row);
+    }
+    append_varint_field(&mut output, 3, account.food_compose.last_recipe_id);
+    output
+}
+
 fn typed_exchange_info_payload(
     account: &blueoath_domain::AccountState,
     catalog: &GameplayCatalog,
