@@ -319,6 +319,35 @@ fn opening_store_is_idempotent_and_records_schema_version() {
 }
 
 #[test]
+fn future_schema_version_rejects_startup() {
+    let suffix = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!(
+        "blueoath-rust-future-schema-test-{}-{suffix}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE schema_meta (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                version INTEGER NOT NULL,
+                applied_at TEXT NOT NULL
+             );
+             INSERT INTO schema_meta(id, version, applied_at)
+             VALUES (1, 999, 'future');",
+        )
+        .unwrap();
+    drop(connection);
+
+    assert!(matches!(
+        ProfileStore::open(&root),
+        Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery))
+    ));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn account_revision_is_cascaded_with_profile() {
     let (store, root) = store();
     let profile_id = ProfileId::new("revision-cascade").unwrap();
