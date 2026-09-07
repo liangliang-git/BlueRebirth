@@ -252,7 +252,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 21);
+    assert_eq!(version, 22);
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
@@ -387,6 +387,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
     account.tasks.completed.insert(7);
     account.tasks.claimed.insert(7);
     account.daily_copy.reset_day = 42;
+    account.sea.difficulty = 3;
     account
         .daily_copy
         .challenge_times
@@ -618,6 +619,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert!(loaded.tasks.completed.contains(&7));
     assert!(loaded.tasks.claimed.contains(&7));
     assert_eq!(loaded.daily_copy.reset_day, 42);
+    assert_eq!(loaded.sea.difficulty, 3);
     assert_eq!(loaded.buildings.levels.get(&11), Some(&6));
     assert_eq!(loaded.buildings.template_ids.get(&11), Some(&41));
     assert_eq!(loaded.buildings.land_indices.get(&11), Some(&6));

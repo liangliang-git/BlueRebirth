@@ -1734,6 +1734,46 @@ where
             } else if !(1..=7).contains(&requested) {
                 handler_error = Some(GameError::Internal("sea difficulty is invalid".to_owned()));
                 Some(Vec::new())
+            } else if let Some(account) = typed_account.as_deref_mut() {
+                let level = i32::try_from(account.character.level).unwrap_or(i32::MAX);
+                if level < SEA_DIFFICULTY_UNLOCK_LEVEL && requested > 1 {
+                    handler_error = Some(GameError::Internal(
+                        "sea difficulty unlocks at commander level 60".to_owned(),
+                    ));
+                    Some(Vec::new())
+                } else {
+                    account.sea.difficulty = requested as u32;
+                    let fallback_catalog;
+                    let catalog = match chapter_catalog {
+                        Some(catalog) => catalog,
+                        None => {
+                            fallback_catalog = ChapterCatalog::fallback();
+                            &fallback_catalog
+                        }
+                    };
+                    let passed = account
+                        .battle
+                        .passed_copies
+                        .iter()
+                        .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
+                        .collect::<Vec<_>>();
+                    append_method_push(
+                        &mut post_pushes,
+                        "copy.GetCopy",
+                        CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
+                            &catalog.sea,
+                            copy_progress_max_or_initial(
+                                &catalog.sea,
+                                &passed,
+                                catalog.sea_initial,
+                            ),
+                            &passed,
+                            &[],
+                            account.sea.difficulty as i32,
+                        ),
+                    );
+                    Some(Vec::new())
+                }
             } else if let Some(account) = account.as_deref_mut() {
                 let level = commander_level(account);
                 if level < SEA_DIFFICULTY_UNLOCK_LEVEL && requested > 1 {
@@ -2501,6 +2541,7 @@ fn legacy_only_method(method: &str) -> bool {
             | "copy.StartBase"
             | "copy.QuitBase"
             | "copy.GetRandomFactors"
+            | "copy.ChooseSfLv"
             | "copy.UnLockCopy"
             | "copy.GetRecord"
             | "copy.DeleteRecord"

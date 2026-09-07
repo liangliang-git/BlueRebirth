@@ -272,6 +272,11 @@ pub struct BattleProgressState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeaProgressState {
+    pub difficulty: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DailyCopyState {
     pub reset_day: u32,
     pub challenge_times: BTreeMap<ChapterId, u32>,
@@ -734,6 +739,8 @@ pub struct AccountState {
     pub fleet: FleetState,
     #[serde(default)]
     pub battle: BattleProgressState,
+    #[serde(default)]
+    pub sea: SeaProgressState,
     #[serde(default)]
     pub daily_copy: DailyCopyState,
     #[serde(default)]

@@ -869,6 +869,16 @@ impl ProfileStore {
                 account.battle.passed_copies.insert(copy_id);
             }
         }
+        account.sea.difficulty = connection
+            .query_row(
+                "SELECT difficulty FROM sea_progress WHERE profile_id = ?1",
+                params![profile_id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .map(|difficulty| non_negative_u32(difficulty, "sea difficulty"))
+            .transpose()?
+            .unwrap_or_default();
 
         let mut statement = connection.prepare(
             "SELECT record_index, copy_id, pass_time, secret_id, strategy_id,
@@ -2438,6 +2448,15 @@ impl ProfileStore {
                 ],
             )?;
         }
+        if account.sea.difficulty > 0 {
+            transaction.execute(
+                "INSERT INTO sea_progress(profile_id, difficulty) VALUES (?1, ?2)",
+                params![
+                    profile.id.as_str(),
+                    typed_i64(account.sea.difficulty, "sea difficulty")?,
+                ],
+            )?;
+        }
         for (record_index, record) in account.battle.records.iter().enumerate() {
             transaction.execute(
                 "INSERT INTO copy_records(
@@ -3366,6 +3385,7 @@ fn clear_normalized_account(
         "copy_records",
         "copy_progress",
         "sea_progress",
+        "sea_progress",
         "tower_progress",
         "activity_progress",
         "tasks",
@@ -3497,6 +3517,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0019_guild_typed_state.sql"),
     include_str!("../../../migrations/0020_guild_box_typed_state.sql"),
     include_str!("../../../migrations/0021_copy_records_typed_state.sql"),
+    include_str!("../../../migrations/0022_sea_progress_typed_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {
