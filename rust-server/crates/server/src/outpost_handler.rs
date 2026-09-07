@@ -10,8 +10,11 @@ pub(super) fn handle_typed(
     match method {
         "outpost.GetOutPostInfo" => reply(method, outpost_info_payload_typed(account)),
         "outpost.UpgradeBuilding" | "outpost.DegradeBuilding" => {
-            let building_id =
-                u64::try_from(decode_varint_field(request_args, 1)).unwrap_or_default();
+            let request = match OutpostBuildingRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => return invalid("outpost building id is invalid"),
+            };
+            let building_id = request.building_id;
             let delta = if method.ends_with("UpgradeBuilding") {
                 1
             } else {
@@ -28,14 +31,17 @@ pub(super) fn handle_typed(
             reply(method, outpost_info_payload_typed(account))
         }
         "outpost.SetHero" => {
-            let building_id =
-                u64::try_from(decode_varint_field(request_args, 1)).unwrap_or_default();
+            let request = match OutpostSetHeroRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => return invalid("outpost hero request is invalid"),
+            };
+            let building_id = request.building_id;
             if !account.buildings.levels.contains_key(&building_id) {
                 return invalid("outpost building was not found");
             }
             let mut hero_ids = Vec::new();
-            for hero_id in decode_repeated_varint_field(request_args, 2) {
-                let Ok(hero_id) = blueoath_domain::HeroId::new(hero_id as u64) else {
+            for hero_id in request.hero_ids {
+                let Ok(hero_id) = blueoath_domain::HeroId::new(hero_id) else {
                     return invalid("outpost hero id is invalid");
                 };
                 if !account.dock.heroes.contains_key(&hero_id) || hero_ids.contains(&hero_id) {

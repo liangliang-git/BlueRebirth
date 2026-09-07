@@ -2,10 +2,10 @@ use blueoath_protocol::{
     BuildShipRequest, BuildShipRewardRequest, ChangeNameRequest, ChangeWorldChannelRequest,
     CopyAttackRequest, CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
     DailyCopySelectExRequest, Decode, FriendSearchRequest, FriendTargetRequest,
-    GetBarrageByIdRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, ProtocolError,
-    SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest,
-    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, TaskAllRewardRequest,
-    TaskRewardRequest,
+    GetBarrageByIdRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, OutpostBuildingRequest,
+    OutpostSetHeroRequest, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
+    SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
+    SetSecretaryRequest, TaskAllRewardRequest, TaskRewardRequest,
 };
 
 #[test]
@@ -255,6 +255,13 @@ fn decodes_typed_chat_requests_with_length_limits() {
         GuildBoxAnonymousRequest::decode(&[0x08, 1]).unwrap(),
         GuildBoxAnonymousRequest { anonymous: true }
     );
+    assert_eq!(
+        OutpostSetHeroRequest::decode(&[0x08, 1, 0x10, 2, 0x10, 3]).unwrap(),
+        OutpostSetHeroRequest {
+            building_id: 1,
+            hero_ids: vec![2, 3],
+        }
+    );
 }
 
 #[test]
@@ -278,5 +285,9 @@ fn rejects_invalid_typed_chat_requests() {
     assert!(matches!(
         GuildBoxAnonymousRequest::decode(&[0x08, 2]),
         Err(ProtocolError::Invalid("guild box anonymous is invalid"))
+    ));
+    assert!(matches!(
+        OutpostBuildingRequest::decode(&[0x08, 0]),
+        Err(ProtocolError::Invalid("outpost building id is invalid"))
     ));
 }

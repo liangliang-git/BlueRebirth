@@ -1686,6 +1686,47 @@ impl Decode for GuildBoxAnonymousRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutpostBuildingRequest {
+    pub building_id: u64,
+}
+
+impl Decode for OutpostBuildingRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let building_id = required_field(&fields, 1, "outpost is missing building id")?;
+        if building_id == 0 {
+            return Err(ProtocolError::Invalid("outpost building id is invalid"));
+        }
+        Ok(Self {
+            building_id: u64::try_from(building_id)
+                .map_err(|_| ProtocolError::Invalid("outpost building id is invalid"))?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutpostSetHeroRequest {
+    pub building_id: u64,
+    pub hero_ids: Vec<u64>,
+}
+
+impl Decode for OutpostSetHeroRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let building_id = required_field(&fields, 1, "outpost is missing building id")?;
+        let hero_ids = fields.get(&2).cloned().unwrap_or_default();
+        if building_id == 0 || hero_ids.contains(&0) {
+            return Err(ProtocolError::Invalid("outpost hero request is invalid"));
+        }
+        Ok(Self {
+            building_id: u64::try_from(building_id)
+                .map_err(|_| ProtocolError::Invalid("outpost building id is invalid"))?,
+            hero_ids,
+        })
+    }
+}
+
 impl Decode for SeaDifficultyRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
