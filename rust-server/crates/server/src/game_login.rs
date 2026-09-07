@@ -833,6 +833,17 @@ where
             }
             result.into_payload()
         }
+        _ if typed_account.is_some() && misc_handler::handles_typed(request.method.as_str()) => {
+            let result = misc_handler::handle_typed(
+                typed_account.as_mut().expect("typed misc account"),
+                request.method.as_str(),
+                request_args,
+            );
+            if let HandlerResult::Error(error) = &result {
+                handler_error = Some(error.clone());
+            }
+            result.into_payload()
+        }
         _ if request.method == "archiveCopy.IsLoad"
             || request.method == "copyextra.AddCopyRewardCount"
             || request.method == "copyextra.UpdateCopyExtraInfo"
@@ -842,20 +853,24 @@ where
             || request.method == "miniGame.StartMiniGame"
             || request.method == "alchemy.StartAlchemy" =>
         {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            let result = if let Some(typed) = typed_account.as_mut() {
+                misc_handler::handle_typed(typed, request.method.as_str(), request_args)
+            } else {
+                let mut context = GameLoginRequestContext {
+                    state,
+                    account: &mut account,
+                    catalogs: *catalogs,
+                    pre_pushes: &mut pre_pushes,
+                    post_pushes: &mut post_pushes,
+                    handler_error: &mut handler_error,
+                    pass_details: &mut pass_details,
+                    pass_rewards: &mut pass_rewards,
+                    pass_hero_ids: &mut pass_hero_ids,
+                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                };
+                misc_handler::handle(&mut context, request.method.as_str(), request_args)
             };
-            let result = misc_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }

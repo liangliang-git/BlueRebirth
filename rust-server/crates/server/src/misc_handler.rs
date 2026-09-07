@@ -18,6 +18,85 @@ pub(super) fn handles(method: &str) -> bool {
     )
 }
 
+pub(super) fn handles_typed(method: &str) -> bool {
+    matches!(
+        method,
+        "archiveCopy.IsLoad"
+            | "copyextra.AddCopyRewardCount"
+            | "copyextra.UpdateCopyExtraInfo"
+            | "prefs.SavePrefs"
+            | "statcount.GetStatCount"
+            | "sign.Sign"
+            | "miniGame.StartMiniGame"
+            | "alchemy.StartAlchemy"
+    )
+}
+
+pub(super) fn handle_typed(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    match method {
+        "copyextra.AddCopyRewardCount" => {
+            let chapter_id = decode_varint_field(request_args, 1);
+            let reward_time = decode_varint_field(request_args, 2).max(1);
+            if chapter_id <= 0 {
+                return invalid("copy reward count target is invalid");
+            }
+            let key = format!("copyExtraRewardCount:{chapter_id}");
+            let total = account.activities.progress.entry(key).or_default();
+            *total = total.saturating_add(u64::try_from(reward_time).unwrap_or_default());
+            reply(method, copy_reward_times_payload(chapter_id, *total as i64))
+        }
+        "copyextra.UpdateCopyExtraInfo" => {
+            let mut output = Vec::new();
+            for (key, value) in &account.activities.progress {
+                let Some(chapter_id) = key.strip_prefix("copyExtraRewardCount:") else {
+                    continue;
+                };
+                let Ok(chapter_id) = chapter_id.parse::<i32>() else {
+                    continue;
+                };
+                append_message_field(
+                    &mut output,
+                    1,
+                    &copy_reward_times_payload(chapter_id, *value as i64),
+                );
+            }
+            reply(method, output)
+        }
+        "sign.Sign" => {
+            let day = decode_varint_field(request_args, 1).max(1);
+            account.activities.progress.insert(format!("sign:{day}"), 1);
+            HandlerResult::PushOnly
+        }
+        "alchemy.StartAlchemy" => {
+            let formula_id = decode_varint_field(request_args, 1);
+            let equip_ids = decode_repeated_varint_field(request_args, 2);
+            if formula_id <= 0
+                || equip_ids.is_empty()
+                || equip_ids.iter().any(|id| {
+                    *id <= 0
+                        || !account
+                            .dock
+                            .equipments
+                            .keys()
+                            .any(|equip_id| equip_id.get() == *id as u64)
+                })
+            {
+                return invalid("alchemy request is invalid");
+            }
+            HandlerResult::PushOnly
+        }
+        "archiveCopy.IsLoad"
+        | "prefs.SavePrefs"
+        | "statcount.GetStatCount"
+        | "miniGame.StartMiniGame" => HandlerResult::PushOnly,
+        _ => HandlerResult::Empty,
+    }
+}
+
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
@@ -297,5 +376,30 @@ mod tests {
             &str,
             &[u8],
         ) -> HandlerResult = handle;
+    }
+
+    #[test]
+    fn typed_copy_extra_state_uses_activity_progress() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("misc-typed").unwrap(),
+            "Captain",
+        );
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, 77);
+        append_varint_field(&mut args, 2, 4);
+        assert!(matches!(
+            handle_typed(&mut account, "copyextra.AddCopyRewardCount", &args),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account.activities.progress.get("copyExtraRewardCount:77"),
+            Some(&4)
+        );
+        let HandlerResult::Reply(response) =
+            handle_typed(&mut account, "copyextra.UpdateCopyExtraInfo", &[])
+        else {
+            panic!("expected typed copy extra response");
+        };
+        assert_eq!(decode_repeated_message_field(&response.payload, 1).len(), 1);
     }
 }
