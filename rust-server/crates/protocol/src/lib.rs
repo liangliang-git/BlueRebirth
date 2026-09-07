@@ -2213,6 +2213,142 @@ impl Decode for GuildOfferRequest {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuildCreateRequest {
+    pub name: String,
+    pub emblem: i32,
+    pub frame: i32,
+}
+
+impl Decode for GuildCreateRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let name = decode_required_string(
+            payload,
+            1,
+            "guild create is missing name",
+            "guild create has duplicate name",
+            "guild name is too long",
+            24,
+        )?;
+        let emblem = optional_i32(&fields, 2, "guild create has duplicate emblem")?;
+        let frame = optional_i32(&fields, 3, "guild create has duplicate frame")?;
+        if name.trim().is_empty() {
+            return Err(ProtocolError::Invalid("guild name is invalid"));
+        }
+        Ok(Self {
+            name,
+            emblem,
+            frame,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuildListRequest {
+    pub start: i32,
+    pub end: i32,
+}
+
+impl Decode for GuildListRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            start: optional_i32(&fields, 1, "guild list has duplicate start")?,
+            end: optional_i32(&fields, 2, "guild list has duplicate end")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuildSearchRequest {
+    pub guild_id: u64,
+    pub name: String,
+}
+
+impl Decode for GuildSearchRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let guild_id = optional_u64(&fields, 1, "guild search has duplicate id")?;
+        let name = decode_optional_string_field(
+            payload,
+            2,
+            "guild search has duplicate name",
+            "guild search name is too long",
+            64,
+        )?
+        .unwrap_or_default();
+        if guild_id == 0 && name.is_empty() {
+            return Err(ProtocolError::Invalid("guild search requires id or name"));
+        }
+        Ok(Self { guild_id, name })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuildIdRequest {
+    pub guild_id: u64,
+}
+
+impl Decode for GuildIdRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let guild_id = required_u64(&fields, 1, "guild request is missing guild id")?;
+        if guild_id == 0 {
+            return Err(ProtocolError::Invalid("guild id is invalid"));
+        }
+        Ok(Self { guild_id })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuildModifyRequest {
+    pub name: Option<String>,
+    pub emblem: i32,
+    pub enounce: Option<String>,
+    pub notice: Option<String>,
+    pub frame: i32,
+    pub chat_room: Option<String>,
+}
+
+impl Decode for GuildModifyRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            name: decode_optional_string_field(
+                payload,
+                1,
+                "guild modify has duplicate name",
+                "guild name is too long",
+                24,
+            )?,
+            emblem: optional_i32(&fields, 2, "guild modify has duplicate emblem")?,
+            enounce: decode_optional_string_field(
+                payload,
+                3,
+                "guild modify has duplicate enounce",
+                "guild enounce is too long",
+                512,
+            )?,
+            notice: decode_optional_string_field(
+                payload,
+                4,
+                "guild modify has duplicate notice",
+                "guild notice is too long",
+                512,
+            )?,
+            frame: optional_i32(&fields, 6, "guild modify has duplicate frame")?,
+            chat_room: decode_optional_string_field(
+                payload,
+                7,
+                "guild modify has duplicate chat room",
+                "guild chat room is too long",
+                128,
+            )?,
+        })
+    }
+}
+
 impl Decode for GuildTaskDonateRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
@@ -2323,6 +2459,19 @@ fn decode_optional_string(
     too_long: &'static str,
     max_length: usize,
 ) -> Result<String, ProtocolError> {
+    Ok(
+        decode_optional_string_field(payload, field, duplicate, too_long, max_length)?
+            .unwrap_or_default(),
+    )
+}
+
+fn decode_optional_string_field(
+    payload: &[u8],
+    field: u32,
+    duplicate: &'static str,
+    too_long: &'static str,
+    max_length: usize,
+) -> Result<Option<String>, ProtocolError> {
     let mut reader = PbReader::new(payload);
     let mut value = None;
     while let Some((current, wire)) = reader.next_field()? {
@@ -2339,7 +2488,7 @@ fn decode_optional_string(
             reader.skip(wire)?;
         }
     }
-    Ok(value.unwrap_or_default())
+    Ok(value)
 }
 
 fn optional_i32(

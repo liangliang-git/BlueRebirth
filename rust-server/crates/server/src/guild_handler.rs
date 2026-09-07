@@ -12,10 +12,10 @@ pub(super) fn handle_typed(
 ) -> HandlerResult {
     match method {
         "guild.Create" => {
-            let name = decode_string_field(request_args, 1).unwrap_or_default();
-            let emblem = decode_varint_field(request_args, 2).max(0) as u32;
-            let frame = decode_varint_field(request_args, 3).max(0) as u32;
-            if account.guild.is_some() || name.trim().is_empty() || name.chars().count() > 24 {
+            let Ok(request) = GuildCreateRequest::decode(request_args) else {
+                return invalid("guild create request is invalid");
+            };
+            if account.guild.is_some() {
                 return invalid("guild name is invalid or captain already has a guild");
             }
             let mut id = 2_000_000_u64;
@@ -27,35 +27,32 @@ pub(super) fn handle_typed(
             account.guild = Some(new_typed_guild(
                 account,
                 id.max(2_000_000),
-                name.trim(),
-                emblem,
-                frame,
+                request.name.trim(),
+                request.emblem.max(0) as u32,
+                request.frame.max(0) as u32,
                 GUILD_LEADER as u32,
                 now,
             ));
             push_guild_state_typed(pre_pushes, account);
             HandlerResult::PushOnly
         }
-        "guild.GetList" => reply(
-            method,
-            guild_list_payload_from_typed(
-                account,
-                decode_varint_field(request_args, 1),
-                decode_varint_field(request_args, 2),
-            ),
-        ),
-        "guild.Search" => reply(
-            method,
-            guild_search_payload_from_typed(
-                account,
-                decode_varint_u64_field(request_args, 1),
-                &decode_string_field(request_args, 2).unwrap_or_default(),
-            ),
-        ),
+        "guild.GetList" => reply(method, {
+            let Ok(request) = GuildListRequest::decode(request_args) else {
+                return invalid("guild list request is invalid");
+            };
+            guild_list_payload_from_typed(account, request.start, request.end)
+        }),
+        "guild.Search" => reply(method, {
+            let Ok(request) = GuildSearchRequest::decode(request_args) else {
+                return invalid("guild search request is invalid");
+            };
+            guild_search_payload_from_typed(account, request.guild_id, &request.name)
+        }),
         "guild.Apply" => {
-            if decode_varint_u64_field(request_args, 1) != DEFAULT_GUILD_ID
-                || account.guild.is_some()
-            {
+            let Ok(request) = GuildIdRequest::decode(request_args) else {
+                return invalid("guild application is invalid");
+            };
+            if request.guild_id != DEFAULT_GUILD_ID || account.guild.is_some() {
                 return invalid("guild application is invalid");
             }
             account.guild = Some(new_typed_guild(
@@ -86,24 +83,27 @@ pub(super) fn handle_typed(
             HandlerResult::PushOnly
         }
         "guild.Modify" => {
+            let Ok(request) = GuildModifyRequest::decode(request_args) else {
+                return invalid("guild modify request is invalid");
+            };
             let Some(guild) = account.guild.as_mut() else {
                 return invalid("captain is not in a guild");
             };
-            if let Some(value) = decode_string_field(request_args, 1) {
+            if let Some(value) = request.name {
                 if value.trim().is_empty() || value.chars().count() > 24 {
                     return invalid("guild name is invalid");
                 }
                 guild.name = value;
             }
-            guild.emblem = decode_varint_field(request_args, 2).max(0) as u32;
-            if let Some(value) = decode_string_field(request_args, 3) {
+            guild.emblem = request.emblem.max(0) as u32;
+            if let Some(value) = request.enounce {
                 guild.enounce = value;
             }
-            if let Some(value) = decode_string_field(request_args, 4) {
+            if let Some(value) = request.notice {
                 guild.notice = value;
             }
-            guild.frame = decode_varint_field(request_args, 6).max(0) as u32;
-            if let Some(value) = decode_string_field(request_args, 7) {
+            guild.frame = request.frame.max(0) as u32;
+            if let Some(value) = request.chat_room {
                 guild.chat_room = value;
             }
             push_guild_state_typed(pre_pushes, account);

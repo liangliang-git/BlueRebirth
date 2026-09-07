@@ -6,7 +6,8 @@ use blueoath_protocol::{
     CopyAttackRequest, CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
     DailyCopySelectExRequest, Decode, FriendSearchRequest, FriendTargetRequest,
     GetBarrageByIdRequest, GuildActivityPresentRequest, GuildBoxAnonymousRequest,
-    GuildBoxIdRequest, GuildOfferRequest, GuildTaskDonateRequest, GuildTaskIdRequest,
+    GuildBoxIdRequest, GuildCreateRequest, GuildIdRequest, GuildListRequest, GuildModifyRequest,
+    GuildOfferRequest, GuildSearchRequest, GuildTaskDonateRequest, GuildTaskIdRequest,
     GuildTaskMemberRequest, GuildWarBaseRequest, GuildWarScoreRequest, HeroAwakenFinishRequest,
     HeroAwakenRewardRequest, InviteRecordVersionRequest, InviteStateTypeRequest,
     OutpostBuildingRequest, OutpostSetHeroRequest, ProtocolError, SeaDifficultyRequest,
@@ -423,6 +424,43 @@ fn decodes_typed_coop_requests() {
         GuildOfferRequest {
             task_id: 4,
             task_index: 2,
+        }
+    );
+    assert_eq!(
+        GuildCreateRequest::decode(&[
+            0x0a, 6, 0xe8, 0x88, 0xb0, 0xe9, 0x98, 0x9f, 0x10, 0xe8, 0x07, 0x18, 2,
+        ])
+        .unwrap(),
+        GuildCreateRequest {
+            name: "舰队".to_owned(),
+            emblem: 1000,
+            frame: 2,
+        }
+    );
+    assert_eq!(
+        GuildListRequest::decode(&[0x08, 1, 0x10, 20]).unwrap(),
+        GuildListRequest { start: 1, end: 20 }
+    );
+    assert_eq!(
+        GuildSearchRequest::decode(&[0x08, 7, 0x12, 2, b'G', b'B']).unwrap(),
+        GuildSearchRequest {
+            guild_id: 7,
+            name: "GB".to_owned(),
+        }
+    );
+    assert_eq!(
+        GuildIdRequest::decode(&[0x08, 7]).unwrap(),
+        GuildIdRequest { guild_id: 7 }
+    );
+    assert_eq!(
+        GuildModifyRequest::decode(&[0x0a, 2, b'X', b'Y', 0x30, 3, 0x3a, 1, b'c']).unwrap(),
+        GuildModifyRequest {
+            name: Some("XY".to_owned()),
+            emblem: 0,
+            enounce: None,
+            notice: None,
+            frame: 3,
+            chat_room: Some("c".to_owned()),
         }
     );
 }
