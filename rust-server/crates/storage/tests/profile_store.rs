@@ -247,6 +247,20 @@ fn account_snapshot_write_projects_core_rows_into_normalized_tables() {
     });
 
     store.save_account("normalized", &account).unwrap();
+    let typed = store
+        .load_typed_account(&ProfileId::new("normalized").unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(typed.character.uid, 7);
+    assert_eq!(typed.dock.heroes.len(), 1);
+    assert_eq!(typed.dock.equipments.len(), 1);
+    assert_eq!(
+        typed
+            .resources
+            .amount(blueoath_domain::CurrencyKind::Gold)
+            .get(),
+        100
+    );
     let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
     for (table, expected) in [
         ("characters", 1),

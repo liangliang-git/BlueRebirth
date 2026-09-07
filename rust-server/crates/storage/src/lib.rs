@@ -1,5 +1,6 @@
 use blueoath_domain::{
-    AccountRepository, AccountState, NewAccountFactory, ProfileId, RepositoryError,
+    AccountRepository, AccountState, CharacterState, EquipId, EquipmentState, FleetId, FleetRecord,
+    HeroId, HeroState, NewAccountFactory, ProfileId, ProfileState, RepositoryError, TemplateId,
 };
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -21,6 +22,8 @@ pub enum StorageError {
     InvalidProfileId,
     #[error("account revision conflict: expected {expected}, actual {actual}")]
     RevisionConflict { expected: u64, actual: u64 },
+    #[error("invalid typed account: {0}")]
+    InvalidTypedAccount(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -84,6 +87,219 @@ impl ProfileStore {
             .map(|json| serde_json::from_str(&json))
             .transpose()
             .map_err(StorageError::from)
+    }
+
+    pub fn load_typed_account(
+        &self,
+        profile_id: &ProfileId,
+    ) -> Result<Option<AccountState>, StorageError> {
+        let connection = self.connection()?;
+        let Some((name, revision)) = connection
+            .query_row(
+                "SELECT name, updated_utc FROM profiles WHERE id = ?1",
+                params![profile_id.as_str()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+            .map(|(name, _updated)| (name, 0_u64))
+        else {
+            return Ok(None);
+        };
+        let revision = connection
+            .query_row(
+                "SELECT revision FROM account_revisions WHERE profile_id = ?1",
+                params![profile_id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .unwrap_or(i64::try_from(revision).unwrap_or_default());
+        let revision = u64::try_from(revision)
+            .map_err(|_| StorageError::InvalidTypedAccount("negative revision".to_owned()))?;
+        let mut account = AccountState::new(ProfileState {
+            id: profile_id.clone(),
+            name,
+            revision,
+        });
+
+        if let Some(row) = connection
+            .query_row(
+                "SELECT uid, name, level, exp, secretary_id, head, head_frame,
+                        gold, diamond, supply, pve_pt
+                 FROM characters WHERE profile_id = ?1",
+                params![profile_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, i64>(8)?,
+                        row.get::<_, i64>(9)?,
+                        row.get::<_, i64>(10)?,
+                    ))
+                },
+            )
+            .optional()?
+        {
+            account.character = CharacterState {
+                uid: positive_u64(row.0, "character uid")?,
+                name: row.1,
+                level: positive_u32(row.2, "character level")?,
+                exp: non_negative_u64(row.3, "character exp")?,
+                secretary_id: (row.4 > 0)
+                    .then(|| {
+                        HeroId::new(row.4 as u64)
+                            .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))
+                    })
+                    .transpose()?,
+                head: non_negative_u32(row.5, "character head")?,
+                head_frame: non_negative_u32(row.6, "character head frame")?,
+                resources: account.character.resources.clone(),
+            };
+            for (kind, amount) in [
+                (blueoath_domain::CurrencyKind::Gold, row.7),
+                (blueoath_domain::CurrencyKind::Diamond, row.8),
+                (blueoath_domain::CurrencyKind::Supply, row.9),
+                (blueoath_domain::CurrencyKind::PvePoint, row.10),
+            ] {
+                account
+                    .resources
+                    .credit(kind, non_negative_u64(amount, "resource")?)
+                    .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
+            }
+        }
+
+        let mut statement = connection.prepare(
+            "SELECT hero_id, template_id, level, exp, mood, affection, hp, lock_state
+             FROM heroes WHERE profile_id = ?1 ORDER BY hero_id",
+        )?;
+        let heroes = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for row in heroes {
+            let id = positive_hero_id(row.0, "hero id")?;
+            let template_id = positive_template_id(row.1, "hero template id")?;
+            account.dock.heroes.insert(
+                id,
+                HeroState {
+                    id,
+                    template_id,
+                    level: positive_u32(row.2, "hero level")?,
+                    exp: non_negative_u64(row.3, "hero exp")?,
+                    mood: non_negative_u32(row.4, "hero mood")?,
+                    affection: non_negative_u64(row.5, "hero affection")?,
+                    hp: non_negative_u64(row.6, "hero hp")?,
+                    locked: row.7 != 0,
+                    equip_slots: Vec::new(),
+                },
+            );
+        }
+
+        let mut statement = connection.prepare(
+            "SELECT equip_id, template_id, enhance_level, star, enhance_exp, hero_id
+             FROM equipments WHERE profile_id = ?1 ORDER BY equip_id",
+        )?;
+        let equipments = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for row in equipments {
+            let id = positive_equip_id(row.0, "equipment id")?;
+            let template_id = positive_template_id(row.1, "equipment template id")?;
+            let hero_id = row
+                .5
+                .map(|value| positive_hero_id(value, "equipment hero id"))
+                .transpose()?;
+            account.dock.equipments.insert(
+                id,
+                EquipmentState {
+                    id,
+                    template_id,
+                    enhance_level: non_negative_u32(row.2, "equipment enhance level")?,
+                    star: non_negative_u32(row.3, "equipment star")?,
+                    enhance_exp: non_negative_u64(row.4, "equipment enhance exp")?,
+                    hero_id,
+                },
+            );
+        }
+
+        let mut statement = connection.prepare(
+            "SELECT fleet_id, formation_id, tactic_id
+             FROM fleets WHERE profile_id = ?1 ORDER BY fleet_id",
+        )?;
+        let fleets = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for row in fleets {
+            let id = positive_fleet_id(row.0, "fleet id")?;
+            account.fleet.fleets.insert(
+                id,
+                FleetRecord {
+                    formation_id: non_negative_u32(row.1, "formation id")?,
+                    tactic_id: non_negative_u32(row.2, "tactic id")?,
+                    members: Vec::new(),
+                },
+            );
+        }
+        let mut statement = connection.prepare(
+            "SELECT fleet_id, position, hero_id
+             FROM fleet_members WHERE profile_id = ?1 ORDER BY fleet_id, position",
+        )?;
+        let members = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for row in members {
+            let fleet_id = positive_fleet_id(row.0, "fleet member fleet id")?;
+            let hero_id = positive_hero_id(row.2, "fleet member hero id")?;
+            if let Some(fleet) = account.fleet.fleets.get_mut(&fleet_id) {
+                let position = usize::try_from(row.1).map_err(|_| {
+                    StorageError::InvalidTypedAccount("fleet member position is invalid".to_owned())
+                })?;
+                if fleet.members.len() <= position {
+                    fleet.members.resize(position + 1, hero_id);
+                }
+                fleet.members[position] = hero_id;
+            }
+        }
+        account
+            .validate()
+            .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
+        Ok(Some(account))
     }
 
     pub fn save(&self, profile_id: &str, name: &str, state: &Value) -> Result<(), StorageError> {
@@ -242,6 +458,50 @@ impl ProfileStore {
         )?;
         Ok(connection)
     }
+}
+
+fn positive_u64(value: i64, field: &str) -> Result<u64, StorageError> {
+    u64::try_from(value)
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| StorageError::InvalidTypedAccount(format!("{field} must be positive")))
+}
+
+fn non_negative_u64(value: i64, field: &str) -> Result<u64, StorageError> {
+    u64::try_from(value)
+        .map_err(|_| StorageError::InvalidTypedAccount(format!("{field} must be non-negative")))
+}
+
+fn non_negative_u32(value: i64, field: &str) -> Result<u32, StorageError> {
+    u32::try_from(value)
+        .map_err(|_| StorageError::InvalidTypedAccount(format!("{field} is out of range")))
+}
+
+fn positive_u32(value: i64, field: &str) -> Result<u32, StorageError> {
+    let value = non_negative_u32(value, field)?;
+    (value > 0)
+        .then_some(value)
+        .ok_or_else(|| StorageError::InvalidTypedAccount(format!("{field} must be positive")))
+}
+
+fn positive_hero_id(value: i64, field: &str) -> Result<HeroId, StorageError> {
+    HeroId::new(positive_u64(value, field)?)
+        .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))
+}
+
+fn positive_equip_id(value: i64, field: &str) -> Result<EquipId, StorageError> {
+    EquipId::new(positive_u64(value, field)?)
+        .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))
+}
+
+fn positive_fleet_id(value: i64, field: &str) -> Result<FleetId, StorageError> {
+    FleetId::new(positive_u64(value, field)?)
+        .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))
+}
+
+fn positive_template_id(value: i64, field: &str) -> Result<TemplateId, StorageError> {
+    TemplateId::new(positive_u64(value, field)?)
+        .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))
 }
 
 fn project_normalized_core(
