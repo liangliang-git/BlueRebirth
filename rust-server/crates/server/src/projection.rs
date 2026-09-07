@@ -1017,6 +1017,7 @@ pub(super) fn default_fleet_info() -> FleetInfo {
     }
 }
 
+#[cfg(test)]
 pub(super) fn copy_record_list_from_account(account: &Value, copy_id: i32) -> CopyRecordList {
     let character = account.get("character").unwrap_or(account);
     let uid = json_i64(character, "uid").unwrap_or_default().max(0) as u64;
@@ -1180,6 +1181,7 @@ pub(super) fn copy_info_response_from_typed_account(
     }
 }
 
+#[cfg(test)]
 pub(super) fn copy_info_response_from_account(account: &Value, copy_id: i32) -> CopyInfoResponse {
     let records = copy_record_list_from_account(account, copy_id).records;
     let first = records.first().cloned();
@@ -1207,6 +1209,7 @@ pub(super) fn copy_info_response_from_account(account: &Value, copy_id: i32) -> 
     }
 }
 
+#[cfg(test)]
 pub(super) fn delete_copy_record(account: &mut Value, copy_id: i32, index: i32) -> bool {
     let Some(records) = account.get_mut("copyRecords").and_then(Value::as_array_mut) else {
         return false;
@@ -1224,6 +1227,7 @@ pub(super) fn delete_copy_record(account: &mut Value, copy_id: i32, index: i32) 
     true
 }
 
+#[cfg(test)]
 pub(super) fn apply_copy_record_to_fleet(
     account: &mut Value,
     copy_id: i32,
