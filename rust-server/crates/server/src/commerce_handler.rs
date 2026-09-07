@@ -1,12 +1,14 @@
 use serde_json::Value;
 
+use super::common::error::GameError;
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
+) -> HandlerResult {
     let state = context.state;
     let account = &mut *context.account;
     let catalogs = context.catalogs;
@@ -20,15 +22,16 @@ pub(super) fn handle<'state, 'account, 'scratch>(
     } = catalogs;
     let account_view = account.as_deref();
     let pre_pushes = &mut *context.pre_pushes;
-    let response_err = &mut *context.response_err;
-    let response_err_msg = &mut *context.response_err_msg;
 
     match method {
         "fashion.Equip" => {
             let fashion_tid = decode_varint_field(request_args, 1);
             let equip_status = decode_varint_field(request_args, 2);
             let hero_id = decode_varint_u64_field(request_args, 3);
-            if let Some(account) = account.as_deref_mut() {
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            {
                 match fashion_equip_state(
                     account,
                     fashion_catalog,
@@ -42,18 +45,10 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                             "hero.UpdateHeroBagData",
                             encode_hero_intensify_payload(account, hero_id, &[]),
                         );
-                        Some(Vec::new())
+                        HandlerResult::PushOnly
                     }
-                    Err(error) => {
-                        *response_err = 1;
-                        *response_err_msg = error.to_owned();
-                        Some(Vec::new())
-                    }
+                    Err(error) => invalid(error),
                 }
-            } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
-                Some(Vec::new())
             }
         }
         "shop.BuyGoods" => {
@@ -62,135 +57,108 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             let requested_buy_num = decode_varint_field(request_args, 3);
             let buy_num = requested_buy_num.max(1);
             if buy_num > MAX_SHOP_BUY_NUM {
-                *response_err = 1;
-                *response_err_msg = format!("buy quantity exceeds {MAX_SHOP_BUY_NUM}");
-                Some(return_shop_buy_response(good_id, buy_num, None))
+                invalid("buy quantity exceeds limit")
             } else {
-                Some(
-                    if let Some(good) = shop_catalog
-                        .and_then(|catalog| catalog.goods_by_id.get(&good_id))
-                        .filter(|good| good.shop_id == shop_id)
-                    {
-                        if let Some(account) = account.as_deref_mut() {
-                            if let Some(reward) = apply_shop_good(
-                                account,
-                                good,
-                                buy_num,
-                                current_unix_seconds(),
-                                fashion_catalog,
-                            ) {
-                                advance_task_event(
-                                    account,
-                                    task_catalog,
-                                    401,
-                                    1,
-                                    current_unix_seconds(),
-                                );
-                                append_method_push(
-                                    pre_pushes,
-                                    "task.TaskInfo",
-                                    task_info_payload(account, task_catalog),
-                                );
-                                append_shop_update_pushes(
-                                    pre_pushes,
-                                    state,
-                                    account,
-                                    reward,
-                                    fashion_catalog,
-                                    equip_catalog,
-                                );
-                                return_shop_buy_response(good_id, buy_num, Some(reward))
-                            } else {
-                                *response_err = 1;
-                                *response_err_msg = "shop goods could not be granted".to_owned();
-                                return_shop_buy_response(good_id, buy_num, None)
-                            }
-                        } else {
-                            *response_err = 1;
-                            *response_err_msg = "account is unavailable".to_owned();
-                            return_shop_buy_response(good_id, buy_num, None)
-                        }
-                    } else {
-                        *response_err = 1;
-                        *response_err_msg = "shop goods were not found".to_owned();
-                        return_shop_buy_response(good_id, buy_num, None)
-                    },
-                )
+                let Some(good) = shop_catalog
+                    .and_then(|catalog| catalog.goods_by_id.get(&good_id))
+                    .filter(|good| good.shop_id == shop_id)
+                else {
+                    return invalid("shop goods were not found");
+                };
+                let Some(account) = account.as_deref_mut() else {
+                    return HandlerResult::Error(GameError::AccountUnavailable);
+                };
+                if let Some(reward) = apply_shop_good(
+                    account,
+                    good,
+                    buy_num,
+                    current_unix_seconds(),
+                    fashion_catalog,
+                ) {
+                    advance_task_event(account, task_catalog, 401, 1, current_unix_seconds());
+                    append_method_push(
+                        pre_pushes,
+                        "task.TaskInfo",
+                        task_info_payload(account, task_catalog),
+                    );
+                    append_shop_update_pushes(
+                        pre_pushes,
+                        state,
+                        account,
+                        reward,
+                        fashion_catalog,
+                        equip_catalog,
+                    );
+                    reply(
+                        method,
+                        return_shop_buy_response(good_id, buy_num, Some(reward)),
+                    )
+                } else {
+                    invalid("shop goods could not be granted")
+                }
             }
         }
         "shop.QualityBuyGoods" => {
             let shop_id = decode_varint_field(request_args, 1);
             let good_ids = decode_repeated_varint_field(request_args, 2);
             if good_ids.len() > MAX_SHOP_BATCH_SIZE {
-                *response_err = 1;
-                *response_err_msg = format!("purchase list exceeds {MAX_SHOP_BATCH_SIZE}");
-                Some(encode_quality_buy_goods_response(
-                    &[],
-                    &good_ids[..MAX_SHOP_BATCH_SIZE],
-                ))
+                invalid("purchase list exceeds limit")
             } else {
+                let Some(account) = account.as_deref_mut() else {
+                    return HandlerResult::Error(GameError::AccountUnavailable);
+                };
                 let mut rewards = Vec::new();
-                if let Some(account) = account.as_deref_mut() {
-                    for good_id in &good_ids {
-                        let Some(good) = shop_catalog
-                            .and_then(|catalog| catalog.goods_by_id.get(good_id))
-                            .filter(|good| good.shop_id == shop_id)
-                        else {
-                            continue;
-                        };
-                        if let Some(reward) = apply_shop_good(
+                for good_id in &good_ids {
+                    let Some(good) = shop_catalog
+                        .and_then(|catalog| catalog.goods_by_id.get(good_id))
+                        .filter(|good| good.shop_id == shop_id)
+                    else {
+                        continue;
+                    };
+                    if let Some(reward) =
+                        apply_shop_good(account, good, 1, current_unix_seconds(), fashion_catalog)
+                    {
+                        advance_task_event(account, task_catalog, 401, 1, current_unix_seconds());
+                        append_method_push(
+                            pre_pushes,
+                            "task.TaskInfo",
+                            task_info_payload(account, task_catalog),
+                        );
+                        append_shop_update_pushes(
+                            pre_pushes,
+                            state,
                             account,
-                            good,
-                            1,
-                            current_unix_seconds(),
+                            reward,
                             fashion_catalog,
-                        ) {
-                            advance_task_event(
-                                account,
-                                task_catalog,
-                                401,
-                                1,
-                                current_unix_seconds(),
-                            );
-                            append_method_push(
-                                pre_pushes,
-                                "task.TaskInfo",
-                                task_info_payload(account, task_catalog),
-                            );
-                            append_shop_update_pushes(
-                                pre_pushes,
-                                state,
-                                account,
-                                reward,
-                                fashion_catalog,
-                                equip_catalog,
-                            );
-                            rewards.push(reward);
-                        }
+                            equip_catalog,
+                        );
+                        rewards.push(reward);
                     }
                 }
                 if rewards.is_empty() {
-                    *response_err = 1;
-                    *response_err_msg = "shop goods were not found".to_owned();
+                    invalid("shop goods were not found")
+                } else {
+                    reply(
+                        method,
+                        encode_quality_buy_goods_response(&rewards, &good_ids),
+                    )
                 }
-                Some(encode_quality_buy_goods_response(&rewards, &good_ids))
             }
         }
-        "shop.GetShopsInfo" => Some(shop_info_payload(shop_catalog)),
+        "shop.GetShopsInfo" => reply(method, shop_info_payload(shop_catalog)),
         "shop.RefreshShop" => {
             let shop_id = decode_varint_field(request_args, 1);
             if let Some(payload) = shop_refresh_payload(shop_catalog, shop_id) {
-                Some(payload)
+                reply(method, payload)
             } else {
-                *response_err = 1;
-                *response_err_msg = "shop was not found".to_owned();
-                Some(Vec::new())
+                invalid("shop was not found")
             }
         }
-        "shop.UpdateShopInfo" => Some(shop_info_payload(shop_catalog)),
-        "bag.GetBagInfo" => Some(BagInfoCodec::encode(&bag_info_from_account(
-            account_view.unwrap_or(&Value::Null),
-        ))),
+        "shop.UpdateShopInfo" => reply(method, shop_info_payload(shop_catalog)),
+        "bag.GetBagInfo" => reply(
+            method,
+            BagInfoCodec::encode(&bag_info_from_account(account_view.unwrap_or(&Value::Null))),
+        ),
         "bag.SaleBagItem" => {
             let sale_items = decode_repeated_message_field(request_args, 1)
                 .into_iter()
@@ -198,16 +166,15 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 .filter(|(template_id, count)| *template_id > 0 && *count > 0)
                 .collect::<Vec<_>>();
             if sale_items.is_empty() {
-                *response_err = 1;
-                *response_err_msg = "sale item list is empty".to_owned();
-                Some(Vec::new())
-            } else if let Some(account) = account.as_deref_mut() {
+                invalid("sale item list is empty")
+            } else {
+                let Some(account) = account.as_deref_mut() else {
+                    return HandlerResult::Error(GameError::AccountUnavailable);
+                };
                 if sale_items.iter().any(|(template_id, count)| {
                     bag_item_count(account, *template_id) < i64::from(*count)
                 }) {
-                    *response_err = 1;
-                    *response_err_msg = "not enough sale items".to_owned();
-                    Some(Vec::new())
+                    invalid("not enough sale items")
                 } else {
                     let total = sale_items.iter().fold(0i32, |total, (template_id, count)| {
                         consume_bag_item(account, *template_id, *count);
@@ -224,30 +191,30 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                         "user.UpdateUserInfo",
                         UserInfoCodec::encode(&user_info_from_account(state, Some(account))),
                     );
-                    Some(encode_rewards_list(&[ShopReward {
-                        goods_type: 5,
-                        item_id: 1,
-                        num: total,
-                        instance_id: 0,
-                    }]))
+                    reply(
+                        method,
+                        encode_rewards_list(&[ShopReward {
+                            goods_type: 5,
+                            item_id: 1,
+                            num: total,
+                            instance_id: 0,
+                        }]),
+                    )
                 }
-            } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
-                Some(Vec::new())
             }
         }
         "bag.CompositeItem" => {
             let template_id = decode_varint_field(request_args, 1);
             let requested = decode_varint_field(request_args, 2);
             if template_id <= 0 || requested <= 0 {
-                *response_err = 1;
-                *response_err_msg = "composite item arguments are invalid".to_owned();
-            } else if let Some(account) = account.as_deref_mut() {
+                invalid("composite item arguments are invalid")
+            } else {
+                let Some(account) = account.as_deref_mut() else {
+                    return HandlerResult::Error(GameError::AccountUnavailable);
+                };
                 let consumed = consume_bag_item(account, template_id, requested);
                 if consumed != requested {
-                    *response_err = 1;
-                    *response_err_msg = "not enough composite items".to_owned();
+                    invalid("not enough composite items")
                 } else {
                     account["lastComposite"] = serde_json::json!({
                         "templateId": template_id,
@@ -259,25 +226,17 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                         "bag.UpdateBagData",
                         BagInfoCodec::encode(&bag_info_from_account(account)),
                     );
+                    HandlerResult::PushOnly
                 }
-            } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
             }
-            Some(Vec::new())
         }
-        "recharge.GetRechargeInfo" | "recharge.RechargeInfo" => Some(recharge_info_payload(
-            account_view.unwrap_or(&Value::Null),
-            RECHARGE_CATALOG.get(),
-        )),
+        "recharge.GetRechargeInfo" | "recharge.RechargeInfo" => reply(
+            method,
+            recharge_info_payload(account_view.unwrap_or(&Value::Null), RECHARGE_CATALOG.get()),
+        ),
         "recharge.FreeReward" => {
             let recharge_id = decode_varint_field(request_args, 1);
-            Some(redeem_recharge(
-                context,
-                recharge_id,
-                fashion_catalog,
-                false,
-            ))
+            redeem_recharge(context, recharge_id, fashion_catalog, false)
         }
         "recharge.GetPaybackReward" => {
             if let Some(account) = account.as_deref_mut() {
@@ -287,22 +246,25 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                     "time": current_unix_seconds(),
                 });
             }
-            Some(Vec::new())
+            HandlerResult::PushOnly
         }
         "recharge.DirectBuyItem" => {
             let recharge_id = decode_varint_field(request_args, 1);
-            Some(redeem_recharge(context, recharge_id, fashion_catalog, true))
+            redeem_recharge(context, recharge_id, fashion_catalog, true)
         }
         "recharge.DirectBuySelectItem" => {
             let recharge_id =
                 decode_varint_field(request_args, 2).max(decode_varint_field(request_args, 1));
-            Some(redeem_recharge(context, recharge_id, fashion_catalog, true))
+            redeem_recharge(context, recharge_id, fashion_catalog, true)
         }
         "recharge.Buy" | "recharge.BuyGoods" | "recharge.Purchase" | "shop.BuyRecharge" => {
             // Single-player mode has no payment provider. Treat recharge card click as a
             // local grant using client recharge/reward catalogs; this includes lucky-bag
             // currency and bundled bag items, with authoritative pushes before callback.
-            if let Some(account) = account.as_deref_mut() {
+            let Some(account) = account.as_deref_mut() else {
+                return HandlerResult::Error(GameError::AccountUnavailable);
+            };
+            {
                 let configured = RECHARGE_CATALOG.get().and_then(|catalog| {
                     // Client builds have used different protobuf field numbers for
                     // recharge product id. Resolve first catalog hit, preserving
@@ -340,23 +302,20 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                     {
                         append_method_push(pre_pushes, "illustrate.IllustrateInfo", payload);
                     }
-                    Some(encode_rewards_list(&rewards))
+                    reply(method, encode_rewards_list(&rewards))
                 } else {
-                    *response_err = 1;
-                    *response_err_msg = "recharge product was not found".to_owned();
-                    Some(Vec::new())
+                    invalid("recharge product was not found")
                 }
-            } else {
-                *response_err = 1;
-                *response_err_msg = "account is unavailable".to_owned();
-                Some(Vec::new())
             }
         }
-        "fashion.updateData" => Some(FashionListCodec::encode(&fashion_list_from_account(
-            account_view.unwrap_or(&Value::Null),
-            fashion_catalog,
-        ))),
-        _ => None,
+        "fashion.updateData" => reply(
+            method,
+            FashionListCodec::encode(&fashion_list_from_account(
+                account_view.unwrap_or(&Value::Null),
+                fashion_catalog,
+            )),
+        ),
+        _ => HandlerResult::Empty,
     }
 }
 
@@ -395,20 +354,16 @@ fn redeem_recharge<'state, 'account, 'scratch>(
     recharge_id: i32,
     fashion_catalog: Option<&FashionList>,
     count_purchase: bool,
-) -> Vec<u8> {
+) -> HandlerResult {
     let Some(configured) = RECHARGE_CATALOG
         .get()
         .and_then(|catalog| catalog.rewards_by_recharge_id.get(&recharge_id))
         .cloned()
     else {
-        *context.response_err = 1;
-        *context.response_err_msg = "recharge product was not found".to_owned();
-        return Vec::new();
+        return invalid("recharge product was not found");
     };
     let Some(account) = context.account.as_deref_mut() else {
-        *context.response_err = 1;
-        *context.response_err_msg = "account is unavailable".to_owned();
-        return Vec::new();
+        return HandlerResult::Error(GameError::AccountUnavailable);
     };
     let now = current_unix_seconds();
     let rewards = configured
@@ -448,5 +403,36 @@ fn redeem_recharge<'state, 'account, 'scratch>(
         "recharge.RechargeInfo",
         recharge_info_payload(account, RECHARGE_CATALOG.get()),
     );
-    encode_rewards_list(&rewards)
+    reply(
+        if count_purchase {
+            "recharge.DirectBuyItem"
+        } else {
+            "recharge.FreeReward"
+        },
+        encode_rewards_list(&rewards),
+    )
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
+}
+
+fn invalid(message: &'static str) -> HandlerResult {
+    HandlerResult::Error(GameError::InvalidRequest(message))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::response::HandlerResult;
+
+    use super::*;
+
+    #[test]
+    fn handler_exposes_typed_result() {
+        let _: for<'state, 'account, 'scratch> fn(
+            &mut GameLoginRequestContext<'state, 'account, 'scratch>,
+            &str,
+            &[u8],
+        ) -> HandlerResult = handle;
+    }
 }
