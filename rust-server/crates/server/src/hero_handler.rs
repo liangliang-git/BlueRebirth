@@ -4,13 +4,35 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
-pub(super) fn handle_typed(account: &blueoath_domain::AccountState, method: &str) -> HandlerResult {
+pub(super) fn handle_typed(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+    pre_pushes: &mut Vec<Vec<u8>>,
+) -> HandlerResult {
     match method {
         "hero.GetHeroInfo" | "hero.GetHeroInfoByHeroIdArray" => {
             HandlerResult::Reply(Response::raw(
                 method,
                 HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
             ))
+        }
+        "hero.LockHero" => {
+            let hero_id = decode_varint_u64_field(request_args, 1);
+            let locked = decode_varint_u64_field(request_args, 2) != 0;
+            let Some(hero_id) = blueoath_domain::HeroId::new(hero_id).ok() else {
+                return HandlerResult::Error(GameError::InvalidRequest("hero id is invalid"));
+            };
+            let Some(hero) = account.dock.heroes.get_mut(&hero_id) else {
+                return HandlerResult::Error(GameError::InvalidRequest("hero was not found"));
+            };
+            hero.locked = locked;
+            append_method_push(
+                pre_pushes,
+                "hero.UpdateHeroBagData",
+                HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+            );
+            HandlerResult::PushOnly
         }
         _ => HandlerResult::Empty,
     }
@@ -747,12 +769,32 @@ mod tests {
                 equip_slots: Vec::new(),
             },
         );
-        let result = handle_typed(&account, "hero.GetHeroInfo");
+        let result = handle_typed(&mut account, "hero.GetHeroInfo", &[], &mut Vec::new());
         let HandlerResult::Reply(response) = result else {
             panic!("typed hero info must reply");
         };
         let hero_payload = response.payload;
         assert!(hero_payload.len() > 2);
         assert_eq!(decode_varint_u64_field(&hero_payload, 2), 200);
+    }
+
+    #[test]
+    fn typed_hero_lock_mutation_updates_normalized_state() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("hero-lock-typed").unwrap(),
+            "Captain",
+        );
+        let hero_id = blueoath_domain::HeroId::new(1).unwrap();
+        assert!(account.dock.heroes.get(&hero_id).unwrap().locked);
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, 1);
+        append_varint_field(&mut args, 2, 0);
+        let mut pushes = Vec::new();
+
+        let result = handle_typed(&mut account, "hero.LockHero", &args, &mut pushes);
+
+        assert!(matches!(result, HandlerResult::PushOnly));
+        assert!(!account.dock.heroes.get(&hero_id).unwrap().locked);
+        assert_eq!(pushes.len(), 1);
     }
 }

@@ -239,7 +239,12 @@ where
         }
         _ if method.is_family(MethodFamily::Hero) => {
             let result = if let Some(typed) = typed_account.as_mut() {
-                let result = hero_handler::handle_typed(typed, request.method.as_str());
+                let result = hero_handler::handle_typed(
+                    typed,
+                    request.method.as_str(),
+                    request_args,
+                    &mut pre_pushes,
+                );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     result
                 } else {
