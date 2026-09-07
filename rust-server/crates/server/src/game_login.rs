@@ -477,36 +477,36 @@ where
             };
             Some(PlayerUserCodec::encode(&user))
         }
-        _ if matches!(
-            request.method.as_str(),
-            "cachedata.CacheData"
-                | "user.GetHeadBuyCount"
-                | "user.BuyHead"
-                | "user.NewHeadUnlockedList"
-                | "hero.Marry"
-                | "hero.AddAffection"
-                | "hero.HeroCombine"
-                | "hero.HeroCombineBreak"
-                | "hero.HeroCombineQuickLevelUp"
-                | "hero.HeroCombineUpLv"
-                | "repair.RepairHero"
-                | "illustrate.VowHero"
-                | "illustrate.VowDecTime"
-                | "illustrate.AddBehaviour"
-                | "illustrate.ModiVowHeroList"
-                | "illustrate.IllustrateNew"
-                | "illustrate.EquipNew"
-                | "fashion.fashionReplaceReward"
-                | "bag.GetNormalTreasureInfo"
-                | "bag.GetSelectTreasureInfo"
-                | "copy.DotBase"
-                | "copyinfo.DotBase"
-                | "copy.FetchRewardBox"
-                | "copy.PassMiniGame"
-                | "copy.StarReward"
-                | "task.GetPtReward"
-                | "task.GetTeachingTask"
-        ) =>
+        _ if known_method == Some(KnownMethod::CacheData)
+            || known_method == Some(KnownMethod::RepairHero)
+            || matches!(
+                request.method.as_str(),
+                "user.GetHeadBuyCount"
+                    | "user.BuyHead"
+                    | "user.NewHeadUnlockedList"
+                    | "hero.Marry"
+                    | "hero.AddAffection"
+                    | "hero.HeroCombine"
+                    | "hero.HeroCombineBreak"
+                    | "hero.HeroCombineQuickLevelUp"
+                    | "hero.HeroCombineUpLv"
+                    | "illustrate.VowHero"
+                    | "illustrate.VowDecTime"
+                    | "illustrate.AddBehaviour"
+                    | "illustrate.ModiVowHeroList"
+                    | "illustrate.IllustrateNew"
+                    | "illustrate.EquipNew"
+                    | "fashion.fashionReplaceReward"
+                    | "bag.GetNormalTreasureInfo"
+                    | "bag.GetSelectTreasureInfo"
+                    | "copy.DotBase"
+                    | "copyinfo.DotBase"
+                    | "copy.FetchRewardBox"
+                    | "copy.PassMiniGame"
+                    | "copy.StarReward"
+                    | "task.GetPtReward"
+                    | "task.GetTeachingTask"
+            ) =>
         {
             let result = if typed_account.is_some() {
                 HandlerResult::Error(GameError::InvalidRequest("compat request is not supported"))
@@ -1074,14 +1074,19 @@ where
             }
             result.into_payload()
         }
-        _ if request.method == "archiveCopy.IsLoad"
-            || request.method == "copyextra.AddCopyRewardCount"
-            || request.method == "copyextra.UpdateCopyExtraInfo"
-            || request.method == "prefs.SavePrefs"
-            || request.method == "statcount.GetStatCount"
-            || request.method == "sign.Sign"
-            || request.method == "miniGame.StartMiniGame"
-            || request.method == "alchemy.StartAlchemy" =>
+        _ if matches!(
+            known_method,
+            Some(
+                KnownMethod::ArchiveCopyIsLoad
+                    | KnownMethod::CopyExtraAddCopyRewardCount
+                    | KnownMethod::CopyExtraUpdateCopyExtraInfo
+                    | KnownMethod::SavePrefs
+                    | KnownMethod::GetStatCount
+                    | KnownMethod::Sign
+                    | KnownMethod::StartMiniGame
+                    | KnownMethod::StartAlchemy
+            )
+        ) =>
         {
             let result = if let Some(typed) = typed_account.as_mut() {
                 misc_handler::handle_typed(typed, request.method.as_str(), request_args)
