@@ -132,6 +132,7 @@ where
     let request = RequestContext::from(TMessageCodec::decode_request(&frame.payload)?);
     let request_args = request.args.as_slice();
     if let (Some(typed), Some(legacy)) = (typed_account.as_deref_mut(), account_view) {
+        sync_typed_daily_copy_state(typed, legacy, current_unix_seconds());
         sync_typed_task_state(typed, legacy);
     }
     if std::env::var_os("BLUEOATH_TRACE_METHODS").is_some() {
@@ -2044,7 +2045,8 @@ where
             }
         }
     }
-    if let (Some(typed), Some(legacy)) = (typed_account.as_deref_mut(), account.as_deref()) {
+    if let (Some(typed), Some(legacy)) = (typed_account, account.as_deref()) {
+        sync_typed_daily_copy_state(typed, legacy, current_unix_seconds());
         if sync_typed_task_state(typed, legacy) {
             append_method_push(
                 &mut post_pushes,

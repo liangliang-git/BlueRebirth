@@ -40,7 +40,7 @@ use super::{
     ship_attributes_for_hero, ship_attributes_for_template, shop_costs_from_value,
     shop_info_payload, start_construction, start_study_state, start_support_state,
     story_memory_payload, study_info_payload, study_skill_state, sync_achievement_points,
-    sync_typed_battle_state, task_completed, task_info_payload,
+    sync_typed_battle_state, sync_typed_daily_copy_state, task_completed, task_info_payload,
     task_info_payload_from_typed_account, update_bathroom_state, update_building_assignments,
     update_mop_up_state, validate_battle_attack, BattleCatalog, BattleCopy, BattleEnemy,
     BattleFleetReward, BuildShipCatalog, BuildingCatalog, ChapterCatalog, CommanderLevelCatalog,
@@ -319,6 +319,36 @@ fn typed_daily_copy_projection_resets_stale_challenge_counts() {
         .insert(blueoath_domain::ChapterId::new(7).unwrap(), 4);
 
     assert!(daily_copy_progress_from_typed_account(&account, 86_400).is_empty());
+}
+
+#[test]
+fn typed_daily_copy_state_syncs_attempts_and_passed_copies() {
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("typed-daily-sync").unwrap(), "Daily");
+    let legacy = json!({
+        "dailyCopy": {
+            "resetDay": 2,
+            "chapters": [{
+                "chapterId": 7,
+                "challengeTimes": 4,
+                "passCopy": [9001]
+            }]
+        }
+    });
+    assert!(sync_typed_daily_copy_state(&mut account, &legacy, 172_800));
+    assert_eq!(account.daily_copy.reset_day, 2);
+    assert_eq!(
+        account
+            .daily_copy
+            .challenge_times
+            .get(&blueoath_domain::ChapterId::new(7).unwrap()),
+        Some(&4)
+    );
+    assert!(account
+        .battle
+        .passed_copies
+        .iter()
+        .any(|copy_id| copy_id.get() == 9001));
 }
 
 #[test]

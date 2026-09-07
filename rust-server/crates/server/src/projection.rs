@@ -1335,6 +1335,55 @@ pub(super) fn daily_copy_progress_from_typed_account(
         .collect()
 }
 
+pub(super) fn sync_typed_daily_copy_state(
+    account: &mut blueoath_domain::AccountState,
+    legacy: &Value,
+    now: u32,
+) -> bool {
+    let Some(daily) = legacy.get("dailyCopy") else {
+        return false;
+    };
+    let reset_day = (u64::from(now) + 8 * 60 * 60) / 86_400;
+    let stored_reset_day = json_i32(daily, "resetDay")
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or_default();
+    let next_reset_day = u32::try_from(reset_day).unwrap_or(u32::MAX);
+    let is_current_day = stored_reset_day == next_reset_day;
+    let mut next_challenges = std::collections::BTreeMap::new();
+    if is_current_day {
+        for chapter in daily
+            .get("chapters")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(chapter_id) = json_i32(chapter, "chapterId")
+                .and_then(|value| u64::try_from(value).ok())
+                .and_then(|value| blueoath_domain::ChapterId::new(value).ok())
+            else {
+                continue;
+            };
+            let challenge_times = json_i32(chapter, "challengeTimes")
+                .and_then(|value| u32::try_from(value.max(0)).ok())
+                .unwrap_or_default();
+            next_challenges.insert(chapter_id, challenge_times);
+            for copy_id in json_i32_array(chapter, "passCopy") {
+                if let Some(copy_id) = u64::try_from(copy_id)
+                    .ok()
+                    .and_then(|value| blueoath_domain::CopyId::new(value).ok())
+                {
+                    account.battle.passed_copies.insert(copy_id);
+                }
+            }
+        }
+    }
+    let changed = account.daily_copy.reset_day != next_reset_day
+        || account.daily_copy.challenge_times != next_challenges;
+    account.daily_copy.reset_day = next_reset_day;
+    account.daily_copy.challenge_times = next_challenges;
+    changed
+}
+
 pub(super) fn daily_copy_group_progress_from_account(
     account: Option<&Value>,
     key: &str,
