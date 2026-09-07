@@ -2393,7 +2393,6 @@ fn legacy_only_method(method: &str) -> bool {
             | MethodFamily::BuildShip
             | MethodFamily::Guild
             | MethodFamily::GuildBox
-            | MethodFamily::InviteScore
             | MethodFamily::MatchServer
             | MethodFamily::Outpost
             | MethodFamily::Room
