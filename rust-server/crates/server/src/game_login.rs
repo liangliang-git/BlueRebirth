@@ -2661,6 +2661,9 @@ fn legacy_only_method(method: &str) -> bool {
     if coop_handler::handles_typed(method) {
         return false;
     }
+    if activity_handler::handles_typed(method) || compat_feature::handles_typed(method) {
+        return false;
+    }
     if method == "copy.PassMiniGame" {
         return false;
     }
@@ -2880,7 +2883,7 @@ mod route_guard_tests {
 
     #[test]
     fn typed_runtime_rejects_unknown_and_legacy_exact_routes() {
-        assert!(legacy_only_method("repair.RepairHero"));
+        assert!(!legacy_only_method("repair.RepairHero"));
         assert!(legacy_only_method("archiveCopy.IsLoad"));
         assert!(!legacy_only_method("player.Login"));
         assert!(!legacy_only_method("copy.GetCopy"));
