@@ -1247,21 +1247,31 @@ where
             result.into_payload()
         }
         _ if method.is_family(MethodFamily::BuildShip) => {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            let result = if let Some(typed) = typed_account.as_mut() {
+                buildship_handler::handle_typed(
+                    typed,
+                    request.method.as_str(),
+                    request_args,
+                    current_unix_seconds(),
+                    task_catalog,
+                    &mut pre_pushes,
+                )
+            } else {
+                let mut context = GameLoginRequestContext {
+                    state,
+                    account: &mut account,
+                    catalogs: *catalogs,
+                    pre_pushes: &mut pre_pushes,
+                    post_pushes: &mut post_pushes,
+                    handler_error: &mut handler_error,
+                    pass_details: &mut pass_details,
+                    pass_rewards: &mut pass_rewards,
+                    pass_hero_ids: &mut pass_hero_ids,
+                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                };
+                buildship_handler::handle(&mut context, request.method.as_str(), request_args)
             };
-            let result =
-                buildship_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -2399,7 +2409,6 @@ fn legacy_only_method(method: &str) -> bool {
         GameMethod::parse(method).family(),
         MethodFamily::ActivityBattlePass
             | MethodFamily::Adventure
-            | MethodFamily::BuildShip
             | MethodFamily::Guild
             | MethodFamily::GuildBox
             | MethodFamily::MatchServer

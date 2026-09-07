@@ -969,6 +969,42 @@ impl ProfileStore {
                     }
                     _ => {}
                 }
+            } else if activity_id == "buildShip" {
+                let mut parts = progress_kind.split(':');
+                match parts.next() {
+                    Some("draw") => {
+                        if let Some(pool_id) = parts.next().and_then(|value| value.parse().ok()) {
+                            account.build_ship.draw_counts.insert(
+                                pool_id,
+                                u32::try_from(value).map_err(|_| {
+                                    StorageError::InvalidTypedAccount(
+                                        "build ship draw count is too large".to_owned(),
+                                    )
+                                })?,
+                            );
+                        }
+                    }
+                    Some("box") | Some("reward") => {
+                        let Some(pool_id) = parts.next().and_then(|value| value.parse().ok())
+                        else {
+                            continue;
+                        };
+                        let Some(milestone) = parts.next().and_then(|value| value.parse().ok())
+                        else {
+                            continue;
+                        };
+                        if value == 0 {
+                            continue;
+                        }
+                        let target = if progress_kind.starts_with("box:") {
+                            &mut account.build_ship.used_box_info
+                        } else {
+                            &mut account.build_ship.used_reward_info
+                        };
+                        target.entry(pool_id).or_default().insert(milestone);
+                    }
+                    _ => {}
+                }
             } else if let Some(hero_id) = activity_id
                 .strip_prefix("heroSkills:")
                 .and_then(|value| value.parse::<u64>().ok())
@@ -2025,6 +2061,38 @@ impl ProfileStore {
                         timestamp(),
                     ],
                 )?;
+            }
+        }
+        for (pool_id, count) in &account.build_ship.draw_counts {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'buildShip', ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    format!("draw:{pool_id}"),
+                    typed_i64(u64::from(*count), "build ship draw count")?,
+                    timestamp(),
+                ],
+            )?;
+        }
+        for (kind, claims) in [
+            ("box", &account.build_ship.used_box_info),
+            ("reward", &account.build_ship.used_reward_info),
+        ] {
+            for (pool_id, milestones) in claims {
+                for milestone in milestones {
+                    transaction.execute(
+                        "INSERT INTO activity_progress(
+                            profile_id, activity_id, progress_kind, value, updated_at
+                         ) VALUES (?1, 'buildShip', ?2, 1, ?3)",
+                        params![
+                            profile.id.as_str(),
+                            format!("{kind}:{pool_id}:{milestone}"),
+                            timestamp(),
+                        ],
+                    )?;
+                }
             }
         }
         let mut sports_progress = vec![

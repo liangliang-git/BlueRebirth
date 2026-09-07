@@ -401,6 +401,13 @@ pub struct StudyState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildShipState {
+    pub draw_counts: BTreeMap<u64, u32>,
+    pub used_box_info: BTreeMap<u64, BTreeSet<u32>>,
+    pub used_reward_info: BTreeMap<u64, BTreeSet<u32>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BathroomHeroState {
     pub hero_id: u64,
     pub position: u32,
@@ -527,6 +534,8 @@ pub struct AccountState {
     pub bathroom: BathroomState,
     #[serde(default)]
     pub study: StudyState,
+    #[serde(default)]
+    pub build_ship: BuildShipState,
     #[serde(default)]
     pub tower: TowerState,
     #[serde(default)]

@@ -435,6 +435,19 @@ fn typed_repository_transaction_commits_domain_mutation() {
             begin_time: 100,
             end_time: 160,
         });
+    account.build_ship.draw_counts.insert(106, 10);
+    account
+        .build_ship
+        .used_box_info
+        .entry(106)
+        .or_default()
+        .insert(10);
+    account
+        .build_ship
+        .used_reward_info
+        .entry(106)
+        .or_default()
+        .insert(20);
     account.battle.active = Some(BattleSession {
         chapter_id: ChapterId::new(3).unwrap(),
         copy_id: CopyId::new(300).unwrap(),
@@ -521,6 +534,17 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(loaded.bathroom.heroes[0].buff_id, 7);
     assert_eq!(loaded.study.progress.len(), 1);
     assert_eq!(loaded.study.progress[0].skill_id, 41);
+    assert_eq!(loaded.build_ship.draw_counts.get(&106), Some(&10));
+    assert!(loaded
+        .build_ship
+        .used_box_info
+        .get(&106)
+        .is_some_and(|claims| claims.contains(&10)));
+    assert!(loaded
+        .build_ship
+        .used_reward_info
+        .get(&106)
+        .is_some_and(|claims| claims.contains(&20)));
     assert_eq!(
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())
