@@ -1,5 +1,5 @@
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -12,7 +12,7 @@ pub(super) fn handle_typed(
     state: &ServerState,
     method: &str,
     request_args: &[u8],
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
     catalogs: CommerceTypedCatalogs<'_>,
 ) -> HandlerResult {
     match method {
@@ -55,7 +55,7 @@ pub(super) fn handle_typed(
                     "shop goods could not be granted",
                 ));
             };
-            append_typed_shop_pushes(pre_pushes, state, account, reward);
+            append_typed_shop_pushes(effects, state, account, reward);
             HandlerResult::Reply(Response::raw(
                 method,
                 return_shop_buy_response(request.good_id, request.buy_num, Some(reward)),
@@ -77,7 +77,7 @@ pub(super) fn handle_typed(
                     continue;
                 };
                 if let Some(reward) = apply_typed_shop_good(account, good, 1) {
-                    append_typed_shop_pushes(pre_pushes, state, account, reward);
+                    append_typed_shop_pushes(effects, state, account, reward);
                     rewards.push(reward);
                 }
             }
@@ -139,16 +139,14 @@ pub(super) fn handle_typed(
             {
                 return HandlerResult::Error(GameError::InvalidState("gold balance overflow"));
             }
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "user.UpdateUserInfo",
                 UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-            );
+            ));
             HandlerResult::Reply(Response::raw(
                 method,
                 encode_rewards_list(&[ShopReward {
@@ -174,11 +172,10 @@ pub(super) fn handle_typed(
                     "not enough composite items",
                 ));
             }
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
+            ));
             HandlerResult::PushOnly
         }
         _ => HandlerResult::Empty,
@@ -388,33 +385,29 @@ fn consume_typed_inventory(
 }
 
 fn append_typed_shop_pushes(
-    pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
     state: &ServerState,
     account: &blueoath_domain::AccountState,
     reward: ShopReward,
 ) {
-    append_method_push(
-        pushes,
+    effects.push_pre(Response::raw(
         "user.UpdateUserInfo",
         UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
-    );
-    append_method_push(
-        pushes,
+    ));
+    effects.push_pre(Response::raw(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-    );
+    ));
     if reward.goods_type == 2 {
-        append_method_push(
-            pushes,
+        effects.push_pre(Response::raw(
             "equip.UpdateEquipBagData",
             EquipListCodec::encode(&equip_list_from_typed_account(account)),
-        );
+        ));
     } else if reward.goods_type == 3 {
-        append_method_push(
-            pushes,
+        effects.push_pre(Response::raw(
             "hero.UpdateHeroBagData",
             HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-        );
+        ));
     }
 }
 
@@ -454,13 +447,13 @@ mod tests {
         append_varint_field(&mut args, 1, 1);
         append_varint_field(&mut args, 2, 7);
         append_varint_field(&mut args, 3, 3);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
         let result = handle_typed(
             &mut account,
             &state,
             "shop.BuyGoods",
             &args,
-            &mut pushes,
+            &mut effects,
             CommerceTypedCatalogs {
                 shop: Some(&catalog),
             },
@@ -477,7 +470,9 @@ mod tests {
             account.inventory.items[&blueoath_domain::TemplateId::new(30_001).unwrap()],
             6
         );
+        let (pushes, _, error) = effects.into_parts();
         assert_eq!(pushes.len(), 2);
+        assert!(error.is_none());
     }
 
     #[test]
@@ -501,7 +496,7 @@ mod tests {
             &state,
             "bag.SaleBagItem",
             &args,
-            &mut Vec::new(),
+            &mut ResponseEffects::default(),
             CommerceTypedCatalogs { shop: None },
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
