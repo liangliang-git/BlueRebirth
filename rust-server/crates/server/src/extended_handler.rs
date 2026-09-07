@@ -1,5 +1,3 @@
-use serde_json::Value;
-
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
@@ -454,16 +452,10 @@ pub(super) fn handle_typed_world_event(
                 return reply(method, encode_rewards_list(&[]));
             };
             let reward_id = event
-                .get("server_stage_rewards")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .find_map(|row| {
-                    let row = row.as_array()?;
-                    (row.first()?.as_i64()? == i64::try_from(stage_id).ok()?)
-                        .then(|| row.get(1)?.as_i64()?.try_into().ok())
-                        .flatten()
-                })
+                .server_stage_rewards
+                .iter()
+                .find(|(stage, _)| *stage as u64 == stage_id)
+                .map(|(_, reward_id)| *reward_id)
                 .unwrap_or_default();
             if event_id <= 0
                 || stage_id == 0
@@ -693,19 +685,14 @@ fn invalid(message: &'static str) -> HandlerResult {
     HandlerResult::Error(GameError::InvalidRequest(message))
 }
 
-fn active_world_event(catalog: &GameplayCatalog) -> Option<(i32, &Value)> {
+fn active_world_event(catalog: &GameplayCatalog) -> Option<(i32, &WorldEventConfig)> {
     let activity = catalog.activity.get(&5001).or_else(|| {
         catalog
             .activity
             .values()
-            .find(|value| json_i32(value, "type") == Some(5001))
+            .find(|value| value.activity_type == 5001)
     })?;
-    let event_id = activity
-        .get("p1")
-        .and_then(Value::as_array)
-        .and_then(|values| values.first())
-        .and_then(Value::as_i64)
-        .and_then(|value| i32::try_from(value).ok())?;
+    let event_id = activity.p1.first().copied()?;
     catalog
         .world_events
         .get(&event_id)

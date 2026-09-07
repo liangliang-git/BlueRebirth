@@ -683,6 +683,36 @@ pub(super) struct ActivityExtractConfig {
     pub(super) rewards: Vec<(i32, i32)>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(super) struct ActivityConfig {
+    pub(super) id: i32,
+    pub(super) activity_type: i32,
+    pub(super) is_open: i32,
+    pub(super) p1: Vec<i32>,
+    pub(super) p2: Option<(i32, i32)>,
+    pub(super) p3: Option<(i32, i32)>,
+    pub(super) p4: Vec<Vec<i32>>,
+    pub(super) p5: Vec<(i32, i32)>,
+    pub(super) p6: Vec<i32>,
+    pub(super) p14: Option<(i32, i32, i32)>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct WorldEventConfig {
+    pub(super) server_stage_rewards: Vec<(i32, i32)>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct ValentineGiftConfig {
+    pub(super) ship_fleet_id: i32,
+    pub(super) attach_reward: i32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct TestShipRewardConfig {
+    pub(super) reward_id: i32,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct GuildBoxScoreConfig {
     pub(super) reward_id: i32,
@@ -710,7 +740,7 @@ pub(super) struct GameplayCatalog {
     pub(super) battlepass_activity_tasks: std::collections::BTreeMap<i32, BattlePassTaskConfig>,
     pub(super) battlepass_param: Option<BattlePassParamConfig>,
     pub(super) battlepass_activity_param: Option<BattlePassParamConfig>,
-    pub(super) activity: std::collections::BTreeMap<i32, Value>,
+    pub(super) activity: std::collections::BTreeMap<i32, ActivityConfig>,
     pub(super) parameters: std::collections::BTreeMap<i32, ParameterConfig>,
     pub(super) activity_extract: std::collections::BTreeMap<i32, ActivityExtractConfig>,
     pub(super) activity_extract_ur: std::collections::BTreeMap<i32, ActivityExtractConfig>,
@@ -719,28 +749,15 @@ pub(super) struct GameplayCatalog {
     pub(super) drop_items: std::collections::BTreeMap<i32, DropItemConfig>,
     pub(super) exchanges: std::collections::BTreeMap<i32, ExchangeConfig>,
     pub(super) food_recipes: std::collections::BTreeMap<i32, FoodRecipeConfig>,
-    pub(super) testship_tasks: std::collections::BTreeMap<i32, Value>,
-    pub(super) testship_rewards: std::collections::BTreeMap<i32, Value>,
-    pub(super) world_events: std::collections::BTreeMap<i32, Value>,
-    pub(super) world_event_tasks: std::collections::BTreeMap<i32, Value>,
-    pub(super) guild_tasks: std::collections::BTreeMap<i32, Value>,
-    pub(super) guild_offer_info: Option<Value>,
-    pub(super) guild_offer_personal_rewards: std::collections::BTreeMap<i32, Value>,
-    pub(super) guild_offer_rewards: std::collections::BTreeMap<i32, Value>,
-    pub(super) guild_war_base_info: std::collections::BTreeMap<i32, Value>,
-    pub(super) guild_war_rank: std::collections::BTreeMap<i32, Value>,
+    pub(super) testship_rewards: std::collections::BTreeMap<i32, TestShipRewardConfig>,
+    pub(super) world_events: std::collections::BTreeMap<i32, WorldEventConfig>,
     pub(super) guild_war_rewards: std::collections::BTreeMap<i32, GuildWarRewardConfig>,
     pub(super) magazine_info: std::collections::BTreeMap<i32, MagazineInfoConfig>,
-    pub(super) magazine_pages: std::collections::BTreeMap<i32, Value>,
-    pub(super) magazine_tasks: std::collections::BTreeMap<i32, Value>,
     pub(super) interaction_items: std::collections::BTreeMap<i32, InteractionItemConfig>,
-    pub(super) interaction_item_bags: std::collections::BTreeMap<i32, Value>,
     pub(super) interaction_figures: std::collections::BTreeMap<i32, InteractionFigureConfig>,
     pub(super) guild_box_scores: std::collections::BTreeMap<i32, GuildBoxScoreConfig>,
-    pub(super) valentine_gifts: std::collections::BTreeMap<i32, Value>,
+    pub(super) valentine_gifts: std::collections::BTreeMap<i32, ValentineGiftConfig>,
     pub(super) sportsmeet_awards: std::collections::BTreeMap<i32, SportsMeetAwardConfig>,
-    pub(super) outpost_info: std::collections::BTreeMap<i32, Value>,
-    pub(super) outpost_levels: std::collections::BTreeMap<i32, Value>,
 }
 
 pub(super) const MAX_SHOP_BUY_NUM: i32 = 99;

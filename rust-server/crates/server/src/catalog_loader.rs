@@ -124,6 +124,86 @@ fn config_extract(value: &Value) -> ActivityExtractConfig {
     ActivityExtractConfig { cost, rewards }
 }
 
+fn config_i32_pairs(value: &Value, key: &str) -> Vec<(i32, i32)> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let values = item.as_array()?;
+            Some((
+                i32::try_from(values.first()?.as_i64()?).ok()?,
+                i32::try_from(values.get(1)?.as_i64()?).ok()?,
+            ))
+        })
+        .collect()
+}
+
+fn config_i32_nested_array(value: &Value, key: &str) -> Vec<Vec<i32>> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            Some(
+                item.as_array()?
+                    .iter()
+                    .filter_map(|value| value.as_i64().and_then(|value| i32::try_from(value).ok()))
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+fn config_i32_triple(value: &Value, key: &str) -> Option<(i32, i32, i32)> {
+    let values = value.get(key)?.as_array()?.first()?.as_array()?;
+    Some((
+        i32::try_from(values.first()?.as_i64()?).ok()?,
+        i32::try_from(values.get(1)?.as_i64()?).ok()?,
+        i32::try_from(values.get(2)?.as_i64()?).ok()?,
+    ))
+}
+
+fn config_activity(id: i32, value: &Value) -> ActivityConfig {
+    let p6 = config_i32_nested_array(value, "p6")
+        .into_iter()
+        .flatten()
+        .collect();
+    ActivityConfig {
+        id: json_i32(value, "id").unwrap_or(id),
+        activity_type: json_i32(value, "type").unwrap_or_default(),
+        is_open: json_i32(value, "is_open").unwrap_or_default(),
+        p1: config_i32_array(value, "p1"),
+        p2: config_i32_pairs(value, "p2").into_iter().next(),
+        p3: config_i32_pairs(value, "p3").into_iter().next(),
+        p4: config_i32_nested_array(value, "p4"),
+        p5: config_i32_pairs(value, "p5"),
+        p6,
+        p14: config_i32_triple(value, "p14"),
+    }
+}
+
+fn config_world_event(value: &Value) -> WorldEventConfig {
+    WorldEventConfig {
+        server_stage_rewards: config_i32_pairs(value, "server_stage_rewards"),
+    }
+}
+
+fn config_valentine_gift(value: &Value) -> ValentineGiftConfig {
+    ValentineGiftConfig {
+        ship_fleet_id: json_i32(value, "ship_fleet_id").unwrap_or_default(),
+        attach_reward: json_i32(value, "attach_reward").unwrap_or_default(),
+    }
+}
+
+fn config_testship_reward(value: &Value) -> TestShipRewardConfig {
+    TestShipRewardConfig {
+        reward_id: json_i32(value, "reward").unwrap_or_default(),
+    }
+}
+
 fn read_json_config_rows(path: &Path) -> Option<Vec<(i32, Value)>> {
     let json_path = path.with_extension("json");
     let bytes = std::fs::read(json_path).ok()?;
@@ -1339,7 +1419,10 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
         battlepass_activity_tasks: battlepass_tasks("config_battlepass_task_activity.db"),
         battlepass_param: battlepass_param("config_battlepass_param.db"),
         battlepass_activity_param: battlepass_param("config_battlepass_param_activity.db"),
-        activity: rows("config_activity.db"),
+        activity: rows("config_activity.db")
+            .into_iter()
+            .map(|(id, value)| (id, config_activity(id, &value)))
+            .collect(),
         parameters,
         activity_extract,
         activity_extract_ur,
@@ -1348,31 +1431,24 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
         drop_items,
         exchanges,
         food_recipes,
-        testship_tasks: rows("config_testship_task.db"),
-        testship_rewards: rows("config_testship_reward.db"),
-        world_events: rows("config_world_event.db"),
-        world_event_tasks: rows("config_world_event_task.db"),
-        guild_tasks: rows("config_task_guild.db"),
-        guild_offer_info: read_config_rows(&dir.join("config_guildoffer_info.db"))
+        testship_rewards: rows("config_testship_reward.db")
             .into_iter()
-            .next()
-            .map(|(_, value)| value),
-        guild_offer_personal_rewards: rows("config_guildoffer_perscorereward.db"),
-        guild_offer_rewards: rows("config_guildoffer_scorereward.db"),
-        guild_war_base_info: rows("config_guildwar_base_info.db"),
-        guild_war_rank: rows("config_guildwar_rank.db"),
+            .map(|(id, value)| (id, config_testship_reward(&value)))
+            .collect(),
+        world_events: rows("config_world_event.db")
+            .into_iter()
+            .map(|(id, value)| (id, config_world_event(&value)))
+            .collect(),
         guild_war_rewards,
         magazine_info,
-        magazine_pages: rows("config_magazine_page.db"),
-        magazine_tasks: rows("config_task_magazine.db"),
         interaction_items,
-        interaction_item_bags: rows("config_interaction_item_bag.db"),
         interaction_figures,
         guild_box_scores,
-        valentine_gifts: rows("config_item_valentine_gift.db"),
+        valentine_gifts: rows("config_item_valentine_gift.db")
+            .into_iter()
+            .map(|(id, value)| (id, config_valentine_gift(&value)))
+            .collect(),
         sportsmeet_awards,
-        outpost_info: rows("config_outpost_info.db"),
-        outpost_levels: rows("config_outpost_level.db"),
     }
 }
 

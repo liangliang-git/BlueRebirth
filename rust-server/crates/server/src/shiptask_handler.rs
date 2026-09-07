@@ -61,7 +61,7 @@ pub(super) fn handle_typed(
                 let Some(reward_id) = catalog
                     .testship_rewards
                     .get(&(achievement_id as i32))
-                    .and_then(|row| json_i32(row, "reward"))
+                    .map(|row| row.reward_id)
                 else {
                     return HandlerResult::Error(GameError::NotFound("ship task reward"));
                 };

@@ -1,5 +1,3 @@
-use serde_json::Value;
-
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
@@ -310,13 +308,10 @@ fn handle_typed_code_exchange(
                 ));
             };
             let reward_id = activity
-                .get("p4")
-                .and_then(Value::as_array)
-                .and_then(|rewards| rewards.get((reward_index - 1) as usize))
-                .and_then(Value::as_array)
+                .p4
+                .get((reward_index - 1) as usize)
                 .and_then(|reward| reward.first())
-                .and_then(Value::as_i64)
-                .and_then(|id| i32::try_from(id).ok())
+                .copied()
                 .unwrap_or_default();
             let reward_defs = catalog
                 .rewards_by_id
@@ -615,8 +610,8 @@ fn handle_typed_valentine_reward(
     let reward_id = catalog
         .valentine_gifts
         .values()
-        .find(|gift| json_i32(gift, "ship_fleet_id") == Some(ship_tid))
-        .and_then(|gift| json_i32(gift, "attach_reward"));
+        .find(|gift| gift.ship_fleet_id == ship_tid)
+        .map(|gift| gift.attach_reward);
     let Some(reward_id) = reward_id else {
         return HandlerResult::Error(GameError::InvalidState(
             "valentine reward is not configured",
@@ -1343,11 +1338,11 @@ fn typed_christmas_eligible_figures(
 fn typed_activity_fashion_config<'a>(
     catalog: &'a GameplayCatalog,
     progress: &std::collections::BTreeMap<String, u64>,
-) -> Option<&'a Value> {
+) -> Option<&'a ActivityConfig> {
     let activity_id = activity_value(progress, "activityFashion", "activityId");
     if activity_id > 0 {
         if let Some(config) = catalog.activity.get(&(activity_id as i32)) {
-            if json_i32(config, "type") == Some(41) {
+            if config.activity_type == 41 {
                 return Some(config);
             }
         }
@@ -1355,15 +1350,8 @@ fn typed_activity_fashion_config<'a>(
     catalog
         .activity
         .values()
-        .filter(|config| {
-            json_i32(config, "type") == Some(41)
-                && json_i32(config, "is_open").unwrap_or_default() > 0
-                && config
-                    .get("p14")
-                    .and_then(Value::as_array)
-                    .is_some_and(|rows| !rows.is_empty())
-        })
-        .max_by_key(|config| json_i32(config, "id").unwrap_or_default())
+        .filter(|config| config.activity_type == 41 && config.is_open > 0 && config.p14.is_some())
+        .max_by_key(|config| config.id)
 }
 
 fn typed_fashion_owned(account: &blueoath_domain::AccountState, fashion_id: i32) -> bool {
@@ -1473,12 +1461,7 @@ fn handle_typed_fashion(
     }
 
     let current = activity_value(&account.activities.progress, "activityFashion", "buyCount");
-    let max_count = config
-        .get("p6")
-        .and_then(Value::as_array)
-        .and_then(|values| values.first())
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
+    let max_count = config.p6.first().copied().unwrap_or_default() as i64;
     let Ok(request) = FashionPurchaseRequest::decode(request_args) else {
         return HandlerResult::Error(GameError::InvalidRequest(
             "activity fashion purchase request is invalid",
@@ -1491,14 +1474,7 @@ fn handle_typed_fashion(
         ));
     }
     let gid = request.group_id.max(0);
-    let pools = config
-        .get("p1")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_i64)
-        .filter_map(|value| i32::try_from(value).ok())
-        .collect::<Vec<_>>();
+    let pools = &config.p1;
     let Some((goods_type, item_id, unit_cost)) = activity_fashion_cost(config) else {
         return HandlerResult::Error(GameError::InvalidState(
             "activity fashion purchase cost is invalid",
@@ -1510,14 +1486,9 @@ fn handle_typed_fashion(
         ));
     }
     let unowned_fashion = config
-        .get("p5")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_array)
-        .flatten()
-        .filter_map(Value::as_i64)
-        .filter_map(|value| i32::try_from(value).ok())
+        .p5
+        .iter()
+        .map(|(id, _)| *id)
         .find(|id| !typed_fashion_owned(account, *id));
     let mut target_unowned = unowned_fashion.is_some();
     let requested_pool = pools.iter().position(|pool| *pool == gid);
@@ -1647,12 +1618,12 @@ fn typed_christmas_payload(progress: &std::collections::BTreeMap<String, u64>) -
     output
 }
 
-fn code_exchange_activity(catalog: &GameplayCatalog) -> Option<&Value> {
+fn code_exchange_activity(catalog: &GameplayCatalog) -> Option<&ActivityConfig> {
     catalog.activity.get(&81005).or_else(|| {
         catalog
             .activity
             .values()
-            .find(|value| json_i32(value, "type") == Some(81005))
+            .find(|value| value.activity_type == 81005)
     })
 }
 
@@ -1678,12 +1649,11 @@ fn extract_draw_ret_payload(rewards: &[ShopReward]) -> Vec<u8> {
 
 fn birthday_formula_reward(catalog: &GameplayCatalog, formula: i32) -> Option<ShopReward> {
     let row = birthday_activity_config(catalog)?;
-    let values = row.get("p4")?.as_array()?;
     let formula = usize::try_from(formula.checked_sub(1)?).ok()?;
-    let reward = values.get(formula)?.as_array()?;
+    let reward = row.p4.get(formula)?;
     Some(ShopReward {
         goods_type: 1,
-        item_id: i32::try_from(reward.get(2)?.as_i64()?).ok()?,
+        item_id: *reward.get(2)?,
         num: 1,
         instance_id: 0,
     })
@@ -1691,13 +1661,10 @@ fn birthday_formula_reward(catalog: &GameplayCatalog, formula: i32) -> Option<Sh
 
 fn birthday_affair_reward_id(catalog: &GameplayCatalog, level: i32) -> Option<i32> {
     let row = birthday_activity_config(catalog)?;
-    row.get("p5")?
-        .as_array()?
+    row.p5
         .iter()
-        .filter_map(Value::as_array)
-        .find(|entry| entry.first().and_then(Value::as_i64) == Some(i64::from(level)))
-        .and_then(|entry| entry.get(1)?.as_i64())
-        .and_then(|value| i32::try_from(value).ok())
+        .find(|(entry_level, _)| *entry_level == level)
+        .map(|(_, reward_id)| *reward_id)
 }
 
 fn paper_cut_ret_payload(formula: i32, rewards: &[ShopReward]) -> Vec<u8> {
@@ -1729,12 +1696,12 @@ fn parameter_value(catalog: &GameplayCatalog, id: i32) -> Option<i32> {
     catalog.parameters.get(&id).map(|config| config.value)
 }
 
-fn activity_fashion_milestone(config: &Value, key: &str) -> Option<(i32, i32)> {
-    let values = config.get(key)?.as_array()?;
-    Some((
-        i32::try_from(values.first()?.as_i64()?).ok()?,
-        i32::try_from(values.get(1)?.as_i64()?).ok()?,
-    ))
+fn activity_fashion_milestone(config: &ActivityConfig, key: &str) -> Option<(i32, i32)> {
+    match key {
+        "p2" => config.p2,
+        "p3" => config.p3,
+        _ => None,
+    }
 }
 
 fn activity_fashion_drop_reward(
@@ -1779,15 +1746,8 @@ fn activity_fashion_drop_reward(
     resolve(catalog, drop_id, sequence.max(0), 0)
 }
 
-fn activity_fashion_cost(config: &Value) -> Option<(i32, i32, i32)> {
-    let row = config
-        .get("p14")
-        .and_then(Value::as_array)?
-        .first()?
-        .as_array()?;
-    let goods_type = i32::try_from(row.first()?.as_i64()?).ok()?;
-    let item_id = i32::try_from(row.get(1)?.as_i64()?).ok()?;
-    let amount = i32::try_from(row.get(2)?.as_i64()?).ok()?;
+fn activity_fashion_cost(config: &ActivityConfig) -> Option<(i32, i32, i32)> {
+    let (goods_type, item_id, amount) = config.p14?;
     (goods_type > 0 && item_id > 0 && amount > 0).then_some((goods_type, item_id, amount))
 }
 
@@ -1799,12 +1759,12 @@ fn common_reward_payload(goods_type: i32, config_id: i32, num: i32) -> Vec<u8> {
     output
 }
 
-fn birthday_activity_config(catalog: &GameplayCatalog) -> Option<&Value> {
+fn birthday_activity_config(catalog: &GameplayCatalog) -> Option<&ActivityConfig> {
     catalog.activity.get(&103).or_else(|| {
         catalog
             .activity
             .values()
-            .find(|activity| json_i32(activity, "type") == Some(103))
+            .find(|activity| activity.activity_type == 103)
     })
 }
 

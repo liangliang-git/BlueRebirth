@@ -1,5 +1,3 @@
-use serde_json::Value;
-
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
@@ -273,14 +271,13 @@ fn handle_typed_hero_awaken_reward(
     let reward_id = catalog
         .activity
         .get(&5002)
-        .and_then(|activity| activity.get("p4"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_array)
-        .find(|row| row.first().and_then(Value::as_i64) == Some(i64::from(milestone)))
-        .and_then(|row| row.get(1).and_then(Value::as_i64))
-        .and_then(|id| i32::try_from(id).ok())
+        .and_then(|activity| {
+            activity
+                .p4
+                .iter()
+                .find(|row| row.first().copied() == Some(milestone))
+                .and_then(|row| row.get(1).copied())
+        })
         .unwrap_or_default();
     let rewards = catalog
         .rewards_by_id
