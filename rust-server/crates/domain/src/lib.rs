@@ -894,6 +894,64 @@ impl AccountState {
                 }
             }
         }
+        for fleet in self.fleet.fleets.values() {
+            if fleet.members.iter().collect::<BTreeSet<_>>().len() != fleet.members.len() {
+                return Err(DomainError::InvalidState(
+                    "fleet member list contains duplicates",
+                ));
+            }
+            if fleet
+                .members
+                .iter()
+                .any(|hero_id| !self.dock.heroes.contains_key(hero_id))
+            {
+                return Err(DomainError::InvalidState("fleet references missing hero"));
+            }
+        }
+        for preset in &self.fleet.presets {
+            if preset.hero_ids.iter().collect::<BTreeSet<_>>().len() != preset.hero_ids.len()
+                || preset.ex_hero_ids.iter().collect::<BTreeSet<_>>().len()
+                    != preset.ex_hero_ids.len()
+                || preset
+                    .hero_ids
+                    .iter()
+                    .chain(preset.ex_hero_ids.iter())
+                    .any(|hero_id| !self.dock.heroes.contains_key(hero_id))
+            {
+                return Err(DomainError::InvalidState(
+                    "preset fleet references invalid hero",
+                ));
+            }
+        }
+        if let Some(session) = &self.battle.active {
+            if session.current_fleet == 0
+                || session.hero_ids.is_empty()
+                || session.hero_ids.iter().collect::<BTreeSet<_>>().len() != session.hero_ids.len()
+                || session
+                    .hero_ids
+                    .iter()
+                    .any(|hero_id| !self.dock.heroes.contains_key(hero_id))
+                || session.remaining_fleet_ids.contains(&0)
+                || session
+                    .remaining_fleet_ids
+                    .iter()
+                    .collect::<BTreeSet<_>>()
+                    .len()
+                    != session.remaining_fleet_ids.len()
+            {
+                return Err(DomainError::InvalidState("battle session is invalid"));
+            }
+        }
+        for record in &self.battle.records {
+            if record.hero_ids.iter().collect::<BTreeSet<_>>().len() != record.hero_ids.len()
+                || record
+                    .hero_ids
+                    .iter()
+                    .any(|hero_id| !self.dock.heroes.contains_key(hero_id))
+            {
+                return Err(DomainError::InvalidState("battle record is invalid"));
+            }
+        }
         for (building_id, hero_ids) in &self.buildings.hero_assignments {
             if !self.buildings.levels.contains_key(building_id) {
                 return Err(DomainError::InvalidState(
@@ -1203,6 +1261,38 @@ mod tests {
         assert!(matches!(
             account.validate(),
             Err(DomainError::InvalidState("support references missing hero"))
+        ));
+    }
+
+    #[test]
+    fn validates_fleet_and_battle_references() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("battle-state").unwrap(), "Captain");
+        let fleet_id = *account.fleet.fleets.keys().next().unwrap();
+        account.fleet.fleets.get_mut(&fleet_id).unwrap().members =
+            vec![HeroId::new(1).unwrap(), HeroId::new(1).unwrap()];
+        assert!(matches!(
+            account.validate(),
+            Err(DomainError::InvalidState(
+                "fleet member list contains duplicates"
+            ))
+        ));
+
+        account.fleet.fleets.get_mut(&fleet_id).unwrap().members = vec![HeroId::new(1).unwrap()];
+        account.battle.active = Some(super::BattleSession {
+            chapter_id: super::ChapterId::new(1).unwrap(),
+            copy_id: super::CopyId::new(1).unwrap(),
+            current_fleet: fleet_id.get() as u32,
+            started_at: 1,
+            expires_at: 2,
+            revision: 0,
+            remaining_fleet_ids: vec![fleet_id.get() as u32, fleet_id.get() as u32],
+            hero_ids: vec![HeroId::new(1).unwrap()],
+            attack_count: 0,
+        });
+        assert!(matches!(
+            account.validate(),
+            Err(DomainError::InvalidState("battle session is invalid"))
         ));
     }
 }
