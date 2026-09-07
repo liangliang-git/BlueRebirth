@@ -1,12 +1,12 @@
 use blueoath_protocol::{
     ActivityCodeExchangeRequest, ActivityExchangeRewardRequest, ActivityExtractDrawRequest,
-    ActivityItemIdRequest, ActivityRewardIndexRequest, ActivitySelectShipRequest,
-    ActivitySelectTeamRequest, BattleAutoMessageRequest, BigActivityRankRequest,
-    BirthdayFeedRequest, BuildShipRequest, BuildShipRewardRequest, ChangeNameRequest,
-    ChangeWorldChannelRequest, ChristmasBuyBlindBoxRequest, ChristmasBuyItemRequest,
-    CoopChangeChapterRequest, CoopCreateRoomRequest, CoopKickRequest, CoopMatchTypeRequest,
-    CoopPasswordRequest, CoopRoomHeroesRequest, CoopRoomIdRequest, CopyAttackRequest,
-    CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
+    ActivityFormulaRequest, ActivityItemIdRequest, ActivityRewardIndexRequest,
+    ActivitySelectShipRequest, ActivitySelectTeamRequest, BattleAutoMessageRequest,
+    BigActivityRankRequest, BirthdayFeedRequest, BuildShipRequest, BuildShipRewardRequest,
+    ChangeNameRequest, ChangeWorldChannelRequest, ChristmasBuyBlindBoxRequest,
+    ChristmasBuyItemRequest, CoopChangeChapterRequest, CoopCreateRoomRequest, CoopKickRequest,
+    CoopMatchTypeRequest, CoopPasswordRequest, CoopRoomHeroesRequest, CoopRoomIdRequest,
+    CopyAttackRequest, CopyPassRequest, CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest,
     DailyCopySelectExRequest, Decode, FashionPurchaseRequest, FriendSearchRequest,
     FriendTargetRequest, GetBarrageByIdRequest, GuildActivityPresentRequest,
     GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildCreateRequest, GuildIdRequest,
@@ -18,6 +18,7 @@ use blueoath_protocol::{
     SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
     SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest,
     SportsMeetPointsRequest, TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
+    ValentineRewardRequest,
 };
 
 #[test]
@@ -403,6 +404,14 @@ fn decodes_typed_activity_requests() {
             requested: 2,
             group_id: 3,
         }
+    );
+    assert_eq!(
+        ActivityFormulaRequest::decode(&[0x08, 4]).unwrap(),
+        ActivityFormulaRequest { formula: 4 }
+    );
+    assert_eq!(
+        ValentineRewardRequest::decode(&[0x08, 2]).unwrap(),
+        ValentineRewardRequest { index: 2 }
     );
 }
 

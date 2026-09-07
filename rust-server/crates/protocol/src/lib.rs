@@ -2536,6 +2536,36 @@ impl Decode for FashionPurchaseRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActivityFormulaRequest {
+    pub formula: i32,
+}
+
+impl Decode for ActivityFormulaRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let formula = required_field(&fields, 1, "activity is missing formula")?;
+        if formula <= 0 {
+            return Err(ProtocolError::Invalid("activity formula is invalid"));
+        }
+        Ok(Self { formula })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ValentineRewardRequest {
+    pub index: i32,
+}
+
+impl Decode for ValentineRewardRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            index: optional_i32(&fields, 1, "valentine reward has duplicate index")?,
+        })
+    }
+}
+
 impl Decode for GuildTaskDonateRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

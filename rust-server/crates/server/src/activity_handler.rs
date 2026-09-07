@@ -508,12 +508,12 @@ fn handle_typed_birthday_reward(
     let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
     match method {
         "activitybirthday.MakeBirthdayCake" => {
-            let formula = decode_varint_field(request_args, 1);
-            if formula <= 0 {
+            let Ok(request) = ActivityFormulaRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
-                    "birthday cake formula is invalid",
+                    "birthday cake request is invalid",
                 ));
-            }
+            };
+            let formula = request.formula;
             let Some(reward) = birthday_formula_reward(catalog, formula) else {
                 return HandlerResult::Error(GameError::InvalidState(
                     "birthday cake formula is not configured",
@@ -542,12 +542,12 @@ fn handle_typed_birthday_reward(
             typed_reply(method, typed_birthday_payload(&account.activities.progress))
         }
         "activitybirthday.GetCakeAffairReward" => {
-            let level = decode_varint_field(request_args, 1).max(0) as u64;
-            if level == 0 {
+            let Ok(request) = ActivityRewardIndexRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
-                    "birthday affair level is invalid",
+                    "birthday affair request is invalid",
                 ));
-            }
+            };
+            let level = request.index as u64;
             let claim_key = activity_key("activityBirthday", &format!("claimedAffair:{level}"));
             if account.activities.progress.contains_key(&claim_key) {
                 return typed_reply(method, typed_birthday_payload(&account.activities.progress));
@@ -587,7 +587,12 @@ fn handle_typed_valentine_reward(
     request_args: &[u8],
 ) -> HandlerResult {
     let by_secretary = method.ends_with("BySecretary");
-    let index = decode_varint_field(request_args, 1).max(0) as u64;
+    let Ok(request) = ValentineRewardRequest::decode(request_args) else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "valentine reward request is invalid",
+        ));
+    };
+    let index = request.index.max(0) as u64;
     if !by_secretary && index == 0 {
         return HandlerResult::Error(GameError::InvalidRequest(
             "valentine reward index is invalid",
@@ -840,10 +845,12 @@ fn handle_typed_video_set(
     account: &mut blueoath_domain::AccountState,
     request_args: &[u8],
 ) -> HandlerResult {
-    let video_id = decode_varint_field(request_args, 1).max(0) as u64;
-    if video_id == 0 {
-        return HandlerResult::Error(GameError::InvalidRequest("activity video id is invalid"));
-    }
+    let Ok(request) = ActivityItemIdRequest::decode(request_args) else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "activity video request is invalid",
+        ));
+    };
+    let video_id = request.item_id as u64;
     let watched_key = format!("activity:activityVideo:watched:{video_id}");
     if account.activities.progress.contains_key(&watched_key) {
         return typed_reply(
