@@ -17,9 +17,21 @@ fn load_or_create_typed_account(
     if let Some(account) = store.load_typed_account(&profile_id)? {
         return Ok(account);
     }
-    let mut account = NewAccountFactory::create(profile_id, name.to_owned());
-    store.save_typed_account(&mut account)?;
-    Ok(account)
+    let account = NewAccountFactory::create(profile_id.clone(), name.to_owned());
+    AccountRepository::create(store, &account).map_err(storage_error_from_repository)?;
+    store.load_typed_account(&profile_id)?.ok_or_else(|| {
+        StorageError::InvalidTypedAccount("created account is unavailable".to_owned())
+    })
+}
+
+fn storage_error_from_repository(error: RepositoryError) -> StorageError {
+    match error {
+        RepositoryError::Storage(message) => StorageError::InvalidTypedAccount(message),
+        RepositoryError::RevisionConflict { expected, actual } => {
+            StorageError::RevisionConflict { expected, actual }
+        }
+        RepositoryError::Domain(error) => StorageError::InvalidTypedAccount(error.to_string()),
+    }
 }
 
 fn persist_typed_account(store: &ProfileStore, account: AccountState) -> Result<(), StorageError> {
@@ -38,13 +50,7 @@ fn persist_typed_account(store: &ProfileStore, account: AccountState) -> Result<
         *current = account;
         Ok(())
     })
-    .map_err(|error| match error {
-        RepositoryError::Storage(message) => StorageError::InvalidTypedAccount(message),
-        RepositoryError::RevisionConflict { expected, actual } => {
-            StorageError::RevisionConflict { expected, actual }
-        }
-        RepositoryError::Domain(error) => StorageError::InvalidTypedAccount(error.to_string()),
-    })
+    .map_err(storage_error_from_repository)
 }
 
 pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
