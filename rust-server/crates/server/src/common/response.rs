@@ -59,6 +59,15 @@ pub enum HandlerResult {
     Empty,
 }
 
+impl HandlerResult {
+    pub fn into_payload(self) -> Option<Vec<u8>> {
+        match self {
+            Self::Reply(response) => Some(response.payload),
+            Self::PushOnly | Self::Empty => None,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ResponseEffects {
     pre: Vec<Response>,

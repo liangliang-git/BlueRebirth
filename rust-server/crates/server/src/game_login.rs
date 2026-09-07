@@ -438,7 +438,7 @@ where
                 pass_mvp_hero_id: &mut pass_mvp_hero_id,
                 pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
             };
-            chat_handler::handle(&mut context, request.method.as_str(), request_args)
+            chat_handler::handle(&mut context, request.method.as_str(), request_args).into_payload()
         }
         _ if method.is_family(MethodFamily::Adventure) => {
             let mut context = GameLoginRequestContext {

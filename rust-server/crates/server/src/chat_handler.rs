@@ -1,13 +1,16 @@
 use serde_json::{json, Value};
 
+use super::common::response::{HandlerResult, Response};
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
     request_args: &[u8],
-) -> Option<Vec<u8>> {
-    let account = context.account.as_deref_mut()?;
+) -> HandlerResult {
+    let Some(account) = context.account.as_deref_mut() else {
+        return HandlerResult::Empty;
+    };
     let now = current_unix_seconds();
     let uid = account
         .get("character")
@@ -15,19 +18,19 @@ pub(super) fn handle<'state, 'account, 'scratch>(
         .unwrap_or(1);
 
     match method {
-        "chat.ChatInfo" => Some(chat_info_payload(account)),
+        "chat.ChatInfo" => reply(method, chat_info_payload(account)),
         "chat.ChangeWorldChannel" => {
             let channel = match ChangeWorldChannelRequest::decode(request_args) {
                 Ok(request) => request.channel,
                 Err(_) => {
                     *context.response_err = 1;
                     *context.response_err_msg = "chat channel is invalid".to_owned();
-                    return Some(Vec::new());
+                    return reply(method, Vec::new());
                 }
             };
             let chat = chat_state_mut(account);
             chat["channel"] = json!(channel);
-            Some(varint_payload(1, channel as u64))
+            reply(method, varint_payload(1, channel as u64))
         }
         "chat.SendMessage" => {
             let request = match SendMessageRequest::decode(request_args) {
@@ -35,7 +38,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 Err(_) => {
                     *context.response_err = 1;
                     *context.response_err_msg = "chat message request is invalid".to_owned();
-                    return Some(Vec::new());
+                    return reply(method, Vec::new());
                 }
             };
             let message = request.message;
@@ -66,7 +69,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             append_method_push(context.post_pushes, "chat.NewMessage", payload);
             let mut response = Vec::new();
             append_bytes_field(&mut response, 1, message.as_bytes());
-            Some(response)
+            reply(method, response)
         }
         "chat.SendBarrage" => {
             let request = match SendBarrageRequest::decode(request_args) {
@@ -74,7 +77,7 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 Err(_) => {
                     *context.response_err = 1;
                     *context.response_err_msg = "barrage request is invalid".to_owned();
-                    return Some(Vec::new());
+                    return reply(method, Vec::new());
                 }
             };
             let SendBarrageRequest {
@@ -94,16 +97,20 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 "uid": uid,
                 "time": now,
             }));
-            Some(Vec::new())
+            reply(method, Vec::new())
         }
         "chat.GetBarrageById" => {
             let id = decode_varint_field(request_args, 1);
             let begin = decode_varint_field(request_args, 2).max(0) as usize;
             let len = decode_varint_field(request_args, 3).clamp(0, 100) as usize;
-            Some(barrage_payload(account, id, begin, len))
+            reply(method, barrage_payload(account, id, begin, len))
         }
-        _ => None,
+        _ => HandlerResult::Empty,
     }
+}
+
+fn reply(method: &str, payload: Vec<u8>) -> HandlerResult {
+    HandlerResult::Reply(Response::raw(method, payload))
 }
 
 fn chat_state_mut(account: &mut Value) -> &mut Value {
