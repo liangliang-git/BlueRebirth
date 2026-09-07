@@ -18,11 +18,13 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, typed_strategy_info_payload(account)))
         }
         "strategy.Learn" | "strategy.Upgrade" => {
-            let strategy_id = decode_varint_field(request_args, 1);
-            if strategy_id <= 0 {
-                return HandlerResult::Error(GameError::InvalidRequest("strategy id is invalid"));
-            }
-            let level = decode_varint_field(request_args, 2).max(1) as u64;
+            let Ok(request) = StrategyLearnRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "strategy request is invalid",
+                ));
+            };
+            let strategy_id = request.strategy_id;
+            let level = i64::from(request.level).max(1) as u64;
             account
                 .activities
                 .progress
@@ -57,21 +59,18 @@ pub(super) fn handle_typed(
             HandlerResult::PushOnly
         }
         "strategy.Apply" => {
-            let strategy_id = decode_varint_field(request_args, 1);
-            let fleet_id = decode_varint_field(request_args, 3);
-            let tactic_type = decode_varint_field(request_args, 4);
-            if strategy_id <= 0 || fleet_id <= 0 || tactic_type <= 0 {
+            let Ok(request) = StrategyApplyRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "strategy apply request is invalid",
                 ));
-            }
-            let Ok(fleet_id) = blueoath_domain::FleetId::new(fleet_id as u64) else {
+            };
+            let Ok(fleet_id) = blueoath_domain::FleetId::new(request.fleet_id as u64) else {
                 return HandlerResult::Error(GameError::InvalidRequest("fleet id is invalid"));
             };
             let Some(fleet) = account.fleet.fleets.get_mut(&fleet_id) else {
                 return HandlerResult::Error(GameError::NotFound("fleet"));
             };
-            fleet.tactic_id = strategy_id as u32;
+            fleet.tactic_id = request.strategy_id as u32;
             append_method_push(
                 pre_pushes,
                 "tactic.GetHerosTactic",
@@ -88,12 +87,13 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, typed_support_info_payload(account)))
         }
         "supportfleet.StartSupport" => {
-            let support_id = decode_varint_field(request_args, 1);
-            let hero_ids = decode_repeated_varint_field(request_args, 2)
-                .into_iter()
-                .filter(|id| *id > 0)
-                .map(|id| id as u64)
-                .collect::<Vec<_>>();
+            let Ok(request) = SupportStartRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "support request is invalid",
+                ));
+            };
+            let support_id = request.support_id;
+            let hero_ids = request.hero_ids;
             if support_id <= 0
                 || hero_ids.is_empty()
                 || hero_ids
@@ -145,13 +145,18 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, Vec::new()))
         }
         "supportfleet.CompleteSupport" | "supportfleet.CancelSupport" => {
-            let id = decode_varint_field(request_args, 1);
-            let completion_type = decode_varint_field(request_args, 2);
+            let Ok(request) = SupportCompleteRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "support completion request is invalid",
+                ));
+            };
+            let id = request.id;
+            let completion_type = request.completion_type;
             let Some(entry) = account
                 .support
                 .entries
                 .iter()
-                .find(|entry| entry.id == id.max(0) as u32)
+                .find(|entry| entry.id == id)
                 .cloned()
             else {
                 return HandlerResult::Error(GameError::InvalidState(
@@ -282,10 +287,14 @@ pub(super) fn handle_typed(
             ))
         }
         "supply.SupplySwitch" => {
-            let hero_ids = decode_repeated_varint_field(request_args, 1)
+            let Ok(request) = SupplySwitchRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "supply hero list is invalid",
+                ));
+            };
+            let hero_ids = request
+                .hero_ids
                 .into_iter()
-                .filter(|id| *id > 0)
-                .map(|id| id as u64)
                 .filter_map(|id| blueoath_domain::HeroId::new(id).ok())
                 .collect::<Vec<_>>();
             if hero_ids.is_empty()
@@ -343,13 +352,13 @@ pub(super) fn handle_typed(
             HandlerResult::Reply(Response::raw(method, typed_milestone_info_payload(account)))
         }
         "milestone.FetchReward" => {
-            let activity_id = decode_varint_field(request_args, 1);
-            let index = decode_varint_field(request_args, 2);
-            if activity_id <= 0 || index <= 0 {
+            let Ok(request) = MilestoneFetchRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "milestone request is invalid",
                 ));
-            }
+            };
+            let activity_id = request.activity_id;
+            let index = request.index;
             account
                 .activities
                 .progress
@@ -999,11 +1008,8 @@ fn typed_support_info_payload(account: &blueoath_domain::AccountState) -> Vec<u8
     output
 }
 
-fn typed_support_remove(account: &mut blueoath_domain::AccountState, id: i32) {
-    account
-        .support
-        .entries
-        .retain(|entry| entry.id != id.max(0) as u32);
+fn typed_support_remove(account: &mut blueoath_domain::AccountState, id: u32) {
+    account.support.entries.retain(|entry| entry.id != id);
 }
 
 fn typed_support_currency(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {

@@ -423,6 +423,138 @@ pub struct BuildingAddRequest {
     pub land_index: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StrategyLearnRequest {
+    pub strategy_id: i32,
+    pub level: i32,
+}
+
+impl Decode for StrategyLearnRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let strategy_id = required_field(&fields, 1, "strategy request is missing strategy id")?;
+        let level = optional_i32(&fields, 2, "strategy request has duplicate level")?;
+        if strategy_id <= 0 {
+            return Err(ProtocolError::Invalid("strategy request is invalid"));
+        }
+        Ok(Self { strategy_id, level })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StrategyApplyRequest {
+    pub strategy_id: i32,
+    pub fleet_id: i32,
+    pub tactic_type: i32,
+}
+
+impl Decode for StrategyApplyRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let strategy_id = required_field(&fields, 1, "strategy apply is missing strategy id")?;
+        let fleet_id = required_field(&fields, 3, "strategy apply is missing fleet id")?;
+        let tactic_type = required_field(&fields, 4, "strategy apply is missing tactic type")?;
+        if strategy_id <= 0 || fleet_id <= 0 || tactic_type <= 0 {
+            return Err(ProtocolError::Invalid("strategy apply request is invalid"));
+        }
+        Ok(Self {
+            strategy_id,
+            fleet_id,
+            tactic_type,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SupportStartRequest {
+    pub support_id: i32,
+    pub hero_ids: Vec<u64>,
+}
+
+impl Decode for SupportStartRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let support_id = required_field(&fields, 1, "support request is missing support id")?;
+        let hero_ids = fields
+            .get(&2)
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
+        if support_id <= 0 || hero_ids.is_empty() || hero_ids.contains(&0) {
+            return Err(ProtocolError::Invalid("support request is invalid"));
+        }
+        Ok(Self {
+            support_id,
+            hero_ids,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SupportCompleteRequest {
+    pub id: u32,
+    pub completion_type: i32,
+}
+
+impl Decode for SupportCompleteRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let id = required_u64(&fields, 1, "support completion is missing id")?;
+        let completion_type = required_field(&fields, 2, "support completion is missing type")?;
+        let id =
+            u32::try_from(id).map_err(|_| ProtocolError::Invalid("support id is out of range"))?;
+        if id == 0 || !(1..=3).contains(&completion_type) {
+            return Err(ProtocolError::Invalid(
+                "support completion request is invalid",
+            ));
+        }
+        Ok(Self {
+            id,
+            completion_type,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SupplySwitchRequest {
+    pub hero_ids: Vec<u64>,
+}
+
+impl Decode for SupplySwitchRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let hero_ids = fields
+            .get(&1)
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
+        if hero_ids.contains(&0) {
+            return Err(ProtocolError::Invalid("supply hero id is invalid"));
+        }
+        Ok(Self { hero_ids })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MilestoneFetchRequest {
+    pub activity_id: i32,
+    pub index: i32,
+}
+
+impl Decode for MilestoneFetchRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let activity_id = required_field(&fields, 1, "milestone is missing activity id")?;
+        let index = required_field(&fields, 2, "milestone is missing index")?;
+        if activity_id <= 0 || index <= 0 {
+            return Err(ProtocolError::Invalid("milestone request is invalid"));
+        }
+        Ok(Self { activity_id, index })
+    }
+}
+
 impl Decode for BuildingAddRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
