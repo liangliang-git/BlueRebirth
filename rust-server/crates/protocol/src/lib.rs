@@ -429,6 +429,128 @@ impl Decode for ConstructionReceiveRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShopBuyRequest {
+    pub shop_id: i32,
+    pub good_id: i32,
+    pub buy_num: i32,
+}
+
+single_varint_request!(
+    ShopRefreshRequest,
+    shop_id,
+    1,
+    "shop refresh is missing shop id",
+    "shop refresh has duplicate shop id"
+);
+
+impl Decode for ShopBuyRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let shop_id = required_field(&fields, 1, "shop buy is missing shop id")?;
+        let good_id = required_field(&fields, 2, "shop buy is missing good id")?;
+        let buy_num = optional_i32(&fields, 3, "shop buy has duplicate quantity")?;
+        if shop_id <= 0 || good_id <= 0 || buy_num < 0 {
+            return Err(ProtocolError::Invalid("shop buy request is invalid"));
+        }
+        Ok(Self {
+            shop_id,
+            good_id,
+            buy_num: buy_num.max(1),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShopQualityBuyRequest {
+    pub shop_id: i32,
+    pub good_ids: Vec<i32>,
+}
+
+impl Decode for ShopQualityBuyRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let shop_id = required_field(&fields, 1, "quality shop buy is missing shop id")?;
+        let values = fields.get(&2).map(Vec::as_slice).unwrap_or_default();
+        if shop_id <= 0 || values.is_empty() || values.len() > 99 {
+            return Err(ProtocolError::Invalid(
+                "quality shop buy request is invalid",
+            ));
+        }
+        let mut good_ids = Vec::with_capacity(values.len());
+        for value in values {
+            let good_id = to_i32(*value, "quality shop good id is out of range")?;
+            if good_id <= 0 || good_ids.contains(&good_id) {
+                return Err(ProtocolError::Invalid("quality shop good ids are invalid"));
+            }
+            good_ids.push(good_id);
+        }
+        Ok(Self { shop_id, good_ids })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BagSaleItemRequest {
+    pub template_id: i32,
+    pub amount: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BagSaleRequest {
+    pub items: Vec<BagSaleItemRequest>,
+}
+
+impl Decode for BagSaleRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let mut reader = PbReader::new(payload);
+        let mut items = Vec::new();
+        while let Some((field, wire)) = reader.next_field()? {
+            if field != 1 || wire != 2 {
+                reader.skip(wire)?;
+                continue;
+            }
+            if items.len() >= 99 {
+                return Err(ProtocolError::Invalid("bag sale has too many items"));
+            }
+            let fields = decode_varint_fields(reader.read_bytes()?)?;
+            let template_id = required_field(&fields, 1, "bag sale is missing template id")?;
+            let amount = required_field(&fields, 2, "bag sale is missing amount")?;
+            if template_id <= 0 || amount <= 0 {
+                return Err(ProtocolError::Invalid("bag sale item is invalid"));
+            }
+            items.push(BagSaleItemRequest {
+                template_id,
+                amount,
+            });
+        }
+        if items.is_empty() {
+            return Err(ProtocolError::Invalid("bag sale request is empty"));
+        }
+        Ok(Self { items })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BagCompositeRequest {
+    pub template_id: i32,
+    pub amount: i32,
+}
+
+impl Decode for BagCompositeRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let template_id = required_field(&fields, 1, "bag composite is missing template id")?;
+        let amount = required_field(&fields, 2, "bag composite is missing amount")?;
+        if template_id <= 0 || amount <= 0 {
+            return Err(ProtocolError::Invalid("bag composite request is invalid"));
+        }
+        Ok(Self {
+            template_id,
+            amount,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeroLockRequest {
     pub hero_id: u64,
     pub locked: bool,

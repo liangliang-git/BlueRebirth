@@ -1019,21 +1019,49 @@ where
             || request.method == "fashion.updateData"
             || request.method == "fashion.Equip" =>
         {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            let result = if let Some(typed) = typed_account.as_mut() {
+                let result = commerce_handler::handle_typed(
+                    typed,
+                    state,
+                    request.method.as_str(),
+                    request_args,
+                    &mut pre_pushes,
+                    commerce_handler::CommerceTypedCatalogs { shop: shop_catalog },
+                );
+                if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
+                    result
+                } else {
+                    let mut context = GameLoginRequestContext {
+                        state,
+                        account: &mut account,
+                        catalogs: *catalogs,
+                        pre_pushes: &mut pre_pushes,
+                        post_pushes: &mut post_pushes,
+                        handler_error: &mut handler_error,
+                        pass_details: &mut pass_details,
+                        pass_rewards: &mut pass_rewards,
+                        pass_hero_ids: &mut pass_hero_ids,
+                        pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                        pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                    };
+                    commerce_handler::handle(&mut context, request.method.as_str(), request_args)
+                }
+            } else {
+                let mut context = GameLoginRequestContext {
+                    state,
+                    account: &mut account,
+                    catalogs: *catalogs,
+                    pre_pushes: &mut pre_pushes,
+                    post_pushes: &mut post_pushes,
+                    handler_error: &mut handler_error,
+                    pass_details: &mut pass_details,
+                    pass_rewards: &mut pass_rewards,
+                    pass_hero_ids: &mut pass_hero_ids,
+                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                };
+                commerce_handler::handle(&mut context, request.method.as_str(), request_args)
             };
-            let result =
-                commerce_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
