@@ -1,5 +1,5 @@
 use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
+use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 pub(super) struct HeroTypedCatalogs<'a> {
@@ -25,7 +25,7 @@ pub(super) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
-    pre_pushes: &mut Vec<Vec<u8>>,
+    effects: &mut ResponseEffects,
     catalogs: HeroTypedCatalogs<'_>,
 ) -> HandlerResult {
     let HeroTypedCatalogs {
@@ -56,11 +56,10 @@ pub(super) fn handle_typed(
                 return HandlerResult::Error(GameError::InvalidRequest("hero was not found"));
             };
             hero.locked = locked;
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "hero.UpdateHeroBagData",
                 HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-            );
+            ));
             HandlerResult::PushOnly
         }
         "hero.ChangeName" => {
@@ -78,11 +77,10 @@ pub(super) fn handle_typed(
             };
             hero.name = request.name;
             hero.change_name_time = u64::from(current_unix_seconds());
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "hero.UpdateHeroBagData",
                 HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-            );
+            ));
             HandlerResult::PushOnly
         }
         "hero.RetireHero" => {
@@ -224,29 +222,25 @@ pub(super) fn handle_typed(
                     ..HeroGrid::default()
                 })
                 .collect::<Vec<_>>();
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "hero.UpdateHeroBagData",
                 HeroBagCodec::encode(&HeroBag {
                     heroes: deleted,
                     bag_size: 200,
                 }),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "equip.UpdateEquipBagData",
                 EquipListCodec::encode(&equip_list_from_typed_account(account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "task.TaskInfo",
                 task_info_payload_from_typed_account(account, task_catalog),
-            );
+            ));
             HandlerResult::Reply(Response::raw(method, encode_retire_hero_response(&rewards)))
         }
         "hero.ChangeEquip" => {
@@ -330,16 +324,14 @@ pub(super) fn handle_typed(
                 }
                 hero.equip_slots[slot_index] = new_equip_id;
             }
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "hero.UpdateHeroBagData",
                 HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "equip.UpdateEquipBagData",
                 EquipListCodec::encode(&equip_list_from_typed_account(account)),
-            );
+            ));
             HandlerResult::PushOnly
         }
         "hero.AddExp" => {
@@ -431,21 +423,18 @@ pub(super) fn handle_typed(
                 hero.exp = exp;
             }
             advance_typed_task_event(account, task_catalog, 10, 1);
-            append_method_push(
-                pre_pushes,
+            effects.push_pre(Response::raw(
                 "hero.UpdateHeroBagData",
                 HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-            );
-            append_method_push(
-                pre_pushes,
+            ));
+            effects.push_pre(Response::raw(
                 "task.TaskInfo",
                 task_info_payload_from_typed_account(account, task_catalog),
-            );
+            ));
             HandlerResult::Reply(Response::raw(
                 method,
                 encode_hero_add_exp_response(hero_id.get(), &items),
@@ -487,7 +476,7 @@ mod tests {
             &mut account,
             "hero.GetHeroInfo",
             &[],
-            &mut Vec::new(),
+            &mut ResponseEffects::default(),
             HeroTypedCatalogs::empty(),
         );
         let HandlerResult::Reply(response) = result else {
@@ -509,19 +498,19 @@ mod tests {
         let mut args = Vec::new();
         append_varint_field(&mut args, 1, 1);
         append_varint_field(&mut args, 2, 0);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         let result = handle_typed(
             &mut account,
             "hero.LockHero",
             &args,
-            &mut pushes,
+            &mut effects,
             HeroTypedCatalogs::empty(),
         );
 
         assert!(matches!(result, HandlerResult::PushOnly));
         assert!(!account.dock.heroes.get(&hero_id).unwrap().locked);
-        assert_eq!(pushes.len(), 1);
+        assert_eq!(effects.into_parts().0.len(), 1);
     }
 
     #[test]
@@ -533,19 +522,19 @@ mod tests {
         let mut args = Vec::new();
         append_varint_field(&mut args, 1, 1);
         append_bytes_field(&mut args, 2, b"Aegis");
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         let result = handle_typed(
             &mut account,
             "hero.ChangeName",
             &args,
-            &mut pushes,
+            &mut effects,
             HeroTypedCatalogs::empty(),
         );
 
         assert!(matches!(result, HandlerResult::PushOnly));
         assert_eq!(account.dock.heroes.values().next().unwrap().name, "Aegis");
-        assert_eq!(pushes.len(), 1);
+        assert_eq!(effects.into_parts().0.len(), 1);
     }
 
     #[test]
@@ -570,13 +559,13 @@ mod tests {
         let mut args = Vec::new();
         append_varint_field(&mut args, 1, 1);
         append_bytes_field(&mut args, 2, &item);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         let result = handle_typed(
             &mut account,
             "hero.AddExp",
             &args,
-            &mut pushes,
+            &mut effects,
             HeroTypedCatalogs {
                 hero_level: Some(&catalog),
                 tasks: None,
@@ -588,7 +577,7 @@ mod tests {
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert_eq!(account.inventory.items.get(&item_id), Some(&(before - 1)));
         assert_eq!(account.dock.heroes.values().next().unwrap().level, 2);
-        assert_eq!(pushes.len(), 3);
+        assert_eq!(effects.into_parts().0.len(), 3);
     }
 
     #[test]
@@ -616,13 +605,13 @@ mod tests {
         let mut args = Vec::new();
         append_varint_field(&mut args, 1, 1);
         append_varint_field(&mut args, 2, 1);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         let result = handle_typed(
             &mut account,
             "hero.RetireHero",
             &args,
-            &mut pushes,
+            &mut effects,
             HeroTypedCatalogs {
                 hero_level: None,
                 tasks: None,
@@ -648,7 +637,7 @@ mod tests {
                 .get(),
             before_gold + 3
         );
-        assert_eq!(pushes.len(), 4);
+        assert_eq!(effects.into_parts().0.len(), 4);
     }
 
     #[test]
@@ -662,13 +651,13 @@ mod tests {
         append_varint_field(&mut args, 2, 2);
         append_varint_field(&mut args, 3, 1);
         append_varint_field(&mut args, 4, 1);
-        let mut pushes = Vec::new();
+        let mut effects = ResponseEffects::default();
 
         let result = handle_typed(
             &mut account,
             "hero.ChangeEquip",
             &args,
-            &mut pushes,
+            &mut effects,
             HeroTypedCatalogs::empty(),
         );
 
@@ -692,6 +681,6 @@ mod tests {
                 .hero_id,
             Some(blueoath_domain::HeroId::new(1).unwrap())
         );
-        assert_eq!(pushes.len(), 2);
+        assert_eq!(effects.into_parts().0.len(), 2);
     }
 }
