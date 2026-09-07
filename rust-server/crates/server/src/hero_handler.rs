@@ -9,6 +9,9 @@ pub(super) fn handle_typed(
     method: &str,
     request_args: &[u8],
     pre_pushes: &mut Vec<Vec<u8>>,
+    hero_level_catalog: Option<&HeroLevelCatalog>,
+    task_catalog: Option<&TaskCatalog>,
+    ship_exp_multiplier: f64,
 ) -> HandlerResult {
     match method {
         "hero.GetHeroInfo" | "hero.GetHeroInfoByHeroIdArray" => {
@@ -56,6 +59,112 @@ pub(super) fn handle_typed(
                 HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
             );
             HandlerResult::PushOnly
+        }
+        "hero.AddExp" => {
+            let Some(hero_level_catalog) = hero_level_catalog else {
+                return HandlerResult::Empty;
+            };
+            let (hero_id, items) = decode_hero_add_exp_request(request_args);
+            if hero_id == 0 || items.is_empty() || items.len() > 99 {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "hero experience request is invalid",
+                ));
+            }
+            let Some(hero_id) = blueoath_domain::HeroId::new(hero_id).ok() else {
+                return HandlerResult::Error(GameError::InvalidRequest("hero id is invalid"));
+            };
+            if !account.dock.heroes.contains_key(&hero_id) {
+                return HandlerResult::Error(GameError::InvalidRequest("hero was not found"));
+            }
+            let plan = items
+                .iter()
+                .filter_map(|(item_id, requested)| {
+                    let item_id =
+                        blueoath_domain::TemplateId::new(u64::try_from(*item_id).ok()?).ok()?;
+                    let raw_item_id = i32::try_from(item_id.get()).ok()?;
+                    let per_item = *hero_level_catalog.exp_per_item.get(&raw_item_id)?;
+                    let requested = u64::try_from((*requested).clamp(0, 1_000_000)).ok()?;
+                    let available = account
+                        .inventory
+                        .items
+                        .get(&item_id)
+                        .copied()
+                        .unwrap_or_default();
+                    let amount = requested.min(available);
+                    (per_item > 0 && amount > 0).then_some((item_id, amount, i64::from(per_item)))
+                })
+                .collect::<Vec<_>>();
+            if plan.is_empty() {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "experience items were not found",
+                ));
+            }
+            let total_exp = plan.iter().fold(0i64, |total, (_, amount, per_item)| {
+                total.saturating_add(
+                    i64::try_from(*amount)
+                        .unwrap_or(i64::MAX)
+                        .saturating_mul(*per_item),
+                )
+            });
+            for (item_id, amount, _) in &plan {
+                if let Some(available) = account.inventory.items.get_mut(item_id) {
+                    *available = available.saturating_sub(*amount);
+                }
+            }
+            let boosted = scale_reward(total_exp, ship_exp_multiplier);
+            let (level, exp) = account
+                .dock
+                .heroes
+                .get(&hero_id)
+                .map(|hero| (hero.level.max(1), hero.exp))
+                .unwrap_or((1, 0));
+            let mut level = level;
+            let mut exp = exp.min(u64::from(i32::MAX as u32));
+            let mut remaining = u64::try_from(boosted).unwrap_or_default();
+            while level < 200 {
+                let need = hero_level_catalog
+                    .exp_needed
+                    .get(&i32::try_from(level).unwrap_or(i32::MAX))
+                    .copied()
+                    .unwrap_or(500)
+                    .max(1) as u64;
+                if exp.saturating_add(remaining) < need {
+                    exp = exp.saturating_add(remaining);
+                    remaining = 0;
+                    break;
+                }
+                remaining = exp.saturating_add(remaining).saturating_sub(need);
+                exp = 0;
+                level = level.saturating_add(1);
+            }
+            exp = exp
+                .saturating_add(remaining)
+                .min(u64::from(i32::MAX as u32));
+            if let Some(hero) = account.dock.heroes.get_mut(&hero_id) {
+                hero.level = level;
+                hero.exp = exp;
+            }
+            let progress = account.tasks.progress.entry(10).or_default();
+            *progress = progress.saturating_add(1);
+            append_method_push(
+                pre_pushes,
+                "hero.UpdateHeroBagData",
+                HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            append_method_push(
+                pre_pushes,
+                "task.TaskInfo",
+                task_info_payload_from_typed_account(account, task_catalog),
+            );
+            HandlerResult::Reply(Response::raw(
+                method,
+                encode_hero_add_exp_response(hero_id.get(), &items),
+            ))
         }
         _ => HandlerResult::Empty,
     }
@@ -794,7 +903,15 @@ mod tests {
                 equip_slots: Vec::new(),
             },
         );
-        let result = handle_typed(&mut account, "hero.GetHeroInfo", &[], &mut Vec::new());
+        let result = handle_typed(
+            &mut account,
+            "hero.GetHeroInfo",
+            &[],
+            &mut Vec::new(),
+            None,
+            None,
+            1.0,
+        );
         let HandlerResult::Reply(response) = result else {
             panic!("typed hero info must reply");
         };
@@ -816,7 +933,15 @@ mod tests {
         append_varint_field(&mut args, 2, 0);
         let mut pushes = Vec::new();
 
-        let result = handle_typed(&mut account, "hero.LockHero", &args, &mut pushes);
+        let result = handle_typed(
+            &mut account,
+            "hero.LockHero",
+            &args,
+            &mut pushes,
+            None,
+            None,
+            1.0,
+        );
 
         assert!(matches!(result, HandlerResult::PushOnly));
         assert!(!account.dock.heroes.get(&hero_id).unwrap().locked);
@@ -834,10 +959,58 @@ mod tests {
         append_bytes_field(&mut args, 2, b"Aegis");
         let mut pushes = Vec::new();
 
-        let result = handle_typed(&mut account, "hero.ChangeName", &args, &mut pushes);
+        let result = handle_typed(
+            &mut account,
+            "hero.ChangeName",
+            &args,
+            &mut pushes,
+            None,
+            None,
+            1.0,
+        );
 
         assert!(matches!(result, HandlerResult::PushOnly));
         assert_eq!(account.dock.heroes.values().next().unwrap().name, "Aegis");
         assert_eq!(pushes.len(), 1);
+    }
+
+    #[test]
+    fn typed_hero_add_exp_consumes_inventory_and_updates_level() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("hero-exp-typed").unwrap(),
+            "Captain",
+        );
+        let item_id = blueoath_domain::TemplateId::new(10_182).unwrap();
+        let before = account
+            .inventory
+            .items
+            .get(&item_id)
+            .copied()
+            .unwrap_or_default();
+        let mut catalog = HeroLevelCatalog::default();
+        catalog.exp_per_item.insert(10_182, 600);
+        catalog.exp_needed.insert(1, 500);
+        let mut item = Vec::new();
+        append_varint_field(&mut item, 2, 10_182);
+        append_varint_field(&mut item, 3, 1);
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, 1);
+        append_bytes_field(&mut args, 2, &item);
+        let mut pushes = Vec::new();
+
+        let result = handle_typed(
+            &mut account,
+            "hero.AddExp",
+            &args,
+            &mut pushes,
+            Some(&catalog),
+            None,
+            1.0,
+        );
+
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert_eq!(account.inventory.items.get(&item_id), Some(&(before - 1)));
+        assert_eq!(account.dock.heroes.values().next().unwrap().level, 2);
+        assert_eq!(pushes.len(), 3);
     }
 }
