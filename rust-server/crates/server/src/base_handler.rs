@@ -277,6 +277,40 @@ pub(super) fn handle_typed(
                 encode_support_settlement(&settlement),
             ))
         }
+        "supply.SupplySwitch" => {
+            account
+                .activities
+                .progress
+                .retain(|key, _| !key.starts_with("compat:supply:hero:"));
+            for hero_id in decode_repeated_varint_field(request_args, 1)
+                .into_iter()
+                .filter(|id| *id > 0)
+            {
+                account
+                    .activities
+                    .progress
+                    .insert(format!("compat:supply:hero:{hero_id}"), 1);
+            }
+            append_method_push(
+                pre_pushes,
+                "user.UpdateUserInfo",
+                UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+            );
+            HandlerResult::PushOnly
+        }
+        "user.KickInfo"
+        | "user.InitQueueInfo"
+        | "user.UpdateQueueInfo"
+        | "user.MedalReplaceReward" => HandlerResult::Reply(Response::raw(
+            method,
+            if method == "user.InitQueueInfo" {
+                let mut payload = Vec::new();
+                append_varint_field(&mut payload, 4, 1);
+                payload
+            } else {
+                Vec::new()
+            },
+        )),
         "jopen.GetJopen" => {
             HandlerResult::Reply(Response::raw(method, typed_jopen_payload(account)))
         }
@@ -1959,6 +1993,24 @@ mod tests {
             HandlerResult::Reply(_)
         ));
         assert!(typed_support_entries(&account).is_empty());
+
+        let mut supply_switch = Vec::new();
+        append_varint_field(&mut supply_switch, 1, 1);
+        append_varint_field(&mut supply_switch, 1, 2);
+        assert!(matches!(
+            handle_typed(
+                &mut account,
+                &state,
+                "supply.SupplySwitch",
+                &supply_switch,
+                &mut pushes,
+            ),
+            HandlerResult::PushOnly
+        ));
+        assert!(account
+            .activities
+            .progress
+            .contains_key("compat:supply:hero:1"));
 
         assert!(matches!(
             handle_typed(&mut account, &state, "jopen.FetchHero", &[], &mut pushes,),
