@@ -243,6 +243,8 @@ fn typed_fleet_mutation_validates_hero_ownership() {
         blueoath_domain::HeroState {
             id: hero_id,
             template_id: blueoath_domain::TemplateId::new(1001).unwrap(),
+            name: String::new(),
+            change_name_time: 0,
             level: 1,
             exp: 0,
             mood: 0,

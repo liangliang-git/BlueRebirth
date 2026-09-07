@@ -1,0 +1,2 @@
+ALTER TABLE heroes ADD COLUMN name TEXT NOT NULL DEFAULT '';
+ALTER TABLE heroes ADD COLUMN change_name_time INTEGER NOT NULL DEFAULT 0 CHECK (change_name_time >= 0);

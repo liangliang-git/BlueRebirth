@@ -136,6 +136,8 @@ mod tests {
             HeroState {
                 id: hero_id,
                 template_id: TemplateId::new(70).unwrap(),
+                name: String::new(),
+                change_name_time: 0,
                 level: 1,
                 exp: 0,
                 mood: 1,

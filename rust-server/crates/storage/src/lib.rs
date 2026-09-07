@@ -241,7 +241,7 @@ impl ProfileStore {
         }
 
         let mut statement = connection.prepare(
-            "SELECT hero_id, template_id, level, exp, mood, affection, hp, lock_state
+            "SELECT hero_id, template_id, name, change_name_time, level, exp, mood, affection, hp, lock_state
              FROM heroes WHERE profile_id = ?1 ORDER BY hero_id",
         )?;
         let heroes = statement
@@ -249,12 +249,14 @@ impl ProfileStore {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, i64>(4)?,
                     row.get::<_, i64>(5)?,
                     row.get::<_, i64>(6)?,
                     row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, i64>(9)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -266,12 +268,14 @@ impl ProfileStore {
                 HeroState {
                     id,
                     template_id,
-                    level: positive_u32(row.2, "hero level")?,
-                    exp: non_negative_u64(row.3, "hero exp")?,
-                    mood: non_negative_u32(row.4, "hero mood")?,
-                    affection: non_negative_u64(row.5, "hero affection")?,
-                    hp: non_negative_u64(row.6, "hero hp")?,
-                    locked: row.7 != 0,
+                    name: row.2,
+                    change_name_time: non_negative_u64(row.3, "hero change name time")?,
+                    level: positive_u32(row.4, "hero level")?,
+                    exp: non_negative_u64(row.5, "hero exp")?,
+                    mood: non_negative_u32(row.6, "hero mood")?,
+                    affection: non_negative_u64(row.7, "hero affection")?,
+                    hp: non_negative_u64(row.8, "hero hp")?,
+                    locked: row.9 != 0,
                     equip_slots: Vec::new(),
                 },
             );
@@ -970,13 +974,15 @@ impl ProfileStore {
         for hero in account.dock.heroes.values() {
             transaction.execute(
                 "INSERT INTO heroes(
-                    profile_id, hero_id, template_id, level, exp, mood,
-                    affection, hp, lock_state, created_utc
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                profile_id, hero_id, template_id, name, change_name_time,
+                    level, exp, mood, affection, hp, lock_state, created_utc
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     profile.id.as_str(),
                     typed_i64(hero.id.get(), "hero id")?,
                     typed_i64(hero.template_id.get(), "hero template id")?,
+                    hero.name,
+                    typed_i64(hero.change_name_time, "hero change name time")?,
                     typed_i64(hero.level, "hero level")?,
                     typed_i64(hero.exp, "hero exp")?,
                     typed_i64(hero.mood, "hero mood")?,
@@ -2013,6 +2019,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0010_building_template_id.sql"),
     include_str!("../../../migrations/0011_preset_fleets.sql"),
     include_str!("../../../migrations/0012_building_hero_assignments.sql"),
+    include_str!("../../../migrations/0013_hero_names.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

@@ -34,6 +34,29 @@ pub(super) fn handle_typed(
             );
             HandlerResult::PushOnly
         }
+        "hero.ChangeName" => {
+            let hero_id = decode_varint_u64_field(request_args, 1);
+            let Some(hero_id) = blueoath_domain::HeroId::new(hero_id).ok() else {
+                return HandlerResult::Error(GameError::InvalidRequest("hero id is invalid"));
+            };
+            let Some(name) = decode_string_field(request_args, 2) else {
+                return HandlerResult::Error(GameError::InvalidRequest("hero name is invalid"));
+            };
+            if name.chars().count() > 32 {
+                return HandlerResult::Error(GameError::InvalidRequest("hero name is too long"));
+            }
+            let Some(hero) = account.dock.heroes.get_mut(&hero_id) else {
+                return HandlerResult::Error(GameError::InvalidRequest("hero was not found"));
+            };
+            hero.name = name;
+            hero.change_name_time = u64::from(current_unix_seconds());
+            append_method_push(
+                pre_pushes,
+                "hero.UpdateHeroBagData",
+                HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+            );
+            HandlerResult::PushOnly
+        }
         _ => HandlerResult::Empty,
     }
 }
@@ -760,6 +783,8 @@ mod tests {
             blueoath_domain::HeroState {
                 id: hero_id,
                 template_id: blueoath_domain::TemplateId::new(70).unwrap(),
+                name: String::new(),
+                change_name_time: 0,
                 level: 8,
                 exp: 9,
                 mood: 10,
@@ -795,6 +820,24 @@ mod tests {
 
         assert!(matches!(result, HandlerResult::PushOnly));
         assert!(!account.dock.heroes.get(&hero_id).unwrap().locked);
+        assert_eq!(pushes.len(), 1);
+    }
+
+    #[test]
+    fn typed_hero_name_mutation_updates_normalized_state() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("hero-name-typed").unwrap(),
+            "Captain",
+        );
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, 1);
+        append_bytes_field(&mut args, 2, b"Aegis");
+        let mut pushes = Vec::new();
+
+        let result = handle_typed(&mut account, "hero.ChangeName", &args, &mut pushes);
+
+        assert!(matches!(result, HandlerResult::PushOnly));
+        assert_eq!(account.dock.heroes.values().next().unwrap().name, "Aegis");
         assert_eq!(pushes.len(), 1);
     }
 }

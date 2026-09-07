@@ -172,6 +172,10 @@ impl Default for CharacterState {
 pub struct HeroState {
     pub id: HeroId,
     pub template_id: TemplateId,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub change_name_time: u64,
     pub level: u32,
     pub exp: u64,
     pub mood: u32,
@@ -456,6 +460,8 @@ impl NewAccountFactory {
                 id: starter_hero_id,
                 template_id: TemplateId::new(10_210_511)
                     .expect("starter hero template is positive"),
+                name: String::new(),
+                change_name_time: 0,
                 level: 1,
                 exp: 0,
                 mood: 100,
