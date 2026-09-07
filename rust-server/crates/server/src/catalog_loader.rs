@@ -3105,3 +3105,32 @@ fn battle_challenge_enemy_aliases(
     }
     aliases
 }
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    #[test]
+    fn bundled_catalogs_pass_startup_reference_validation() {
+        let config_dir =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../catalog/config");
+        assert!(
+            config_dir.is_dir(),
+            "missing bundled catalog: {}",
+            config_dir.display()
+        );
+
+        let chapters = load_chapter_catalog(Some(&config_dir));
+        let battle = load_battle_catalog(Some(&config_dir));
+        let tasks = load_task_catalog(Some(&config_dir));
+        let gameplay = load_gameplay_catalog(Some(&config_dir));
+
+        chapters.validate().unwrap();
+        chapters.validate_references(&gameplay).unwrap();
+        battle.validate().unwrap();
+        battle.validate_references().unwrap();
+        tasks.validate_references().unwrap();
+        gameplay.validate().unwrap();
+        gameplay.validate_references().unwrap();
+    }
+}
