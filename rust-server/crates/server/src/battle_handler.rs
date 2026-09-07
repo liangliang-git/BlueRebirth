@@ -245,8 +245,13 @@ pub(super) fn handle_typed_with_catalog(
             let started_at = active.started_at;
             let result = decode_battle_pass_result(request_args);
             let grade = if result.grade > 0 { result.grade } else { 3 };
-            let first_pass = BattleService::settle(account, copy_id, grade < 9)
-                .map_err(|_| GameError::InvalidState("battle settlement is invalid"));
+            let first_pass = BattleService::settle_at(
+                account,
+                copy_id,
+                grade < 9,
+                u64::from(current_unix_seconds()),
+            )
+            .map_err(|_| GameError::InvalidState("battle settlement is invalid"));
             match first_pass {
                 Ok(first_pass) => {
                     account

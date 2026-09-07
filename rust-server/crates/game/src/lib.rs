@@ -13,6 +13,8 @@ pub enum GameServiceError {
     BattleNotActive,
     #[error("battle session does not match requested copy")]
     BattleCopyMismatch,
+    #[error("battle session expired")]
+    BattleExpired,
     #[error("hero is not owned by account: {0:?}")]
     HeroNotOwned(HeroId),
     #[error("fleet is not configured: {0:?}")]
@@ -175,6 +177,21 @@ impl BattleService {
         Ok(victory && account.battle.passed_copies.insert(copy_id))
     }
 
+    pub fn settle_at(
+        account: &mut AccountState,
+        copy_id: CopyId,
+        victory: bool,
+        now: u64,
+    ) -> Result<bool, GameServiceError> {
+        let Some(session) = account.battle.active.as_ref() else {
+            return Err(GameServiceError::BattleNotActive);
+        };
+        if now > session.expires_at {
+            return Err(GameServiceError::BattleExpired);
+        }
+        Self::settle(account, copy_id, victory)
+    }
+
     pub fn record_attack(
         account: &mut AccountState,
         copy_id: CopyId,
@@ -316,5 +333,23 @@ mod tests {
             BattleService::record_attack(&mut account, CopyId::new(3).unwrap(), &[hero_id]),
             Err(GameServiceError::BattleCopyMismatch)
         ));
+    }
+
+    #[test]
+    fn battle_service_rejects_expired_settlement() {
+        let mut account = account();
+        BattleService::start(
+            &mut account,
+            ChapterId::new(1).unwrap(),
+            CopyId::new(2).unwrap(),
+            FleetId::new(1).unwrap(),
+            10,
+        )
+        .unwrap();
+        assert_eq!(
+            BattleService::settle_at(&mut account, CopyId::new(2).unwrap(), true, 11),
+            Err(GameServiceError::BattleExpired)
+        );
+        assert!(account.battle.active.is_some());
     }
 }
