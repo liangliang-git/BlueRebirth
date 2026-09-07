@@ -134,6 +134,55 @@ fn normalized_profile_runtime_round_trips_without_json_state_column() {
 }
 
 #[test]
+fn migration_from_schema_v6_normalizes_profile_runtime() {
+    let suffix = NEXT_ROOT.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!(
+        "blueoath-rust-migration-test-{}-{suffix}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
+    let migrations = [
+        include_str!("../../../migrations/0001_schema_meta.sql"),
+        include_str!("../../../migrations/0002_profiles_accounts.sql"),
+        include_str!("../../../migrations/0003_account_revisions.sql"),
+        include_str!("../../../migrations/0004_core_account.sql"),
+        include_str!("../../../migrations/0005_core_indexes.sql"),
+        include_str!("../../../migrations/0006_progress_social_activity.sql"),
+    ];
+    connection.execute_batch(migrations[0]).unwrap();
+    for (index, migration) in migrations.iter().enumerate().skip(1) {
+        connection.execute_batch(migration).unwrap();
+        connection
+            .execute(
+                "UPDATE schema_meta SET version = ?1, applied_at = 'now' WHERE id = 1",
+                [i64::try_from(index + 1).unwrap()],
+            )
+            .unwrap();
+    }
+    drop(connection);
+
+    let store = ProfileStore::open(&root).unwrap();
+    let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
+    let version: i64 = connection
+        .query_row("SELECT version FROM schema_meta WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let state_json_columns: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('profiles') WHERE name = 'state_json'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, 7);
+    assert_eq!(state_json_columns, 0);
+    assert!(store.list().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn account_json_round_trips_without_losing_unknown_fields() {
     let (store, root) = store();
     let account = json!({
