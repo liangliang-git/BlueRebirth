@@ -28,6 +28,7 @@ pub(super) fn encode_random_factor_payload(
 }
 
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn battle_start_payload(
     account: &Value,
     copy_id: i32,
@@ -53,6 +54,7 @@ pub(super) struct BattleStartOptions {
     pub(super) match_type: i32,
 }
 
+#[cfg(test)]
 pub(super) fn battle_start_payload_with_fleet_groups_with_stats(
     account: &Value,
     copy_id: i32,
@@ -517,6 +519,7 @@ fn encode_battle_player(
     player
 }
 
+#[cfg(test)]
 pub(super) fn battle_enemy_ids(copy_id: i32, battle_catalog: Option<&BattleCatalog>) -> Vec<i32> {
     let Some(catalog) = battle_catalog else {
         return vec![1];
@@ -616,6 +619,7 @@ pub(super) fn battle_position_fleet_id(
     }
 }
 
+#[cfg(test)]
 pub(super) fn battle_fleet_aliases(
     copy_id: i32,
     battle_catalog: Option<&BattleCatalog>,
@@ -630,6 +634,7 @@ pub(super) fn battle_fleet_aliases(
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn battle_enemy_hps(copy_id: i32, battle_catalog: Option<&BattleCatalog>) -> Vec<i64> {
     battle_enemy_ids(copy_id, battle_catalog)
         .into_iter()
@@ -642,6 +647,7 @@ pub(super) fn battle_enemy_hps(copy_id: i32, battle_catalog: Option<&BattleCatal
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn battle_enemy_hp_for_client(copy_id: i32, configured_hp: i32) -> i32 {
     let hp = configured_hp.max(1);
     if copy_id == 100 {
@@ -651,6 +657,7 @@ pub(super) fn battle_enemy_hp_for_client(copy_id: i32, configured_hp: i32) -> i3
     }
 }
 
+#[cfg(test)]
 #[cfg(test)]
 pub(super) fn battle_attack_payload_with_damage(args: &[u8], damage: u64) -> Vec<u8> {
     let mut output = Vec::new();
@@ -738,11 +745,13 @@ fn normalized_battle_passed_fleet_ids(
 }
 
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn validate_battle_fleet_pass(session: &Value, payload: &[u8]) -> bool {
     let passed_fleet_ids = normalized_battle_passed_fleet_ids(session, payload);
     !passed_fleet_ids.is_empty() && passed_fleet_ids.len() == battle_passed_fleet_ids(payload).len()
 }
 
+#[cfg(test)]
 #[cfg(test)]
 pub(super) fn mark_battle_fleet_passed(session: &mut Value, payload: &[u8]) -> bool {
     let passed_fleet_ids = normalized_battle_passed_fleet_ids(session, payload);
@@ -769,6 +778,7 @@ pub(super) fn mark_battle_fleet_passed(session: &mut Value, payload: &[u8]) -> b
     remaining.is_empty()
 }
 
+#[cfg(test)]
 pub(super) fn mark_first_battle_fleet_passed(session: &mut Value) -> bool {
     let Some(session) = session.as_object_mut() else {
         return true;
@@ -787,6 +797,7 @@ pub(super) fn mark_first_battle_fleet_passed(session: &mut Value) -> bool {
     remaining.is_empty()
 }
 
+#[cfg(test)]
 #[cfg(test)]
 pub(super) fn save_battle_hero_hp(
     account: &mut Value,
@@ -822,6 +833,7 @@ pub(super) fn save_battle_hero_hp(
     changed
 }
 
+#[cfg(test)]
 #[cfg(test)]
 pub(super) fn validate_battle_attack(
     session: &serde_json::Map<String, Value>,
