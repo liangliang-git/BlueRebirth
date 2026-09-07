@@ -1063,6 +1063,128 @@ impl ProfileStore {
                     }
                     _ => {}
                 }
+            } else if activity_id == "shipTask" {
+                match progress_kind.as_str() {
+                    "currentShipTid" => account.ship_task.current_ship_tid = value,
+                    "currentHeroTemplateId" => account.ship_task.current_hero_template_id = value,
+                    "setShipTime" => account.ship_task.set_ship_time = value,
+                    key if key.starts_with("task:") => {
+                        let mut parts = key.split(':');
+                        let Some(ship_tid) = parts
+                            .next()
+                            .and_then(|_| parts.next())
+                            .and_then(|value| value.parse::<u64>().ok())
+                        else {
+                            continue;
+                        };
+                        let Some(task_id) =
+                            parts.next().and_then(|value| value.parse::<u64>().ok())
+                        else {
+                            continue;
+                        };
+                        let Some(field) = parts.next() else {
+                            continue;
+                        };
+                        let task = account
+                            .ship_task
+                            .tasks
+                            .iter_mut()
+                            .find(|task| task.ship_tid == ship_tid && task.task_id == task_id);
+                        let task = if let Some(task) = task {
+                            task
+                        } else {
+                            account
+                                .ship_task
+                                .tasks
+                                .push(blueoath_domain::ShipTaskTaskState {
+                                    ship_tid,
+                                    task_id,
+                                    ..Default::default()
+                                });
+                            account
+                                .ship_task
+                                .tasks
+                                .last_mut()
+                                .expect("pushed ship task")
+                        };
+                        match field {
+                            "status" => task.status = value,
+                            "count" => task.count = value,
+                            _ => {}
+                        }
+                    }
+                    key if key.starts_with("achievement:") => {
+                        let mut parts = key.split(':');
+                        let Some(ship_tid) = parts
+                            .next()
+                            .and_then(|_| parts.next())
+                            .and_then(|value| value.parse::<u64>().ok())
+                        else {
+                            continue;
+                        };
+                        let Some(id) = parts.next().and_then(|value| value.parse::<u64>().ok())
+                        else {
+                            continue;
+                        };
+                        if parts.next() != Some("claimed") {
+                            continue;
+                        }
+                        let achievement =
+                            account
+                                .ship_task
+                                .achievements
+                                .iter_mut()
+                                .find(|achievement| {
+                                    achievement.ship_tid == ship_tid && achievement.id == id
+                                });
+                        let achievement = if let Some(achievement) = achievement {
+                            achievement
+                        } else {
+                            account.ship_task.achievements.push(
+                                blueoath_domain::ShipTaskAchievementState {
+                                    ship_tid,
+                                    id,
+                                    ..Default::default()
+                                },
+                            );
+                            account
+                                .ship_task
+                                .achievements
+                                .last_mut()
+                                .expect("pushed ship task achievement")
+                        };
+                        achievement.claimed = value != 0;
+                    }
+                    key if key.starts_with("extraMvp:") => {
+                        let mut parts = key.split(':');
+                        let Some(copy_id) = parts
+                            .next()
+                            .and_then(|_| parts.next())
+                            .and_then(|value| value.parse::<u64>().ok())
+                        else {
+                            continue;
+                        };
+                        if parts.next() != Some("count") {
+                            continue;
+                        }
+                        if let Some(extra) = account
+                            .ship_task
+                            .extra_mvp
+                            .iter_mut()
+                            .find(|extra| extra.copy_id == copy_id)
+                        {
+                            extra.count = value;
+                        } else {
+                            account.ship_task.extra_mvp.push(
+                                blueoath_domain::ShipTaskExtraMvpState {
+                                    copy_id,
+                                    count: value,
+                                },
+                            );
+                        }
+                    }
+                    _ => {}
+                }
             } else if activity_id == "buildShip" {
                 let mut parts = progress_kind.split(':');
                 match parts.next() {
@@ -2397,6 +2519,58 @@ impl ProfileStore {
                     profile.id.as_str(),
                     progress_kind,
                     typed_i64(value, "adventure state")?,
+                    timestamp(),
+                ],
+            )?;
+        }
+        let mut ship_task_progress = vec![
+            (
+                "currentShipTid".to_owned(),
+                account.ship_task.current_ship_tid,
+            ),
+            (
+                "currentHeroTemplateId".to_owned(),
+                account.ship_task.current_hero_template_id,
+            ),
+            ("setShipTime".to_owned(), account.ship_task.set_ship_time),
+        ];
+        ship_task_progress.extend(account.ship_task.tasks.iter().flat_map(|task| {
+            [
+                (
+                    format!("task:{}:{}:status", task.ship_tid, task.task_id),
+                    task.status,
+                ),
+                (
+                    format!("task:{}:{}:count", task.ship_tid, task.task_id),
+                    task.count,
+                ),
+            ]
+        }));
+        ship_task_progress.extend(account.ship_task.achievements.iter().map(|achievement| {
+            (
+                format!(
+                    "achievement:{}:{}:claimed",
+                    achievement.ship_tid, achievement.id
+                ),
+                u64::from(achievement.claimed),
+            )
+        }));
+        ship_task_progress.extend(
+            account
+                .ship_task
+                .extra_mvp
+                .iter()
+                .map(|extra| (format!("extraMvp:{}:count", extra.copy_id), extra.count)),
+        );
+        for (progress_kind, value) in ship_task_progress {
+            transaction.execute(
+                "INSERT INTO activity_progress(
+                    profile_id, activity_id, progress_kind, value, updated_at
+                 ) VALUES (?1, 'shipTask', ?2, ?3, ?4)",
+                params![
+                    profile.id.as_str(),
+                    progress_kind,
+                    typed_i64(value, "ship task state")?,
                     timestamp(),
                 ],
             )?;

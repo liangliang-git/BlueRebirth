@@ -466,6 +466,37 @@ impl Default for AdventureState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShipTaskTaskState {
+    pub ship_tid: u64,
+    pub task_id: u64,
+    pub status: u64,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShipTaskAchievementState {
+    pub ship_tid: u64,
+    pub id: u64,
+    pub claimed: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShipTaskExtraMvpState {
+    pub copy_id: u64,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShipTaskState {
+    pub current_ship_tid: u64,
+    pub current_hero_template_id: u64,
+    pub set_ship_time: u64,
+    pub tasks: Vec<ShipTaskTaskState>,
+    pub achievements: Vec<ShipTaskAchievementState>,
+    pub extra_mvp: Vec<ShipTaskExtraMvpState>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InviteScoreState {
     pub have_got_ssr: u64,
     pub have_got_fashion: u64,
@@ -630,6 +661,8 @@ pub struct AccountState {
     pub activities: ActivityState,
     #[serde(default)]
     pub adventure: AdventureState,
+    #[serde(default)]
+    pub ship_task: ShipTaskState,
     #[serde(default)]
     pub invite_score: InviteScoreState,
     #[serde(default)]
