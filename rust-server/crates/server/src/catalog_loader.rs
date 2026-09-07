@@ -1243,6 +1243,20 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
             )
         })
         .collect();
+    let interaction_figures = rows("config_interaction_figurte.db")
+        .into_iter()
+        .map(|(id, value)| {
+            (
+                id,
+                InteractionFigureConfig {
+                    is_drawable: json_i32(&value, "is_drawable").unwrap_or_default(),
+                    figure_type: json_i32(&value, "figure_type").unwrap_or_default(),
+                    original_ship_required: json_i32(&value, "origional_ship_required")
+                        .unwrap_or_default(),
+                },
+            )
+        })
+        .collect();
     GameplayCatalog {
         rewards_by_id: load_reward_definitions(&dir),
         battlepass_levels: battlepass_levels("config_battlepass_level.db"),
@@ -1279,7 +1293,7 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
         magazine_tasks: rows("config_task_magazine.db"),
         interaction_items,
         interaction_item_bags: rows("config_interaction_item_bag.db"),
-        interaction_figures: rows("config_interaction_figurte.db"),
+        interaction_figures,
         guild_box_scores: rows("config_guildboxscore.db"),
         valentine_gifts: rows("config_item_valentine_gift.db"),
         sportsmeet_awards: rows("config_sportsmeet_award.db"),

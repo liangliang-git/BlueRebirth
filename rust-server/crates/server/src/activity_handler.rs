@@ -1342,12 +1342,10 @@ fn typed_christmas_eligible_figures(
         .interaction_figures
         .iter()
         .filter_map(|(id, figure)| {
-            if json_i32(figure, "is_drawable").unwrap_or_default() <= 0
-                || json_i32(figure, "figure_type") != Some(1)
-            {
+            if figure.is_drawable <= 0 || figure.figure_type != 1 {
                 return None;
             }
-            let required = json_i32(figure, "origional_ship_required").unwrap_or_default() > 0;
+            let required = figure.original_ship_required > 0;
             (!required || owned_ship_fleets.contains(&(*id as u64))).then_some(*id)
         })
         .collect::<Vec<_>>();

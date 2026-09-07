@@ -670,6 +670,13 @@ pub(super) struct ParameterConfig {
     pub(super) value: i32,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct InteractionFigureConfig {
+    pub(super) is_drawable: i32,
+    pub(super) figure_type: i32,
+    pub(super) original_ship_required: i32,
+}
+
 #[derive(Clone, Debug, Default)]
 pub(super) struct GameplayCatalog {
     pub(super) rewards_by_id: std::collections::BTreeMap<i32, Vec<ShopReward>>,
@@ -704,7 +711,7 @@ pub(super) struct GameplayCatalog {
     pub(super) magazine_tasks: std::collections::BTreeMap<i32, Value>,
     pub(super) interaction_items: std::collections::BTreeMap<i32, InteractionItemConfig>,
     pub(super) interaction_item_bags: std::collections::BTreeMap<i32, Value>,
-    pub(super) interaction_figures: std::collections::BTreeMap<i32, Value>,
+    pub(super) interaction_figures: std::collections::BTreeMap<i32, InteractionFigureConfig>,
     pub(super) guild_box_scores: std::collections::BTreeMap<i32, Value>,
     pub(super) valentine_gifts: std::collections::BTreeMap<i32, Value>,
     pub(super) sportsmeet_awards: std::collections::BTreeMap<i32, Value>,
