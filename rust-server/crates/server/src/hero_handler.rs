@@ -21,8 +21,13 @@ pub(super) fn handle_typed(
             ))
         }
         "hero.LockHero" => {
-            let hero_id = decode_varint_u64_field(request_args, 1);
-            let locked = decode_varint_u64_field(request_args, 2) != 0;
+            let Ok(request) = HeroLockRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "hero lock request is invalid",
+                ));
+            };
+            let hero_id = request.hero_id;
+            let locked = request.locked;
             let Some(hero_id) = blueoath_domain::HeroId::new(hero_id).ok() else {
                 return HandlerResult::Error(GameError::InvalidRequest("hero id is invalid"));
             };
@@ -38,20 +43,19 @@ pub(super) fn handle_typed(
             HandlerResult::PushOnly
         }
         "hero.ChangeName" => {
-            let hero_id = decode_varint_u64_field(request_args, 1);
+            let Ok(request) = HeroChangeNameRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "hero name request is invalid",
+                ));
+            };
+            let hero_id = request.hero_id;
             let Some(hero_id) = blueoath_domain::HeroId::new(hero_id).ok() else {
                 return HandlerResult::Error(GameError::InvalidRequest("hero id is invalid"));
             };
-            let Some(name) = decode_string_field(request_args, 2) else {
-                return HandlerResult::Error(GameError::InvalidRequest("hero name is invalid"));
-            };
-            if name.chars().count() > 32 {
-                return HandlerResult::Error(GameError::InvalidRequest("hero name is too long"));
-            }
             let Some(hero) = account.dock.heroes.get_mut(&hero_id) else {
                 return HandlerResult::Error(GameError::InvalidRequest("hero was not found"));
             };
-            hero.name = name;
+            hero.name = request.name;
             hero.change_name_time = u64::from(current_unix_seconds());
             append_method_push(
                 pre_pushes,

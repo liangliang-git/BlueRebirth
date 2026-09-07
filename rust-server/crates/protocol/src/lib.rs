@@ -193,6 +193,53 @@ single_string_request!(
 );
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroLockRequest {
+    pub hero_id: u64,
+    pub locked: bool,
+}
+
+impl Decode for HeroLockRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let hero_id = optional_u64(&fields, 1, "hero lock has duplicate hero id")?;
+        if hero_id == 0 {
+            return Err(ProtocolError::Invalid("hero lock is missing hero id"));
+        }
+        Ok(Self {
+            hero_id,
+            locked: optional_i32(&fields, 2, "hero lock has duplicate state")? != 0,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroChangeNameRequest {
+    pub hero_id: u64,
+    pub name: String,
+}
+
+impl Decode for HeroChangeNameRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let hero_id = optional_u64(&fields, 1, "hero name has duplicate hero id")?;
+        if hero_id == 0 {
+            return Err(ProtocolError::Invalid("hero name is missing hero id"));
+        }
+        Ok(Self {
+            hero_id,
+            name: decode_required_string(
+                payload,
+                2,
+                "hero name is missing",
+                "hero name has duplicate value",
+                "hero name is too long",
+                32,
+            )?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DailyCopyEnterRequest {
     pub chapter_id: i32,
     pub copy_id: i32,
