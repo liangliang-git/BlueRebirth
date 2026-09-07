@@ -356,21 +356,32 @@ where
             Some(BagInfoCodec::encode(&bag))
         }
         "tactic.SetHerosTactic" => {
-            let fleet = decode_fleet_info(request_args);
-            if let Some(typed) = typed_account.as_mut() {
-                if !set_fleet_on_typed_account(typed, &fleet) {
-                    handler_error = Some(GameError::InvalidRequest(
-                        "fleet tactic contains invalid or unowned hero",
-                    ));
-                    Some(Vec::new())
+            let fleet = match FleetInfo::decode(request_args) {
+                Ok(fleet) => Some(fleet),
+                Err(_) => {
+                    handler_error =
+                        Some(GameError::InvalidRequest("fleet tactic request is invalid"));
+                    None
+                }
+            };
+            if let Some(fleet) = fleet {
+                if let Some(typed) = typed_account.as_mut() {
+                    if !set_fleet_on_typed_account(typed, &fleet) {
+                        handler_error = Some(GameError::InvalidRequest(
+                            "fleet tactic contains invalid or unowned hero",
+                        ));
+                        Some(Vec::new())
+                    } else {
+                        Some(FleetInfoCodec::encode(&fleet))
+                    }
+                } else if let Some(account) = account.as_deref_mut() {
+                    set_fleet_from_account(account, &fleet);
+                    Some(FleetInfoCodec::encode(&fleet))
                 } else {
                     Some(FleetInfoCodec::encode(&fleet))
                 }
-            } else if let Some(account) = account.as_deref_mut() {
-                set_fleet_from_account(account, &fleet);
-                Some(FleetInfoCodec::encode(&fleet))
             } else {
-                Some(FleetInfoCodec::encode(&fleet))
+                Some(Vec::new())
             }
         }
         "presetfleet.PresetFleetsInfo" => Some(PresetFleetCodec::encode(

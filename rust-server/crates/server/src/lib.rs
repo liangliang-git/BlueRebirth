@@ -101,8 +101,8 @@ use shop_state::*;
 use study_state::*;
 use task_state::*;
 use wire::{
-    append_bytes_field, append_message_field, append_varint, append_varint_field,
-    read_string_slice, read_varint, skip_wire,
+    append_bytes_field, append_message_field, append_varint, append_varint_field, read_varint,
+    skip_wire,
 };
 
 pub use runtime::run;

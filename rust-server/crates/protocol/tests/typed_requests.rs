@@ -11,19 +11,19 @@ use blueoath_protocol::{
     CoopRoomHeroesRequest, CoopRoomIdRequest, CopyAttackRequest, CopyIdRequest,
     CopyPassBaseRequest, CopyPassRequest, CopyRecordRequest, CopyRewardCountRequest,
     CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode, DiscussRequest,
-    ExchangeRequest, FashionPurchaseRequest, FoodComposeRequest, FriendSearchRequest,
-    FriendTargetRequest, GetBarrageByIdRequest, GuideSettingEntry, GuideSettingRequest,
-    GuildActivityPresentRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildCreateRequest,
-    GuildIdRequest, GuildListRequest, GuildModifyRequest, GuildOfferRequest, GuildSearchRequest,
-    GuildTaskDonateRequest, GuildTaskIdRequest, GuildTaskMemberRequest, GuildWarBaseRequest,
-    GuildWarScoreRequest, HeroAwakenFinishRequest, HeroAwakenRewardRequest, HeroChangeEquipRequest,
-    InviteRecordVersionRequest, InviteStateTypeRequest, OutpostBuildingRequest,
-    OutpostSetHeroRequest, PaperCutRequest, ProtocolError, SeaDifficultyRequest,
-    SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
-    SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest, SignDayRequest,
-    SportsMeetPointsRequest, StudyProgressRequest, StudySpeedupItem, StudySpeedupRequest,
-    StudyStartRequest, TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
-    ValentineRewardRequest, WorldEventStageRequest,
+    ExchangeRequest, FashionPurchaseRequest, FleetInfo, FleetTactic, FoodComposeRequest,
+    FriendSearchRequest, FriendTargetRequest, GetBarrageByIdRequest, GuideSettingEntry,
+    GuideSettingRequest, GuildActivityPresentRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest,
+    GuildCreateRequest, GuildIdRequest, GuildListRequest, GuildModifyRequest, GuildOfferRequest,
+    GuildSearchRequest, GuildTaskDonateRequest, GuildTaskIdRequest, GuildTaskMemberRequest,
+    GuildWarBaseRequest, GuildWarScoreRequest, HeroAwakenFinishRequest, HeroAwakenRewardRequest,
+    HeroChangeEquipRequest, InviteRecordVersionRequest, InviteStateTypeRequest,
+    OutpostBuildingRequest, OutpostSetHeroRequest, PaperCutRequest, ProtocolError,
+    SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest,
+    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, ShipTaskCurrentShipRequest,
+    ShipTaskRewardRequest, SignDayRequest, SportsMeetPointsRequest, StudyProgressRequest,
+    StudySpeedupItem, StudySpeedupRequest, StudyStartRequest, TaskAllRewardRequest,
+    TaskRewardRequest, TeachingUserRequest, ValentineRewardRequest, WorldEventStageRequest,
 };
 
 #[test]
@@ -730,6 +730,22 @@ fn decodes_typed_battle_and_guide_requests() {
                     value: "d".to_owned(),
                 },
             ],
+        }
+    );
+    assert_eq!(
+        FleetInfo::decode(&[0x0a, 6, 0x10, 1, 0x28, 4, 0x30, 2, 0x10, 9, 0x18, 3,]).unwrap(),
+        FleetInfo {
+            tactics: vec![FleetTactic {
+                tactic_name: String::new(),
+                hero_ids: vec![1],
+                mode_id: 0,
+                strategy_id: 0,
+                formation_id: 4,
+                tactic_type: 2,
+                ex_hero_ids: vec![],
+            }],
+            max_power: 9,
+            min_power: 3,
         }
     );
 }

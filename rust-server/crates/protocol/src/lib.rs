@@ -4588,6 +4588,57 @@ pub struct FleetInfo {
     pub min_power: i32,
 }
 
+impl Decode for FleetInfo {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let mut tactics = Vec::new();
+        for nested in decode_repeated_message_fields(payload, 1)? {
+            let nested_fields = decode_varint_fields(&nested)?;
+            tactics.push(FleetTactic {
+                tactic_name: decode_optional_string_field(
+                    &nested,
+                    1,
+                    "fleet tactic has duplicate name",
+                    "fleet tactic name is too long",
+                    256,
+                )?
+                .unwrap_or_default(),
+                hero_ids: nested_fields
+                    .get(&2)
+                    .into_iter()
+                    .flatten()
+                    .map(|value| to_signed_i32(*value, "fleet hero id is out of range"))
+                    .collect::<Result<Vec<_>, _>>()?,
+                mode_id: optional_i32(&nested_fields, 3, "fleet tactic has duplicate mode")?,
+                strategy_id: optional_i32(
+                    &nested_fields,
+                    4,
+                    "fleet tactic has duplicate strategy",
+                )?,
+                formation_id: optional_i32(
+                    &nested_fields,
+                    5,
+                    "fleet tactic has duplicate formation",
+                )?
+                .max(2),
+                tactic_type: optional_i32(&nested_fields, 6, "fleet tactic has duplicate type")?
+                    .max(1),
+                ex_hero_ids: nested_fields
+                    .get(&7)
+                    .into_iter()
+                    .flatten()
+                    .map(|value| to_signed_i32(*value, "fleet ex hero id is out of range"))
+                    .collect::<Result<Vec<_>, _>>()?,
+            });
+        }
+        Ok(Self {
+            tactics,
+            max_power: optional_i32(&fields, 2, "fleet info has duplicate max power")?,
+            min_power: optional_i32(&fields, 3, "fleet info has duplicate min power")?,
+        })
+    }
+}
+
 pub struct FleetInfoCodec;
 
 impl FleetInfoCodec {
