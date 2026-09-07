@@ -616,6 +616,19 @@ pub(super) struct BattlePassParamConfig {
 }
 
 #[derive(Clone, Debug, Default)]
+pub(super) struct ExchangeConfig {
+    pub(super) change_count: i32,
+    pub(super) item_consume: Vec<(i32, i32, i32)>,
+    pub(super) item_reward: Vec<(i32, i32, i32)>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct FoodRecipeConfig {
+    pub(super) material: Vec<(i32, i32, i32)>,
+    pub(super) reward_id: i32,
+}
+
+#[derive(Clone, Debug, Default)]
 pub(super) struct GameplayCatalog {
     pub(super) rewards_by_id: std::collections::BTreeMap<i32, Vec<ShopReward>>,
     pub(super) battlepass_levels: std::collections::BTreeMap<i32, BattlePassLevelConfig>,
@@ -631,8 +644,8 @@ pub(super) struct GameplayCatalog {
     pub(super) anniversary_videos: std::collections::BTreeMap<i32, Value>,
     pub(super) paper_cut_formulas: std::collections::BTreeMap<i32, Value>,
     pub(super) drop_items: std::collections::BTreeMap<i32, Value>,
-    pub(super) exchanges: std::collections::BTreeMap<i32, Value>,
-    pub(super) food_recipes: std::collections::BTreeMap<i32, Value>,
+    pub(super) exchanges: std::collections::BTreeMap<i32, ExchangeConfig>,
+    pub(super) food_recipes: std::collections::BTreeMap<i32, FoodRecipeConfig>,
     pub(super) testship_tasks: std::collections::BTreeMap<i32, Value>,
     pub(super) testship_rewards: std::collections::BTreeMap<i32, Value>,
     pub(super) world_events: std::collections::BTreeMap<i32, Value>,

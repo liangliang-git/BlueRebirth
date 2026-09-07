@@ -41,6 +41,24 @@ fn read_config_rows(path: &Path) -> Vec<(i32, Value)> {
     rows.flatten().collect()
 }
 
+fn config_triplets(value: &Value, key: &str) -> Vec<(i32, i32, i32)> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            let row = row.as_array()?;
+            Some((
+                i32::try_from(row.first()?.as_i64()?).ok()?,
+                i32::try_from(row.get(1)?.as_i64()?).ok()?,
+                i32::try_from(row.get(2)?.as_i64()?).ok()?,
+            ))
+        })
+        .filter(|(kind, item, amount)| *kind > 0 && *item > 0 && *amount > 0)
+        .collect()
+}
+
 fn read_json_config_rows(path: &Path) -> Option<Vec<(i32, Value)>> {
     let json_path = path.with_extension("json");
     let bytes = std::fs::read(json_path).ok()?;
@@ -1087,6 +1105,38 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
                     }),
             })
     };
+    let exchanges = rows("config_item_exchange.db")
+        .into_iter()
+        .map(|(id, value)| {
+            (
+                id,
+                ExchangeConfig {
+                    change_count: json_i32(&value, "change_count").unwrap_or_default(),
+                    item_consume: config_triplets(&value, "item_consume"),
+                    item_reward: config_triplets(&value, "item_reward"),
+                },
+            )
+        })
+        .collect();
+    let food_recipes = rows("config_food_compose.db")
+        .into_iter()
+        .map(|(id, value)| {
+            let reward_id = value
+                .get("reward")
+                .and_then(Value::as_array)
+                .and_then(|values| values.first())
+                .and_then(Value::as_i64)
+                .and_then(|value| i32::try_from(value).ok())
+                .unwrap_or_default();
+            (
+                id,
+                FoodRecipeConfig {
+                    material: config_triplets(&value, "material"),
+                    reward_id,
+                },
+            )
+        })
+        .collect();
     GameplayCatalog {
         rewards_by_id: load_reward_definitions(&dir),
         battlepass_levels: battlepass_levels("config_battlepass_level.db"),
@@ -1102,8 +1152,8 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
         anniversary_videos: rows("config_anniversary_video.db"),
         paper_cut_formulas: rows("config_interaction_paper_cut_fomula.db"),
         drop_items: rows("config_drop_item.db"),
-        exchanges: rows("config_item_exchange.db"),
-        food_recipes: rows("config_food_compose.db"),
+        exchanges,
+        food_recipes,
         testship_tasks: rows("config_testship_task.db"),
         testship_rewards: rows("config_testship_reward.db"),
         world_events: rows("config_world_event.db"),

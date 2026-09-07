@@ -280,9 +280,9 @@ pub(super) fn handle_typed_exchange(
             let Some(config) = catalog.exchanges.get(&id) else {
                 return invalid("exchange item was not found");
             };
-            let max_count = json_i32(config, "change_count").unwrap_or_default();
-            let consume = reward_triplets(config, "item_consume");
-            let rewards = reward_triplets(config, "item_reward");
+            let max_count = config.change_count;
+            let consume = config.item_consume.clone();
+            let rewards = config.item_reward.clone();
             let current_count = account
                 .exchange_times
                 .get(&(id.max(0) as u64))
@@ -360,7 +360,13 @@ pub(super) fn handle_typed_food_compose(
                 .food_recipes
                 .iter()
                 .find(|(_, recipe)| {
-                    let mut configured = recipe_material_ids(recipe);
+                    let mut configured = recipe
+                        .material
+                        .iter()
+                        .flat_map(|(_, item_id, amount)| {
+                            std::iter::repeat_n(*item_id, (*amount).max(1) as usize)
+                        })
+                        .collect::<Vec<_>>();
                     if configured.len() != material_ids.len() {
                         return false;
                     }
@@ -374,7 +380,7 @@ pub(super) fn handle_typed_food_compose(
             let Some(recipe) = catalog.food_recipes.get(&recipe_id) else {
                 return invalid("food recipe was not found");
             };
-            let materials = reward_triplets(recipe, "material");
+            let materials = recipe.material.clone();
             if materials.is_empty()
                 || materials
                     .iter()
@@ -382,13 +388,7 @@ pub(super) fn handle_typed_food_compose(
             {
                 return invalid("food materials are insufficient");
             }
-            let reward_id = recipe
-                .get("reward")
-                .and_then(Value::as_array)
-                .and_then(|values| values.first())
-                .and_then(Value::as_i64)
-                .and_then(|value| i32::try_from(value).ok())
-                .unwrap_or_default();
+            let reward_id = recipe.reward_id;
             let rewards = catalog
                 .rewards_by_id
                 .get(&reward_id)
@@ -670,40 +670,6 @@ fn encode_battlepass_reward_response(claimed: &[(i32, i32)]) -> Vec<u8> {
         append_message_field(&mut output, 1, &item);
     }
     output
-}
-
-fn reward_triplets(value: &Value, key: &str) -> Vec<(i32, i32, i32)> {
-    value
-        .get(key)
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|row| {
-            let row = row.as_array()?;
-            Some((
-                i32::try_from(row.first()?.as_i64()?).ok()?,
-                i32::try_from(row.get(1)?.as_i64()?).ok()?,
-                i32::try_from(row.get(2)?.as_i64()?).ok()?,
-            ))
-        })
-        .filter(|(kind, item, amount)| *kind > 0 && *item > 0 && *amount > 0)
-        .collect()
-}
-
-fn recipe_material_ids(recipe: &Value) -> Vec<i32> {
-    recipe
-        .get("material")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|row| {
-            let row = row.as_array()?;
-            let item_id = i32::try_from(row.get(1)?.as_i64()?).ok()?;
-            let amount = i32::try_from(row.get(2)?.as_i64()?).ok()?.max(1);
-            Some(std::iter::repeat_n(item_id, usize::try_from(amount).ok()?))
-        })
-        .flatten()
-        .collect()
 }
 
 fn food_reward_payload(recipe_id: i32, rewards: &[ShopReward]) -> Vec<u8> {
