@@ -431,6 +431,25 @@ impl AccountState {
                 "character level must be positive",
             ));
         }
+        if self.social.friends.contains(&self.character.uid)
+            || self.social.pending.contains(&self.character.uid)
+            || self.social.blacklist.contains(&self.character.uid)
+            || self.social.applied.contains(&self.character.uid)
+        {
+            return Err(DomainError::InvalidState(
+                "social relation cannot target current character",
+            ));
+        }
+        if self
+            .social
+            .friends
+            .iter()
+            .any(|uid| self.social.blacklist.contains(uid))
+        {
+            return Err(DomainError::InvalidState(
+                "friend cannot also be blacklisted",
+            ));
+        }
         for hero in self.dock.heroes.values() {
             if hero.level == 0 {
                 return Err(DomainError::InvalidState("hero level must be positive"));
@@ -651,5 +670,17 @@ mod tests {
         assert_eq!(account.inventory.items.len(), 13);
         assert_eq!(account.fleet.fleets.len(), 5);
         assert_eq!(account.buildings.levels.get(&1), Some(&2));
+    }
+
+    #[test]
+    fn validates_social_relation_invariants() {
+        let mut account = NewAccountFactory::create(ProfileId::new("social").unwrap(), "Captain");
+        account.social.friends.insert(account.character.uid);
+        assert!(matches!(
+            account.validate(),
+            Err(DomainError::InvalidState(
+                "social relation cannot target current character"
+            ))
+        ));
     }
 }

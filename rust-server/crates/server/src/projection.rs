@@ -1552,6 +1552,7 @@ pub(super) fn sync_typed_daily_copy_state(
     let next_reset_day = u32::try_from(reset_day).unwrap_or(u32::MAX);
     let is_current_day = stored_reset_day == next_reset_day;
     let mut next_challenges = std::collections::BTreeMap::new();
+    let mut next_select_ex = std::collections::BTreeMap::new();
     if is_current_day {
         for chapter in daily
             .get("chapters")
@@ -1569,6 +1570,13 @@ pub(super) fn sync_typed_daily_copy_state(
                 .and_then(|value| u32::try_from(value.max(0)).ok())
                 .unwrap_or_default();
             next_challenges.insert(chapter_id, challenge_times);
+            next_select_ex.insert(
+                chapter_id,
+                chapter
+                    .get("selectEx")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            );
             for copy_id in json_i32_array(chapter, "passCopy") {
                 if let Some(copy_id) = u64::try_from(copy_id)
                     .ok()
@@ -1580,9 +1588,11 @@ pub(super) fn sync_typed_daily_copy_state(
         }
     }
     let changed = account.daily_copy.reset_day != next_reset_day
-        || account.daily_copy.challenge_times != next_challenges;
+        || account.daily_copy.challenge_times != next_challenges
+        || account.daily_copy.select_ex != next_select_ex;
     account.daily_copy.reset_day = next_reset_day;
     account.daily_copy.challenge_times = next_challenges;
+    account.daily_copy.select_ex = next_select_ex;
     changed
 }
 
