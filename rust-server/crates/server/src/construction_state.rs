@@ -75,6 +75,7 @@ pub(super) fn decode_construction_projects(payload: &[u8]) -> Vec<Value> {
 }
 
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn start_construction(
     account: &mut Value,
     projects: &[Value],
@@ -284,6 +285,7 @@ pub(super) fn encode_discuss_empty() -> Vec<u8> {
 }
 
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn finish_construction(account: &mut Value, indexes: &[i32], now: u32) -> bool {
     if indexes.is_empty() {
         return false;
@@ -335,6 +337,7 @@ pub(super) fn finish_construction(account: &mut Value, indexes: &[i32], now: u32
     true
 }
 
+#[cfg(test)]
 #[cfg(test)]
 pub(super) fn receive_construction(
     account: &mut Value,

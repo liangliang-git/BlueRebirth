@@ -175,6 +175,7 @@ pub(super) fn decode_building_assignments(
 }
 
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn update_building_assignments(
     account: &mut Value,
     assignments: &[(i32, Vec<i32>)],
@@ -291,6 +292,7 @@ pub(super) fn building_capacity(
 /// Apply one client building placement without relying on optional building config tables.
 /// Persisted account remains source of truth; projection supplies protocol defaults.
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn add_building_state(
     account: &mut Value,
     template_id: i32,
@@ -350,6 +352,7 @@ pub(super) fn add_building_state(
 }
 
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn change_building_level(account: &mut Value, building_id: i32, delta: i32) -> bool {
     if building_id <= 0 || delta == 0 {
         return false;
@@ -378,6 +381,7 @@ pub(super) fn change_building_level(account: &mut Value, building_id: i32, delta
 }
 
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn finish_building_state(account: &mut Value, building_id: i32, now: u32) -> bool {
     let Some(building) = account
         .get_mut("building")
@@ -397,6 +401,7 @@ pub(super) fn finish_building_state(account: &mut Value, building_id: i32, now: 
     true
 }
 
+#[cfg(test)]
 #[cfg(test)]
 pub(super) fn set_building_production(
     account: &mut Value,
@@ -435,6 +440,7 @@ pub(super) fn set_building_production(
 /// Client has no production-list RPC: it derives claimable entries from each
 /// TBuildingInfo and uses ReceiveBuilding/ReceiveResource/ReceiveAll. Keep
 /// this operation server-authoritative and idempotent.
+#[cfg(test)]
 #[cfg(test)]
 pub(super) fn collect_building_rewards(
     account: &mut Value,
@@ -754,6 +760,7 @@ pub(super) fn bathroom_service_payload(hero_id: u64, pos: i64, _bath_time: i64) 
 }
 
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn bathroom_start_all_payload(account: &Value, args: &[u8]) -> Vec<u8> {
     let heroes = account
         .get("bath")
@@ -775,6 +782,7 @@ pub(super) fn bathroom_start_all_payload(account: &Value, args: &[u8]) -> Vec<u8
     output
 }
 
+#[cfg(test)]
 #[cfg(test)]
 pub(super) fn update_bathroom_state(account: &mut Value, method: &str, args: &[u8], now: u32) {
     let owned_hero_ids = account
