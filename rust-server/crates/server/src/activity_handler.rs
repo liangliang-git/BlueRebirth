@@ -391,25 +391,12 @@ fn handle_typed_extract_draw(
             "activity extract pool is not configured",
         ));
     };
-    let Some(cost) = extract_cost(config) else {
+    let Some(cost) = config.cost else {
         return HandlerResult::Error(GameError::InvalidState(
             "activity extract cost is not configured",
         ));
     };
-    let entries = config
-        .get("drop_reward_id")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|row| {
-            let row = row.as_array()?;
-            Some((
-                i32::try_from(row.first()?.as_i64()?).ok()?,
-                i32::try_from(row.get(1)?.as_i64()?).ok()?,
-            ))
-        })
-        .filter(|(reward_id, amount)| *reward_id > 0 && *amount > 0)
-        .collect::<Vec<_>>();
+    let entries = config.rewards.clone();
     if entries.is_empty() {
         return HandlerResult::Error(GameError::InvalidState(
             "activity extract reward pool is empty",
@@ -1667,15 +1654,6 @@ fn code_exchange_activity(catalog: &GameplayCatalog) -> Option<&Value> {
             .values()
             .find(|value| json_i32(value, "type") == Some(81005))
     })
-}
-
-fn extract_cost(config: &Value) -> Option<(i32, i32, i32)> {
-    let values = config.get("item_cost")?.as_array()?;
-    Some((
-        i32::try_from(values.first()?.as_i64()?).ok()?,
-        i32::try_from(values.get(1)?.as_i64()?).ok()?,
-        i32::try_from(values.get(2)?.as_i64()?).ok()?,
-    ))
 }
 
 fn extract_ur_draw_ret_payload(reward_ids: &[i32]) -> Vec<u8> {

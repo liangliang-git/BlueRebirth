@@ -96,6 +96,34 @@ fn config_drop_entries(value: &Value) -> Vec<DropEntry> {
         .collect()
 }
 
+fn config_extract(value: &Value) -> ActivityExtractConfig {
+    let cost = value
+        .get("item_cost")
+        .and_then(Value::as_array)
+        .and_then(|values| {
+            Some((
+                i32::try_from(values.first()?.as_i64()?).ok()?,
+                i32::try_from(values.get(1)?.as_i64()?).ok()?,
+                i32::try_from(values.get(2)?.as_i64()?).ok()?,
+            ))
+        });
+    let rewards = value
+        .get("drop_reward_id")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            let row = row.as_array()?;
+            Some((
+                i32::try_from(row.first()?.as_i64()?).ok()?,
+                i32::try_from(row.get(1)?.as_i64()?).ok()?,
+            ))
+        })
+        .filter(|(reward_id, amount)| *reward_id > 0 && *amount > 0)
+        .collect();
+    ActivityExtractConfig { cost, rewards }
+}
+
 fn read_json_config_rows(path: &Path) -> Option<Vec<(i32, Value)>> {
     let json_path = path.with_extension("json");
     let bytes = std::fs::read(json_path).ok()?;
@@ -1257,6 +1285,14 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
             )
         })
         .collect();
+    let activity_extract = rows("config_activity_extract.db")
+        .into_iter()
+        .map(|(id, value)| (id, config_extract(&value)))
+        .collect();
+    let activity_extract_ur = rows("config_activity_extract_ur.db")
+        .into_iter()
+        .map(|(id, value)| (id, config_extract(&value)))
+        .collect();
     GameplayCatalog {
         rewards_by_id: load_reward_definitions(&dir),
         battlepass_levels: battlepass_levels("config_battlepass_level.db"),
@@ -1267,8 +1303,8 @@ pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCa
         battlepass_activity_param: battlepass_param("config_battlepass_param_activity.db"),
         activity: rows("config_activity.db"),
         parameters,
-        activity_extract: rows("config_activity_extract.db"),
-        activity_extract_ur: rows("config_activity_extract_ur.db"),
+        activity_extract,
+        activity_extract_ur,
         anniversary_videos,
         paper_cut_formulas,
         drop_items,

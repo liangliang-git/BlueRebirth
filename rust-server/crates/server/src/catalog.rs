@@ -678,6 +678,12 @@ pub(super) struct InteractionFigureConfig {
 }
 
 #[derive(Clone, Debug, Default)]
+pub(super) struct ActivityExtractConfig {
+    pub(super) cost: Option<(i32, i32, i32)>,
+    pub(super) rewards: Vec<(i32, i32)>,
+}
+
+#[derive(Clone, Debug, Default)]
 pub(super) struct GameplayCatalog {
     pub(super) rewards_by_id: std::collections::BTreeMap<i32, Vec<ShopReward>>,
     pub(super) battlepass_levels: std::collections::BTreeMap<i32, BattlePassLevelConfig>,
@@ -688,8 +694,8 @@ pub(super) struct GameplayCatalog {
     pub(super) battlepass_activity_param: Option<BattlePassParamConfig>,
     pub(super) activity: std::collections::BTreeMap<i32, Value>,
     pub(super) parameters: std::collections::BTreeMap<i32, ParameterConfig>,
-    pub(super) activity_extract: std::collections::BTreeMap<i32, Value>,
-    pub(super) activity_extract_ur: std::collections::BTreeMap<i32, Value>,
+    pub(super) activity_extract: std::collections::BTreeMap<i32, ActivityExtractConfig>,
+    pub(super) activity_extract_ur: std::collections::BTreeMap<i32, ActivityExtractConfig>,
     pub(super) anniversary_videos: std::collections::BTreeMap<i32, AnniversaryVideoConfig>,
     pub(super) paper_cut_formulas: std::collections::BTreeMap<i32, PaperCutFormulaConfig>,
     pub(super) drop_items: std::collections::BTreeMap<i32, DropItemConfig>,
