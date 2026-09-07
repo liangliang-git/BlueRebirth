@@ -426,6 +426,65 @@ impl GameCatalogs {
         {
             return Err("task catalog contains non-positive reward id".to_owned());
         }
+        let mut task_keys = std::collections::BTreeSet::new();
+        for definition in &self.tasks.definitions {
+            if definition.id <= 0
+                || definition.task_type <= 0
+                || definition.goal < 0
+                || !task_keys.insert((definition.task_type, definition.id))
+            {
+                return Err(format!(
+                    "task catalog contains invalid or duplicate task {}:{}",
+                    definition.task_type, definition.id
+                ));
+            }
+            if definition.reward_id < 0 || definition.medal_id < 0 || definition.point < 0 {
+                return Err(format!(
+                    "task catalog contains invalid reward fields for {}:{}",
+                    definition.task_type, definition.id
+                ));
+            }
+            if definition
+                .inline_rewards
+                .iter()
+                .any(|(goods_type, item_id, amount)| {
+                    *goods_type <= 0 || *item_id <= 0 || *amount <= 0
+                })
+            {
+                return Err(format!(
+                    "task catalog contains invalid inline reward for {}:{}",
+                    definition.task_type, definition.id
+                ));
+            }
+        }
+        for (shop_id, good_ids) in &self.shop.goods_by_shop {
+            if *shop_id <= 0
+                || good_ids.iter().any(|good_id| {
+                    *good_id <= 0
+                        || self
+                            .shop
+                            .goods_by_id
+                            .get(good_id)
+                            .is_none_or(|good| good.shop_id != *shop_id)
+                })
+            {
+                return Err(format!("shop catalog contains invalid shop {shop_id}"));
+            }
+        }
+        for (good_id, good) in &self.shop.goods_by_id {
+            if *good_id <= 0
+                || good.shop_id <= 0
+                || good.goods_type <= 0
+                || good.item_id <= 0
+                || good.num <= 0
+                || good
+                    .costs
+                    .iter()
+                    .any(|cost| cost.goods_type <= 0 || cost.item_id <= 0 || cost.amount <= 0)
+            {
+                return Err(format!("shop catalog contains invalid good {good_id}"));
+            }
+        }
         Ok(())
     }
 
