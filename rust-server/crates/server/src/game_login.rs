@@ -1648,6 +1648,24 @@ where
                 handler_error = Some(error.clone());
             }
             let payload = result.into_payload();
+            if typed_handled && request.method == "dailycopy.CopyEnter" {
+                if let Some(typed) = typed_account.as_deref() {
+                    append_method_push(
+                        &mut post_pushes,
+                        "dailycopy.UpdateDailyCopyData",
+                        daily_copy_snapshot_payload_from_typed_account(
+                            typed,
+                            chapter_catalog,
+                            current_unix_seconds(),
+                        ),
+                    );
+                    append_method_push(
+                        &mut post_pushes,
+                        "user.UpdateUserInfo",
+                        UserInfoCodec::encode(&user_info_from_typed_account(state, typed)),
+                    );
+                }
+            }
             if !typed_handled && handler_error.is_none() {
                 sync_typed_battle_state_with_catalog(
                     typed_account.as_deref_mut(),
