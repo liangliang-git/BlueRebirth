@@ -453,10 +453,24 @@ impl NewAccountFactory {
                 },
             );
         }
-        for template_id in [60_000, 60_001, 60_002, 60_003] {
+        for (template_id, amount) in [
+            (60_000, 1_000),
+            (60_001, 1_000),
+            (60_002, 1_000),
+            (60_003, 1_000),
+            (10_182, 100),
+            (10_185, 100),
+            (10_187, 100),
+            (10_007, 100),
+            (10_181, 100),
+            (12_201, 100),
+            (10_029, 1_000),
+            (10_030, 1_000),
+            (10_031, 100),
+        ] {
             account.inventory.items.insert(
                 TemplateId::new(template_id).expect("starter item id is positive"),
-                1_000,
+                amount,
             );
         }
         for fleet_id in 1..=5u64 {
@@ -531,7 +545,7 @@ mod tests {
         assert!(account.profile.is_some());
         assert_eq!(account.dock.heroes.len(), 1);
         assert_eq!(account.dock.equipments.len(), 2);
-        assert_eq!(account.inventory.items.len(), 4);
+        assert_eq!(account.inventory.items.len(), 13);
         assert_eq!(account.fleet.fleets.len(), 5);
         assert_eq!(account.buildings.levels.get(&1), Some(&2));
     }
