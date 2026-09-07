@@ -173,6 +173,7 @@ where
     let mut pass_mvp_hero_id = None;
     let mut pass_shipwrecked_ids = std::collections::HashSet::new();
     let mut handler_error: Option<GameError> = None;
+    let mut typed_daily_copy_handled = false;
     let mut ret = match request.method.as_str() {
         "player.Login" => Some(GameLoginCodec::encode_response(&TRetLogin {
             ret: "ok".to_owned(),
@@ -1352,6 +1353,7 @@ where
                     &mut post_pushes,
                 );
                 if matches!(result, HandlerResult::PushOnly | HandlerResult::Error(_)) {
+                    typed_daily_copy_handled = true;
                     result
                 } else {
                     let mut context = GameLoginRequestContext {
@@ -2257,14 +2259,16 @@ where
             }
         }
     }
-    if let (Some(typed), Some(legacy)) = (typed_account, account.as_deref()) {
-        sync_typed_daily_copy_state(typed, legacy, current_unix_seconds());
-        if sync_typed_task_state(typed, legacy) {
-            append_method_push(
-                &mut post_pushes,
-                "task.TaskInfo",
-                task_info_payload_from_typed_account(typed, task_catalog),
-            );
+    if !typed_daily_copy_handled {
+        if let (Some(typed), Some(legacy)) = (typed_account, account.as_deref()) {
+            sync_typed_daily_copy_state(typed, legacy, current_unix_seconds());
+            if sync_typed_task_state(typed, legacy) {
+                append_method_push(
+                    &mut post_pushes,
+                    "task.TaskInfo",
+                    task_info_payload_from_typed_account(typed, task_catalog),
+                );
+            }
         }
     }
     for push in post_pushes {
