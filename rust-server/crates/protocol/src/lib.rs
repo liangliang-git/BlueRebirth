@@ -181,6 +181,22 @@ impl Decode for CopyIdRequest {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyTypeRequest {
+    pub copy_type: i32,
+}
+
+impl Decode for CopyTypeRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let copy_type = optional_i32(&fields, 1, "copy type request has duplicate type")?;
+        if copy_type < 0 {
+            return Err(ProtocolError::Invalid("copy type request is invalid"));
+        }
+        Ok(Self { copy_type })
+    }
+}
+
 impl Decode for CopyMiniGamePassRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;

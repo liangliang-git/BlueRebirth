@@ -200,7 +200,7 @@ where
         _ if typed_account.is_some()
             && matches!(request.method.as_str(), "copy.DotBase" | "copyinfo.DotBase") =>
         {
-            if decode_varint_field(request_args, 1) <= 0 {
+            if CopyIdRequest::decode(request_args).is_err() {
                 handler_error = Some(GameError::InvalidRequest("copy id is invalid"));
             }
             Some(Vec::new())
@@ -1513,7 +1513,13 @@ where
                     &fallback_catalog
                 }
             };
-            let copy_type = copy_request_type(request_args);
+            let copy_type = match CopyTypeRequest::decode(request_args) {
+                Ok(request) => request.copy_type.max(1),
+                Err(_) => {
+                    handler_error = Some(GameError::InvalidRequest("copy type is invalid"));
+                    1
+                }
+            };
             let passed = typed_account
                 .as_deref()
                 .map(|account| {
