@@ -1149,38 +1149,24 @@ where
             result.into_payload()
         }
         "task.TaskInfo" => {
-            if let Some(typed) = typed_account.as_ref() {
-                Some(task_info_payload_from_typed_account(typed, task_catalog))
-            } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                let result = progression_handler::handle(
-                    &mut context,
-                    request.method.as_str(),
-                    request_args,
-                );
-                if let HandlerResult::Error(error) = &result {
-                    handler_error = Some(error.clone());
+            let result = typed_account
+                .as_ref()
+                .map(|typed| task_info_payload_from_typed_account(typed, task_catalog));
+            match result {
+                Some(payload) => Some(payload),
+                None => {
+                    handler_error = Some(GameError::InvalidRequest(
+                        "task info requires typed account",
+                    ));
+                    None
                 }
-                result.into_payload()
             }
         }
         _ if method.is_family(MethodFamily::Study)
             || method.is_family(MethodFamily::Task)
             || method.is_family(MethodFamily::Bathroom) =>
         {
-            let typed_result = typed_account.as_mut().map(|typed| {
+            let result = if let Some(typed) = typed_account.as_mut() {
                 if method.is_family(MethodFamily::Bathroom) {
                     progression_handler::handle_bathroom_typed(
                         typed,
@@ -1208,43 +1194,15 @@ where
                         &mut post_pushes,
                     )
                 }
-            });
-            if let Some(result @ (HandlerResult::Reply(_) | HandlerResult::Error(_))) = typed_result
-            {
-                if let HandlerResult::Error(error) = &result {
-                    handler_error = Some(error.clone());
-                }
-                result.into_payload()
-            } else if typed_account.is_some() {
-                let error = HandlerResult::Error(GameError::InvalidRequest(
-                    "task request is not supported",
-                ));
-                handler_error = Some(GameError::InvalidRequest("task request is not supported"));
-                error.into_payload()
             } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                let result = progression_handler::handle(
-                    &mut context,
-                    request.method.as_str(),
-                    request_args,
-                );
-                if let HandlerResult::Error(error) = &result {
-                    handler_error = Some(error.clone());
-                }
-                result.into_payload()
+                HandlerResult::Error(GameError::InvalidRequest(
+                    "progression request requires typed account",
+                ))
+            };
+            if let HandlerResult::Error(error) = &result {
+                handler_error = Some(error.clone());
             }
+            result.into_payload()
         }
         _ if typed_account.is_some() && coop_handler::handles_typed(request.method.as_str()) => {
             let result = coop_handler::handle_typed(

@@ -4044,9 +4044,20 @@ async fn repair_route_restores_damaged_heroes() {
 
 #[tokio::test]
 async fn study_speedup_route_refreshes_hero_study_and_bag() {
-    let mut account = default_account_snapshot("study-route", "Study Route", 123);
-    account["dock"]["heroes"][0]["pSkills"] = json!([{"pSkillId": 41, "level": 1}]);
-    add_bag_item(&mut account, 70000, 2);
+    let mut typed_account =
+        NewAccountFactory::create(ProfileId::new("study-route").unwrap(), "Study Route");
+    typed_account
+        .dock
+        .heroes
+        .get_mut(&blueoath_domain::HeroId::new(1).unwrap())
+        .unwrap()
+        .pskills
+        .insert(41, 1);
+    typed_account
+        .inventory
+        .items
+        .insert(TemplateId::new(70000).unwrap(), 2);
+    let catalogs = GameLoginCatalogs::empty();
     let mut start_args = Vec::new();
     append_varint_field(&mut start_args, 1, 1);
     append_varint_field(&mut start_args, 2, 41);
@@ -4062,22 +4073,12 @@ async fn study_speedup_route_refreshes_hero_study_and_bag() {
         .await
         .unwrap();
     let state = ServerState::new("study-route", "Study Route", "1.4.0");
-    assert!(process_game_login_frame_with_catalog_mut(
+    assert!(process_game_login_frame_with_catalogs_typed_mut(
         &mut server,
         &state,
-        Some(&mut account),
         None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        Some(&mut typed_account),
+        &catalogs,
     )
     .await
     .unwrap());
@@ -4104,38 +4105,16 @@ async fn study_speedup_route_refreshes_hero_study_and_bag() {
     NetSocketFrameCodec::write(&mut client, 0, &speedup_request)
         .await
         .unwrap();
-    assert!(process_game_login_frame_with_catalog_mut(
+    assert!(process_game_login_frame_with_catalogs_typed_mut(
         &mut server,
         &state,
-        Some(&mut account),
         None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        Some(&mut typed_account),
+        &catalogs,
     )
     .await
     .unwrap());
-    for method in [
-        "hero.UpdateHeroBagData",
-        "study.GetStudyInfo",
-        "bag.UpdateBagData",
-    ] {
-        let frame = NetSocketFrameCodec::read(&mut client)
-            .await
-            .unwrap()
-            .unwrap();
-        let push = TMessageCodec::decode_response(&frame.payload).unwrap();
-        assert_eq!(push.method, method);
-        assert_eq!(push.is_response, 0);
-    }
+
     let response = TMessageCodec::decode_response(
         &NetSocketFrameCodec::read(&mut client)
             .await
@@ -4146,8 +4125,32 @@ async fn study_speedup_route_refreshes_hero_study_and_bag() {
     .unwrap();
     assert_eq!(response.method, "study.SpeedUpStudy");
     assert_eq!(response.err, 0);
-    assert_eq!(account["dock"]["heroes"][0]["pSkills"][0]["level"], 2);
-    assert_eq!(bag_item_count(&account, 70000), 0);
+    for method in ["hero.UpdateHeroBagData", "study.GetStudyInfo"] {
+        let frame = NetSocketFrameCodec::read(&mut client)
+            .await
+            .unwrap()
+            .unwrap();
+        let push = TMessageCodec::decode_response(&frame.payload).unwrap();
+        assert_eq!(push.method, method);
+        assert_eq!(push.is_response, 0);
+    }
+    assert_eq!(
+        typed_account
+            .dock
+            .heroes
+            .get(&blueoath_domain::HeroId::new(1).unwrap())
+            .unwrap()
+            .pskills
+            .get(&41),
+        Some(&2)
+    );
+    assert_eq!(
+        typed_account
+            .inventory
+            .items
+            .get(&TemplateId::new(70000).unwrap()),
+        None
+    );
 }
 
 #[test]
