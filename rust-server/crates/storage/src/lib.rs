@@ -797,24 +797,33 @@ impl ProfileStore {
             }
         }
 
-        if let Some((chapter_value, copy_value, current_fleet, started_at, expires_at, revision)) =
-            connection
-                .query_row(
-                    "SELECT chapter_id, copy_id, current_fleet, started_at, expires_at, revision
-                     FROM battle_sessions WHERE profile_id = ?1",
-                    params![profile_id.as_str()],
-                    |row| {
-                        Ok((
-                            row.get::<_, i64>(0)?,
-                            row.get::<_, i64>(1)?,
-                            row.get::<_, i64>(2)?,
-                            row.get::<_, i64>(3)?,
-                            row.get::<_, i64>(4)?,
-                            row.get::<_, i64>(5)?,
-                        ))
-                    },
-                )
-                .optional()?
+        if let Some((
+            chapter_value,
+            copy_value,
+            current_fleet,
+            started_at,
+            expires_at,
+            revision,
+            attack_count,
+        )) = connection
+            .query_row(
+                "SELECT chapter_id, copy_id, current_fleet, started_at, expires_at, revision,
+                        attack_count
+                 FROM battle_sessions WHERE profile_id = ?1",
+                params![profile_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
+                    ))
+                },
+            )
+            .optional()?
         {
             let chapter_id = ChapterId::new(positive_u64(chapter_value, "battle chapter id")?)
                 .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
@@ -827,7 +836,36 @@ impl ProfileStore {
                 started_at: non_negative_u64(started_at, "battle start")?,
                 expires_at: non_negative_u64(expires_at, "battle expiry")?,
                 revision: non_negative_u64(revision, "battle revision")?,
+                remaining_fleet_ids: Vec::new(),
+                hero_ids: Vec::new(),
+                attack_count: non_negative_u32(attack_count, "battle attack count")?,
             });
+        }
+        if let Some(active) = account.battle.active.as_mut() {
+            let mut statement = connection.prepare(
+                "SELECT fleet_id FROM battle_session_fleets
+                 WHERE profile_id = ?1 ORDER BY position",
+            )?;
+            active.remaining_fleet_ids = statement
+                .query_map(params![profile_id.as_str()], |row| row.get::<_, i64>(0))?
+                .map(|value| {
+                    value
+                        .map_err(StorageError::from)
+                        .and_then(|value| non_negative_u32(value, "battle fleet id"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut statement = connection.prepare(
+                "SELECT hero_id FROM battle_session_heroes
+                 WHERE profile_id = ?1 ORDER BY position",
+            )?;
+            active.hero_ids = statement
+                .query_map(params![profile_id.as_str()], |row| row.get::<_, i64>(0))?
+                .map(|value| {
+                    value
+                        .map_err(StorageError::from)
+                        .and_then(|value| positive_hero_id(value, "battle hero id"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
         }
 
         let mut statement = connection.prepare(
@@ -1443,8 +1481,8 @@ impl ProfileStore {
             transaction.execute(
                 "INSERT INTO battle_sessions(
                     profile_id, chapter_id, copy_id, current_fleet, state,
-                    started_at, expires_at, revision
-                 ) VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?6, ?7)",
+                    started_at, expires_at, revision, attack_count
+                 ) VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?6, ?7, ?8)",
                 params![
                     profile.id.as_str(),
                     typed_i64(session.chapter_id.get(), "battle chapter id")?,
@@ -1453,8 +1491,31 @@ impl ProfileStore {
                     typed_i64(session.started_at, "battle start")?,
                     typed_i64(session.expires_at, "battle expiry")?,
                     typed_i64(session.revision, "battle revision")?,
+                    typed_i64(session.attack_count, "battle attack count")?,
                 ],
             )?;
+            for (position, fleet_id) in session.remaining_fleet_ids.iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO battle_session_fleets(profile_id, position, fleet_id)
+                     VALUES (?1, ?2, ?3)",
+                    params![
+                        profile.id.as_str(),
+                        typed_i64(position, "battle fleet position")?,
+                        typed_i64(*fleet_id, "battle fleet id")?,
+                    ],
+                )?;
+            }
+            for (position, hero_id) in session.hero_ids.iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO battle_session_heroes(profile_id, position, hero_id)
+                     VALUES (?1, ?2, ?3)",
+                    params![
+                        profile.id.as_str(),
+                        typed_i64(position, "battle hero position")?,
+                        typed_i64(hero_id.get(), "battle hero id")?,
+                    ],
+                )?;
+            }
         }
         transaction.execute(
             "INSERT INTO account_revisions(profile_id, revision, updated_utc)
@@ -1674,6 +1735,8 @@ fn clear_normalized_account(
         "tasks",
         "chat_barrages",
         "chat_state",
+        "battle_session_fleets",
+        "battle_session_heroes",
         "battle_sessions",
         "fleet_members",
         "fleets",
@@ -2278,6 +2341,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0013_hero_names.sql"),
     include_str!("../../../migrations/0014_building_production.sql"),
     include_str!("../../../migrations/0015_construction_typed_state.sql"),
+    include_str!("../../../migrations/0016_battle_session_typed_state.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

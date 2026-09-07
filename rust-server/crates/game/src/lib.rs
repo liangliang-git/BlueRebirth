@@ -100,6 +100,9 @@ impl BattleService {
             started_at: now,
             expires_at: now,
             revision: 0,
+            remaining_fleet_ids: Vec::new(),
+            hero_ids: fleet.members.clone(),
+            attack_count: 0,
         });
         Ok(())
     }

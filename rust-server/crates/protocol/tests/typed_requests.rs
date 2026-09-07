@@ -1,8 +1,8 @@
 use blueoath_protocol::{
-    ChangeNameRequest, ChangeWorldChannelRequest, CopyRecordRequest, CopyStartRequest,
-    DailyCopyEnterRequest, DailyCopySelectExRequest, Decode, FriendSearchRequest,
-    FriendTargetRequest, ProtocolError, SeaDifficultyRequest, SendBarrageRequest,
-    SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
+    ChangeNameRequest, ChangeWorldChannelRequest, CopyAttackRequest, CopyPassRequest,
+    CopyRecordRequest, CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode,
+    FriendSearchRequest, FriendTargetRequest, ProtocolError, SeaDifficultyRequest,
+    SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
     SetSecretaryRequest,
 };
 
@@ -118,6 +118,43 @@ fn rejects_invalid_typed_copy_requests() {
     assert!(matches!(
         SeaDifficultyRequest::decode(&[0x08, 9, 0x10, 8]),
         Err(ProtocolError::Invalid("sea request has invalid value"))
+    ));
+}
+
+#[test]
+fn decodes_typed_battle_attack_and_pass_requests() {
+    let attack = CopyAttackRequest::decode(&[0x08, 1, 0x10, 9, 0x18, 2, 0x18, 3, 0x20, 7]).unwrap();
+    assert_eq!(
+        (
+            attack.attack_type,
+            attack.copy_id,
+            attack.hero_ids,
+            attack.enemy_id
+        ),
+        (1, 9, vec![2, 3], 7)
+    );
+
+    let mut pass = vec![0x40, 3, 0x60, 12, 0x48, 2];
+    pass.extend([0x92, 0x01, 0x02, 0x08, 0x01]);
+    pass.extend([0xa2, 0x01, 0x02, 0x08, 0x09]);
+    let decoded = CopyPassRequest::decode(&pass).unwrap();
+    assert_eq!((decoded.grade, decoded.battle_time), (3, 12));
+    assert_eq!(decoded.mvp_hero_id, Some(2));
+    assert_eq!(decoded.heroes[0].hero_id, 1);
+    assert_eq!(decoded.passed_fleet_ids, vec![9]);
+}
+
+#[test]
+fn rejects_invalid_typed_battle_requests() {
+    assert!(matches!(
+        CopyAttackRequest::decode(&[]),
+        Err(ProtocolError::Invalid("copy attack is missing attack type"))
+    ));
+    assert!(matches!(
+        CopyAttackRequest::decode(&[0x08, 1, 0x10, 9, 0x18, 2, 0x18, 2, 0x20, 7]),
+        Err(ProtocolError::Invalid(
+            "copy attack hero ids are duplicated"
+        ))
     ));
 }
 

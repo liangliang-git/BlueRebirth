@@ -4,6 +4,38 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
+pub(super) fn handle_typed(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    if method != "copy.AttackBase" {
+        return HandlerResult::Empty;
+    }
+    let Ok(request) = CopyAttackRequest::decode(request_args) else {
+        return HandlerResult::Error(GameError::InvalidRequest("copy attack request is invalid"));
+    };
+    let Some(active) = account.battle.active.as_mut() else {
+        return HandlerResult::Error(GameError::InvalidState("battle session is not active"));
+    };
+    if active.copy_id.get() != request.copy_id
+        || request
+            .hero_ids
+            .iter()
+            .any(|hero_id| !active.hero_ids.iter().any(|id| id.get() == *hero_id))
+    {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "battle attack does not match active session",
+        ));
+    }
+    active.attack_count = active.attack_count.saturating_add(1);
+    active.revision = active.revision.saturating_add(1);
+    HandlerResult::Reply(Response::raw(
+        method,
+        battle_attack_payload_with_damage(request_args, 0),
+    ))
+}
+
 pub(super) fn handle<'state, 'account, 'scratch>(
     context: &mut GameLoginRequestContext<'state, 'account, 'scratch>,
     method: &str,
@@ -889,6 +921,7 @@ fn daily_copy_enter_payload(start_base_ret: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use crate::common::response::HandlerResult;
+    use blueoath_domain::{ChapterId, CopyId, FleetId, NewAccountFactory, ProfileId};
 
     use super::*;
 
@@ -899,5 +932,38 @@ mod tests {
             &str,
             &[u8],
         ) -> HandlerResult = handle;
+    }
+
+    #[test]
+    fn typed_attack_updates_active_battle_session() {
+        let mut account = NewAccountFactory::create(ProfileId::new("battle").unwrap(), "Battle");
+        let chapter_id = ChapterId::new(1).unwrap();
+        let copy_id = CopyId::new(9).unwrap();
+        let fleet_id = FleetId::new(1).unwrap();
+        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
+        account
+            .fleet
+            .fleets
+            .entry(fleet_id)
+            .or_default()
+            .members
+            .push(hero_id);
+        blueoath_game::BattleService::start(&mut account, chapter_id, copy_id, fleet_id, 10)
+            .unwrap();
+        account.battle.active.as_mut().unwrap().hero_ids = vec![hero_id];
+
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, 1);
+        append_varint_field(&mut request, 2, copy_id.get());
+        append_varint_field(&mut request, 3, hero_id.get());
+        append_varint_field(&mut request, 4, 7);
+
+        assert!(matches!(
+            handle_typed(&mut account, "copy.AttackBase", &request),
+            HandlerResult::Reply(_)
+        ));
+        let active = account.battle.active.as_ref().unwrap();
+        assert_eq!(active.attack_count, 1);
+        assert_eq!(active.revision, 1);
     }
 }

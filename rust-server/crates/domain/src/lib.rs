@@ -241,6 +241,12 @@ pub struct BattleSession {
     pub started_at: u64,
     pub expires_at: u64,
     pub revision: u64,
+    #[serde(default)]
+    pub remaining_fleet_ids: Vec<u32>,
+    #[serde(default)]
+    pub hero_ids: Vec<HeroId>,
+    #[serde(default)]
+    pub attack_count: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

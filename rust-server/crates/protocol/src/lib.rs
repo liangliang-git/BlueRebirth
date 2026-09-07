@@ -117,6 +117,115 @@ impl Decode for CopyStartRequest {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyAttackRequest {
+    pub attack_type: u64,
+    pub copy_id: u64,
+    pub hero_ids: Vec<u64>,
+    pub enemy_id: u64,
+}
+
+impl Decode for CopyAttackRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let attack_type = required_u64(&fields, 1, "copy attack is missing attack type")?;
+        let copy_id = required_u64(&fields, 2, "copy attack is missing copy id")?;
+        let enemy_id = required_u64(&fields, 4, "copy attack is missing enemy id")?;
+        let values = fields.get(&3).map(Vec::as_slice).unwrap_or_default();
+        if values.is_empty() || values.len() > 6 || values.contains(&0) {
+            return Err(ProtocolError::Invalid("copy attack hero ids are invalid"));
+        }
+        let mut hero_ids = values.to_vec();
+        hero_ids.sort_unstable();
+        hero_ids.dedup();
+        if hero_ids.len() != values.len() {
+            return Err(ProtocolError::Invalid(
+                "copy attack hero ids are duplicated",
+            ));
+        }
+        if attack_type == 0 || copy_id == 0 || enemy_id == 0 {
+            return Err(ProtocolError::Invalid("copy attack request is invalid"));
+        }
+        Ok(Self {
+            attack_type,
+            copy_id,
+            hero_ids: values.to_vec(),
+            enemy_id,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyPassHeroResult {
+    pub hero_id: u64,
+    pub hp: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyPassRequest {
+    pub grade: i32,
+    pub battle_time: i32,
+    pub mvp_hero_id: Option<u64>,
+    pub heroes: Vec<CopyPassHeroResult>,
+    pub passed_fleet_ids: Vec<u64>,
+    pub damage: i32,
+}
+
+impl Decode for CopyPassRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let grade = optional_i32(&fields, 8, "copy pass has duplicate grade")?;
+        let battle_time = optional_i32(&fields, 12, "copy pass has duplicate battle time")?;
+        let mvp = optional_u64(&fields, 9, "copy pass has duplicate mvp hero")?;
+        if grade < 0 || battle_time < 0 {
+            return Err(ProtocolError::Invalid("copy pass request is invalid"));
+        }
+
+        let mut reader = PbReader::new(payload);
+        let mut heroes = Vec::<CopyPassHeroResult>::new();
+        let mut passed_fleet_ids = Vec::new();
+        let mut damage = 0_i32;
+        while let Some((field, wire)) = reader.next_field()? {
+            if wire != 2 || !matches!(field, 11 | 17 | 18 | 20) {
+                reader.skip(wire)?;
+                continue;
+            }
+            let nested = decode_varint_fields(reader.read_bytes()?)?;
+            match field {
+                11 => {
+                    let value = optional_u64(&nested, 2, "copy pass has duplicate damage")?;
+                    damage = i32::try_from(value)
+                        .map_err(|_| ProtocolError::Invalid("copy pass damage is out of range"))?;
+                }
+                18 => {
+                    let hero_id = optional_u64(&nested, 1, "copy pass hero is missing id")?;
+                    let hp = optional_u64(&nested, 2, "copy pass hero has duplicate hp")?;
+                    if hero_id == 0 || heroes.iter().any(|hero| hero.hero_id == hero_id) {
+                        return Err(ProtocolError::Invalid("copy pass hero result is invalid"));
+                    }
+                    heroes.push(CopyPassHeroResult { hero_id, hp });
+                }
+                17 | 20 => {
+                    let fleet_id = optional_u64(&nested, 1, "copy pass fleet is missing id")?;
+                    if fleet_id == 0 || passed_fleet_ids.contains(&fleet_id) {
+                        return Err(ProtocolError::Invalid("copy pass fleet result is invalid"));
+                    }
+                    passed_fleet_ids.push(fleet_id);
+                }
+                _ => {}
+            }
+        }
+        Ok(Self {
+            grade,
+            battle_time,
+            mvp_hero_id: (mvp > 0).then_some(mvp),
+            heroes,
+            passed_fleet_ids,
+            damage,
+        })
+    }
+}
+
 macro_rules! single_varint_request {
     ($name:ident, $field_name:ident, $field:expr, $missing:expr, $duplicate:expr) => {
         #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1109,6 +1218,18 @@ fn optional_u64(
         [] => Ok(0),
         [value] => Ok(*value),
         [_first, _second, ..] => Err(ProtocolError::Invalid(duplicate_error)),
+    }
+}
+
+fn required_u64(
+    fields: &BTreeMap<u32, Vec<u64>>,
+    field: u32,
+    missing: &'static str,
+) -> Result<u64, ProtocolError> {
+    match fields.get(&field).map(Vec::as_slice).unwrap_or_default() {
+        [] => Err(ProtocolError::Invalid(missing)),
+        [value] => Ok(*value),
+        [_first, _second, ..] => Err(ProtocolError::Invalid("typed request has duplicate field")),
     }
 }
 

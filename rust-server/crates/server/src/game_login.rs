@@ -1422,26 +1422,50 @@ where
             || method.is_family(MethodFamily::DailyCopy)
             || request.method == "copyinfo.GetCopyInfo" =>
         {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+            let mut typed_handled = false;
+            let result = if let Some(typed) = typed_account.as_mut() {
+                let result =
+                    battle_handler::handle_typed(typed, request.method.as_str(), request_args);
+                if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
+                    typed_handled = true;
+                    result
+                } else {
+                    let mut context = GameLoginRequestContext {
+                        state,
+                        account: &mut account,
+                        catalogs: *catalogs,
+                        pre_pushes: &mut pre_pushes,
+                        post_pushes: &mut post_pushes,
+                        handler_error: &mut handler_error,
+                        pass_details: &mut pass_details,
+                        pass_rewards: &mut pass_rewards,
+                        pass_hero_ids: &mut pass_hero_ids,
+                        pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                        pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                    };
+                    battle_handler::handle(&mut context, request.method.as_str(), request_args)
+                }
+            } else {
+                let mut context = GameLoginRequestContext {
+                    state,
+                    account: &mut account,
+                    catalogs: *catalogs,
+                    pre_pushes: &mut pre_pushes,
+                    post_pushes: &mut post_pushes,
+                    handler_error: &mut handler_error,
+                    pass_details: &mut pass_details,
+                    pass_rewards: &mut pass_rewards,
+                    pass_hero_ids: &mut pass_hero_ids,
+                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
+                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
+                };
+                battle_handler::handle(&mut context, request.method.as_str(), request_args)
             };
-            let result =
-                battle_handler::handle(&mut context, request.method.as_str(), request_args);
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
             let payload = result.into_payload();
-            if handler_error.is_none() {
+            if !typed_handled && handler_error.is_none() {
                 sync_typed_battle_state_with_catalog(
                     typed_account.as_deref_mut(),
                     account.as_deref(),
@@ -2375,6 +2399,24 @@ fn sync_typed_battle_state_with_catalog(
             {
                 if let Some(active) = typed_account.battle.active.as_mut() {
                     active.expires_at = u64::from(now).saturating_add(1_800);
+                    active.remaining_fleet_ids = session
+                        .and_then(|session| session.get("remainingFleetIds"))
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_u64)
+                        .filter_map(|id| u32::try_from(id).ok())
+                        .filter(|id| *id > 0)
+                        .collect();
+                    active.hero_ids = hero_ids
+                        .iter()
+                        .filter_map(|id| blueoath_domain::HeroId::new(*id).ok())
+                        .collect();
+                    active.attack_count = session
+                        .and_then(|session| session.get("attackCount"))
+                        .and_then(Value::as_u64)
+                        .and_then(|value| u32::try_from(value).ok())
+                        .unwrap_or_default();
                 }
             }
         }
@@ -2392,7 +2434,26 @@ fn sync_typed_battle_state_with_catalog(
                 let _ = BattleService::settle(typed_account, copy_id, victory);
             } else if victory {
                 if let Some(active) = typed_account.battle.active.as_mut() {
-                    active.current_fleet = active.current_fleet.saturating_add(1);
+                    let remaining = legacy_account
+                        .and_then(|account| account.get("battleSession"))
+                        .and_then(|session| session.get("remainingFleetIds"))
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_u64)
+                        .filter_map(|id| u32::try_from(id).ok())
+                        .filter(|id| *id > 0)
+                        .collect::<Vec<_>>();
+                    if let Some(next_fleet) = remaining
+                        .first()
+                        .copied()
+                        .filter(|next| *next != active.current_fleet)
+                    {
+                        active.current_fleet = next_fleet;
+                    } else {
+                        active.current_fleet = active.current_fleet.saturating_add(1);
+                    }
+                    active.remaining_fleet_ids = remaining;
                     active.revision = active.revision.saturating_add(1);
                 }
             }

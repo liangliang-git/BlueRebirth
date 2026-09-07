@@ -210,7 +210,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 15);
+    assert_eq!(version, 16);
     assert_eq!(state_json_columns, 0);
     for column in ["class_id", "create_time", "message"] {
         let count: i64 = connection
@@ -426,6 +426,9 @@ fn typed_repository_transaction_commits_domain_mutation() {
         started_at: 100,
         expires_at: 200,
         revision: 1,
+        remaining_fleet_ids: vec![1, 2],
+        hero_ids: vec![hero_id],
+        attack_count: 3,
     });
     AccountRepository::create(&store, &account).unwrap();
     AccountRepository::transact(&store, &profile_id, |account| {
@@ -485,6 +488,10 @@ fn typed_repository_transaction_commits_domain_mutation() {
         loaded.battle.active.as_ref().map(|session| session.copy_id),
         Some(CopyId::new(300).unwrap())
     );
+    let active = loaded.battle.active.as_ref().unwrap();
+    assert_eq!(active.remaining_fleet_ids, vec![1, 2]);
+    assert_eq!(active.hero_ids, vec![hero_id]);
+    assert_eq!(active.attack_count, 3);
     let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
     let legacy_rows: i64 = connection
         .query_row(
