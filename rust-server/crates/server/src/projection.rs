@@ -376,6 +376,39 @@ pub(super) fn fashion_list_from_account(
     FashionList { items }
 }
 
+pub(super) fn fashion_list_from_typed_account(
+    account: &blueoath_domain::AccountState,
+    catalog: Option<&FashionList>,
+) -> FashionList {
+    let stored = account
+        .fashion
+        .entries
+        .iter()
+        .map(|(sf_id, fashion_tids)| FashionInfo {
+            sf_id: i32::try_from(*sf_id).unwrap_or(i32::MAX),
+            fashion_tids: fashion_tids
+                .iter()
+                .map(|fashion_tid| i32::try_from(fashion_tid.get()).unwrap_or(i32::MAX))
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    let Some(catalog) = catalog else {
+        return FashionList { items: stored };
+    };
+    let mut items = catalog.items.clone();
+    for entry in stored {
+        if let Some(existing) = items.iter_mut().find(|item| item.sf_id == entry.sf_id) {
+            existing.fashion_tids.extend(entry.fashion_tids);
+            existing.fashion_tids.sort_unstable();
+            existing.fashion_tids.dedup();
+        } else {
+            items.push(entry);
+        }
+    }
+    items.sort_unstable_by_key(|item| item.sf_id);
+    FashionList { items }
+}
+
 pub(super) fn equip_list_from_account(
     account: &Value,
     catalog: Option<&EquipCatalog>,

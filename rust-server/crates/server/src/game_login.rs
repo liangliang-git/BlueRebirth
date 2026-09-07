@@ -2328,10 +2328,11 @@ where
             NetSocketFrameCodec::write(stream, 0, &push).await?;
             let push = TMessageCodec::encode_response(&TResponse {
                 method: "fashion.updateData".to_owned(),
-                ret: Some(FashionListCodec::encode(&fashion_list_from_account(
-                    account,
-                    fashion_catalog,
-                ))),
+                ret: Some(FashionListCodec::encode(
+                    &typed_account_view
+                        .map(|typed| fashion_list_from_typed_account(typed, fashion_catalog))
+                        .unwrap_or_else(|| fashion_list_from_account(account, fashion_catalog)),
+                )),
                 time: current_unix_seconds(),
                 ..TResponse::default()
             });
