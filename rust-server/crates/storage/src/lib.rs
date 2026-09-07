@@ -3737,6 +3737,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0026_guide_typed_state.sql"),
     include_str!("../../../migrations/0027_supply_typed_state.sql"),
     include_str!("../../../migrations/0028_support_typed_state.sql"),
+    include_str!("../../../migrations/0029_battle_session_constraints.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {
