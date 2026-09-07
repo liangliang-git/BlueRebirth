@@ -659,19 +659,37 @@ async fn teacher_rank_returns_typed_current_user_row() {
 #[tokio::test]
 async fn friend_update_user_state_returns_typed_status_event() {
     let state = ServerState::new("friend-state", "Captain", "1.4.0");
-    let mut account = default_account_snapshot("friend-state", "Captain", 321);
+    let mut account = NewAccountFactory::create(ProfileId::new("friend-state").unwrap(), "Captain");
+    account.character.uid = 321;
     let mut args = Vec::new();
     append_varint_field(&mut args, 1, 2);
     append_varint_field(&mut args, 2, 987);
 
-    let responses = battle_route_test_request(
-        &mut account,
+    let (mut client, mut server) = duplex(1_048_576);
+    let request = TMessageCodec::encode_request(&TRequest {
+        method: "friend.UpdateUserState".to_owned(),
+        args: Some(args),
+        callback_handler: 71,
+        ..TRequest::default()
+    });
+    NetSocketFrameCodec::write(&mut client, 0, &request)
+        .await
+        .unwrap();
+    let catalogs = GameLoginCatalogs::empty();
+    process_game_login_frame_with_catalogs_typed_mut(
+        &mut server,
         &state,
-        &BattleCatalog::default(),
-        "friend.UpdateUserState",
-        args,
+        None,
+        Some(&mut account),
+        &catalogs,
     )
-    .await;
+    .await
+    .unwrap();
+    drop(server);
+    let mut responses = Vec::new();
+    while let Some(frame) = NetSocketFrameCodec::read(&mut client).await.unwrap() {
+        responses.push(TMessageCodec::decode_response(&frame.payload).unwrap());
+    }
     let response = responses
         .iter()
         .find(|response| response.method == "friend.UpdateUserState")
@@ -2315,7 +2333,7 @@ async fn shared_pve_room_is_visible_across_accounts() {
 }
 
 async fn guild_route_test_request(
-    account: &mut serde_json::Value,
+    account: &mut blueoath_domain::AccountState,
     state: &ServerState,
     method: &str,
     args: Vec<u8>,
@@ -2330,22 +2348,13 @@ async fn guild_route_test_request(
     NetSocketFrameCodec::write(&mut client, 0, &request)
         .await
         .unwrap();
-    process_game_login_frame_with_catalog_mut(
+    let catalogs = GameLoginCatalogs::empty();
+    process_game_login_frame_with_catalogs_typed_mut(
         &mut server,
         state,
+        None,
         Some(account),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        &catalogs,
     )
     .await
     .unwrap();
@@ -2360,13 +2369,14 @@ async fn guild_route_test_request(
 #[tokio::test]
 async fn guild_create_pushes_own_info_and_member_info() {
     let state = ServerState::new("guild-test", "Captain", "1.4.0");
-    let mut account = default_account_snapshot("guild-test", "Captain", 100);
+    let mut account = NewAccountFactory::create(ProfileId::new("guild-test").unwrap(), "Captain");
+    account.character.uid = 100;
     let mut args = Vec::new();
     append_message_field(&mut args, 1, b"Test Fleet");
 
     let responses = guild_route_test_request(&mut account, &state, "guild.Create", args).await;
 
-    assert_eq!(account["guild"]["name"], "Test Fleet");
+    assert_eq!(account.guild.as_ref().unwrap().name, "Test Fleet");
     assert!(responses
         .iter()
         .any(|response| response.method == "guild.UpdateOurGuildData"));
@@ -2383,7 +2393,9 @@ async fn guild_create_pushes_own_info_and_member_info() {
 #[tokio::test]
 async fn guild_list_apply_member_and_quit_round_trip() {
     let state = ServerState::new("guild-apply-test", "Captain", "1.4.0");
-    let mut account = default_account_snapshot("guild-apply-test", "Captain", 100);
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("guild-apply-test").unwrap(), "Captain");
+    account.character.uid = 100;
 
     let mut list_args = Vec::new();
     append_varint_field(&mut list_args, 1, 0);
@@ -2402,7 +2414,7 @@ async fn guild_list_apply_member_and_quit_round_trip() {
     let mut apply_args = Vec::new();
     append_varint_field(&mut apply_args, 1, DEFAULT_GUILD_ID);
     let apply = guild_route_test_request(&mut account, &state, "guild.Apply", apply_args).await;
-    assert_eq!(account["guild"]["myPost"], GUILD_MEMBER);
+    assert_eq!(account.guild.as_ref().unwrap().my_post, GUILD_MEMBER as u32);
     assert!(apply
         .iter()
         .any(|response| response.method == "guild.UpdateOurGuildData"));
@@ -2415,7 +2427,7 @@ async fn guild_list_apply_member_and_quit_round_trip() {
     );
 
     guild_route_test_request(&mut account, &state, "guild.Quit", Vec::new()).await;
-    assert!(account.get("guild").is_none());
+    assert!(account.guild.is_none());
 }
 
 #[tokio::test]

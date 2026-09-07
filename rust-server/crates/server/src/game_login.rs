@@ -443,12 +443,12 @@ where
             let now = current_unix_seconds();
             if let Some(account) = account.as_deref_mut() {
                 advance_task_event(account, task_catalog, 1, 1, now);
-                if account.get("guild").is_some() {
-                    guild_handler::push_guild_state(&mut post_pushes, account);
-                }
             }
             if let Some(typed) = typed_account.as_deref_mut() {
                 advance_typed_task_event(typed, task_catalog, 1, 1);
+                if typed.guild.is_some() {
+                    guild_handler::push_guild_state_typed(&mut post_pushes, typed);
+                }
                 append_method_push(
                     &mut post_pushes,
                     "task.TaskInfo",
@@ -614,20 +614,7 @@ where
                     &mut pre_pushes,
                 )
             } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                guild_handler::handle(&mut context, request.method.as_str(), request_args)
+                HandlerResult::Error(GameError::InvalidRequest("guild requires typed account"))
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -636,50 +623,15 @@ where
         }
         _ if method.is_family(MethodFamily::Friend) => {
             let result = if let Some(typed) = typed_account.as_mut() {
-                let result = friend_handler::handle_typed(
+                friend_handler::handle_typed(
                     typed,
                     state,
                     request.method.as_str(),
                     request_args,
                     &mut pre_pushes,
-                );
-                if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
-                    result
-                } else if typed_account.is_some() {
-                    HandlerResult::Error(GameError::InvalidRequest(
-                        "friend request is not supported",
-                    ))
-                } else {
-                    let mut context = GameLoginRequestContext {
-                        state,
-                        account: &mut account,
-                        catalogs: *catalogs,
-                        pre_pushes: &mut pre_pushes,
-                        post_pushes: &mut post_pushes,
-                        handler_error: &mut handler_error,
-                        pass_details: &mut pass_details,
-                        pass_rewards: &mut pass_rewards,
-                        pass_hero_ids: &mut pass_hero_ids,
-                        pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                        pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                    };
-                    friend_handler::handle(&mut context, request.method.as_str(), request_args)
-                }
+                )
             } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                friend_handler::handle(&mut context, request.method.as_str(), request_args)
+                HandlerResult::Error(GameError::InvalidRequest("friend requires typed account"))
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -1093,21 +1045,9 @@ where
             result.into_payload()
         }
         _ if guildtask_handler::handles(request.method.as_str()) => {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-            };
-            let result =
-                guildtask_handler::handle(&mut context, request.method.as_str(), request_args);
+            let result = HandlerResult::Error(GameError::InvalidRequest(
+                "guild task requires typed account",
+            ));
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -1127,24 +1067,9 @@ where
             result.into_payload()
         }
         _ if guild_extension_handler::handles(request.method.as_str()) => {
-            let mut context = GameLoginRequestContext {
-                state,
-                account: &mut account,
-                catalogs: *catalogs,
-                pre_pushes: &mut pre_pushes,
-                post_pushes: &mut post_pushes,
-                handler_error: &mut handler_error,
-                pass_details: &mut pass_details,
-                pass_rewards: &mut pass_rewards,
-                pass_hero_ids: &mut pass_hero_ids,
-                pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-            };
-            let result = guild_extension_handler::handle(
-                &mut context,
-                request.method.as_str(),
-                request_args,
-            );
+            let result = HandlerResult::Error(GameError::InvalidRequest(
+                "guild extension requires typed account",
+            ));
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -1246,36 +1171,12 @@ where
                         "commerce request is not supported",
                     ))
                 } else {
-                    let mut context = GameLoginRequestContext {
-                        state,
-                        account: &mut account,
-                        catalogs: *catalogs,
-                        pre_pushes: &mut pre_pushes,
-                        post_pushes: &mut post_pushes,
-                        handler_error: &mut handler_error,
-                        pass_details: &mut pass_details,
-                        pass_rewards: &mut pass_rewards,
-                        pass_hero_ids: &mut pass_hero_ids,
-                        pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                        pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                    };
-                    commerce_handler::handle(&mut context, request.method.as_str(), request_args)
+                    HandlerResult::Error(GameError::InvalidRequest(
+                        "commerce request is not supported",
+                    ))
                 }
             } else {
-                let mut context = GameLoginRequestContext {
-                    state,
-                    account: &mut account,
-                    catalogs: *catalogs,
-                    pre_pushes: &mut pre_pushes,
-                    post_pushes: &mut post_pushes,
-                    handler_error: &mut handler_error,
-                    pass_details: &mut pass_details,
-                    pass_rewards: &mut pass_rewards,
-                    pass_hero_ids: &mut pass_hero_ids,
-                    pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                    pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                };
-                commerce_handler::handle(&mut context, request.method.as_str(), request_args)
+                HandlerResult::Error(GameError::InvalidRequest("commerce requires typed account"))
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
