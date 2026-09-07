@@ -177,7 +177,7 @@ fn migration_from_schema_v6_normalizes_profile_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 13);
+    assert_eq!(version, 14);
     assert_eq!(state_json_columns, 0);
     for column in ["class_id", "create_time", "message"] {
         let count: i64 = connection
