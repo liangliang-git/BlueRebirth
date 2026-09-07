@@ -46,6 +46,8 @@ pub(super) fn handles_typed(method: &str) -> bool {
             | "activityVideo.GetActivityVideo"
             | "activityVideo.SetActivityVideo"
             | "activitychristmasshop.UpdateActivityChristmasShopInfo"
+            | "activitychristmasshop.BuyBlindBox"
+            | "activitychristmasshop.BuyBlindItem"
             | "activitychristmasshop.OpenSpecialBlindBox"
             | "activitychristmasshop.SetToy"
             | "activitychristmasshop.GiveMeCrystalBall"
@@ -69,6 +71,8 @@ pub(super) fn handle_typed(
             | "activitycodeexchange.ExchangeCode"
             | "activitycodeexchange.ExchangeReward"
             | "activitypapercut.MakePaperCut"
+            | "activitychristmasshop.BuyBlindBox"
+            | "activitychristmasshop.BuyBlindItem"
     ) {
         return match method {
             "activityextract.Draw" | "activityextractur.Draw" => {
@@ -86,6 +90,9 @@ pub(super) fn handle_typed(
                 handle_typed_code_exchange(account, method, request_args)
             }
             "activitypapercut.MakePaperCut" => handle_typed_paper_cut(account, request_args),
+            "activitychristmasshop.BuyBlindBox" | "activitychristmasshop.BuyBlindItem" => {
+                handle_typed_christmas_buy(account, method, request_args)
+            }
             _ => unreachable!(),
         };
     }
@@ -1169,16 +1176,212 @@ fn typed_valentine_payload(progress: &std::collections::BTreeMap<String, u64>) -
     output
 }
 
+fn handle_typed_christmas_buy(
+    account: &mut blueoath_domain::AccountState,
+    method: &str,
+    request_args: &[u8],
+) -> HandlerResult {
+    const BLIND_BOX_COIN: i32 = 17_007;
+    const BLIND_BOX_REPEAT_TOY: i32 = 17_008;
+    let catalog = GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default);
+    let snapshot = account.clone();
+
+    if method == "activitychristmasshop.BuyBlindItem" {
+        let buy_way = decode_varint_field(request_args, 1);
+        let buy_times = decode_varint_field(request_args, 2).clamp(1, 99);
+        let (goods_type, item_id, unit_cost) = match buy_way {
+            1 => (5, 1, parameter_value(catalog, 311).unwrap_or(5_000).max(1)),
+            2 => (
+                1,
+                BLIND_BOX_REPEAT_TOY,
+                parameter_value(catalog, 312).unwrap_or(10).max(1),
+            ),
+            _ => {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "christmas buy way is invalid",
+                ));
+            }
+        };
+        let Some(total_cost) = unit_cost.checked_mul(buy_times) else {
+            return HandlerResult::Error(GameError::InvalidRequest(
+                "christmas blind box exchange amount is invalid",
+            ));
+        };
+        if !typed_activity_can_consume(account, goods_type, item_id, total_cost)
+            || !typed_activity_consume(account, goods_type, item_id, total_cost)
+        {
+            return HandlerResult::Error(GameError::InvalidState(
+                "christmas blind box exchange cost is insufficient",
+            ));
+        }
+        let reward = ShopReward {
+            goods_type: 1,
+            item_id: BLIND_BOX_COIN,
+            num: buy_times,
+            instance_id: 0,
+        };
+        if !task_state::can_grant_typed_task_reward(account, &reward)
+            || !task_state::grant_typed_task_reward(account, &reward)
+        {
+            *account = snapshot;
+            return HandlerResult::Error(GameError::InvalidState(
+                "christmas blind box coin reward is unsupported",
+            ));
+        }
+        set_activity_value(
+            &mut account.activities.progress,
+            "activityChristmasShop",
+            "lastBuyWay",
+            buy_way as u64,
+        );
+        set_activity_value(
+            &mut account.activities.progress,
+            "activityChristmasShop",
+            "lastBuyTimes",
+            buy_times as u64,
+        );
+        return typed_reply(method, encode_rewards_list(&[reward]));
+    }
+
+    let buy_index = decode_varint_field(request_args, 1);
+    let limit = parameter_value(catalog, 314).unwrap_or(8).max(1) as u64;
+    let cost = parameter_value(catalog, 313).unwrap_or(10).max(1);
+    let buy_key = format!("activity:activityChristmasShop:buy:{buy_index}:count");
+    let current_count = account
+        .activities
+        .progress
+        .get(&buy_key)
+        .copied()
+        .unwrap_or_default();
+    if current_count >= limit {
+        return HandlerResult::Error(GameError::InvalidState(
+            "christmas blind box daily limit reached",
+        ));
+    }
+    if !typed_activity_can_consume(account, 1, BLIND_BOX_COIN, cost)
+        || !typed_activity_consume(account, 1, BLIND_BOX_COIN, cost)
+    {
+        return HandlerResult::Error(GameError::InvalidState(
+            "christmas blind box coin is insufficient",
+        ));
+    }
+    let eligible = typed_christmas_eligible_figures(catalog, account);
+    if eligible.is_empty() {
+        *account = snapshot;
+        return HandlerResult::Error(GameError::InvalidState(
+            "christmas blind box has no eligible figure",
+        ));
+    }
+    let toy_id = eligible[(current_count as usize) % eligible.len()];
+    let toy_key = format!("activity:activityChristmasShop:toy:{toy_id}:count");
+    let duplicate = account
+        .activities
+        .progress
+        .get(&toy_key)
+        .copied()
+        .unwrap_or_default()
+        > 0;
+    let mut rewards = Vec::new();
+    if duplicate {
+        rewards.push(ShopReward {
+            goods_type: 1,
+            item_id: BLIND_BOX_REPEAT_TOY,
+            num: 1,
+            instance_id: 0,
+        });
+        if !task_state::can_grant_typed_task_rewards(account, &rewards) {
+            *account = snapshot;
+            return HandlerResult::Error(GameError::InvalidState(
+                "christmas duplicate toy reward is unsupported",
+            ));
+        }
+        for reward in &rewards {
+            if !task_state::grant_typed_task_reward(account, reward) {
+                *account = snapshot;
+                return HandlerResult::Error(GameError::InvalidState(
+                    "christmas duplicate toy reward failed",
+                ));
+            }
+        }
+    } else {
+        account.activities.progress.insert(toy_key, 1);
+    }
+    account
+        .activities
+        .progress
+        .insert(buy_key, current_count.saturating_add(1));
+    let mut output = Vec::new();
+    append_varint_field(&mut output, 1, toy_id as u64);
+    typed_reply(method, output)
+}
+
+fn typed_christmas_eligible_figures(
+    catalog: &GameplayCatalog,
+    account: &blueoath_domain::AccountState,
+) -> Vec<i32> {
+    let owned_ship_fleets = account
+        .dock
+        .heroes
+        .values()
+        .map(|hero| hero.template_id.get() / 10)
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut figures = catalog
+        .interaction_figures
+        .iter()
+        .filter_map(|(id, figure)| {
+            if json_i32(figure, "is_drawable").unwrap_or_default() <= 0
+                || json_i32(figure, "figure_type") != Some(1)
+            {
+                return None;
+            }
+            let required = json_i32(figure, "origional_ship_required").unwrap_or_default() > 0;
+            (!required || owned_ship_fleets.contains(&(*id as u64))).then_some(*id)
+        })
+        .collect::<Vec<_>>();
+    figures.sort_unstable();
+    figures
+}
+
 fn typed_christmas_payload(progress: &std::collections::BTreeMap<String, u64>) -> Vec<u8> {
     let mut output = Vec::new();
+    let mut buy_info = std::collections::BTreeMap::new();
+    let mut toy_info = std::collections::BTreeMap::new();
     let mut boxes = std::collections::BTreeSet::new();
     for key in progress.keys() {
+        if let Some(index) = key
+            .strip_prefix("activity:activityChristmasShop:buy:")
+            .and_then(|value| value.strip_suffix(":count"))
+        {
+            if let (Ok(index), Some(count)) = (index.parse::<u64>(), progress.get(key)) {
+                buy_info.insert(index, *count);
+            }
+        }
+        if let Some(toy_id) = key
+            .strip_prefix("activity:activityChristmasShop:toy:")
+            .and_then(|value| value.strip_suffix(":count"))
+        {
+            if let (Ok(toy_id), Some(count)) = (toy_id.parse::<u64>(), progress.get(key)) {
+                toy_info.insert(toy_id, *count);
+            }
+        }
         if let Some(id) = key
             .strip_prefix("activity:activityChristmasShop:specialBox:")
             .and_then(|value| value.parse::<u64>().ok())
         {
             boxes.insert(id);
         }
+    }
+    for (index, count) in buy_info {
+        let mut item = Vec::new();
+        append_varint_field(&mut item, 1, index);
+        append_varint_field(&mut item, 2, count);
+        append_message_field(&mut output, 1, &item);
+    }
+    for (toy_id, count) in toy_info {
+        let mut item = Vec::new();
+        append_varint_field(&mut item, 1, toy_id);
+        append_varint_field(&mut item, 2, count);
+        append_message_field(&mut output, 2, &item);
     }
     for id in boxes {
         let mut item = Vec::new();
