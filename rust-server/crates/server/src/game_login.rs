@@ -384,21 +384,25 @@ where
                 .unwrap_or_else(|| user_info_from_account(state, account_view)),
         )),
         "user.UserLogin" => {
+            let now = current_unix_seconds();
             if let Some(account) = account.as_deref_mut() {
-                advance_task_event(account, task_catalog, 1, 1, current_unix_seconds());
-                if let Some(typed) = typed_account.as_deref_mut() {
-                    advance_typed_task_event(typed, task_catalog, 1, 1);
-                }
+                advance_task_event(account, task_catalog, 1, 1, now);
                 if account.get("guild").is_some() {
                     guild_handler::push_guild_state(&mut post_pushes, account);
                 }
+            }
+            if let Some(typed) = typed_account.as_deref_mut() {
+                advance_typed_task_event(typed, task_catalog, 1, 1);
                 append_method_push(
                     &mut post_pushes,
                     "task.TaskInfo",
-                    typed_account
-                        .as_deref()
-                        .map(|typed| task_info_payload_from_typed_account(typed, task_catalog))
-                        .unwrap_or_else(|| task_info_payload(account, task_catalog)),
+                    task_info_payload_from_typed_account(typed, task_catalog),
+                );
+            } else if let Some(account) = account.as_deref() {
+                append_method_push(
+                    &mut post_pushes,
+                    "task.TaskInfo",
+                    task_info_payload(account, task_catalog),
                 );
             }
             Some(UserLoginCodec::encode_response("ok", "", 0))
@@ -2386,6 +2390,16 @@ where
 }
 
 fn legacy_only_method(method: &str) -> bool {
+    if matches!(
+        method,
+        "copy.AttackBase"
+            | "copy.GetCopy"
+            | "dailycopy.GetData"
+            | "dailycopy.SelectEx"
+            | "dailycopy.UpdateDailyCopyData"
+    ) {
+        return false;
+    }
     if activity_handler::handles(method) {
         return true;
     }
@@ -2406,11 +2420,17 @@ fn legacy_only_method(method: &str) -> bool {
             | MethodFamily::TalentTree
             | MethodFamily::Tower
             | MethodFamily::ActivityTower
+            | MethodFamily::Bathroom
+            | MethodFamily::Battle
             | MethodFamily::BattlePass
+            | MethodFamily::Copy
+            | MethodFamily::DailyCopy
             | MethodFamily::Exchange
             | MethodFamily::FoodCompose
             | MethodFamily::Magazine
             | MethodFamily::InteractionItem
+            | MethodFamily::MopUp
+            | MethodFamily::Study
             | MethodFamily::WorldEvent
     )
 }
