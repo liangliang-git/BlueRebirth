@@ -1095,6 +1095,20 @@ where
             }
             result.into_payload()
         }
+        _ if typed_account.is_some()
+            && guildtask_handler::handles_typed(request.method.as_str()) =>
+        {
+            let result = guildtask_handler::handle_typed(
+                typed_account.as_mut().expect("typed guild task account"),
+                request.method.as_str(),
+                request_args,
+                &mut pre_pushes,
+            );
+            if let HandlerResult::Error(error) = &result {
+                handler_error = Some(error.clone());
+            }
+            result.into_payload()
+        }
         _ if guildtask_handler::handles(request.method.as_str()) => {
             let mut context = GameLoginRequestContext {
                 state,
