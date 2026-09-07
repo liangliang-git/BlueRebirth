@@ -17,6 +17,109 @@ pub(super) fn handle_typed(
             method,
             EquipListCodec::encode(&equip_list_from_typed_account(account)),
         )),
+        "equip.Dismantle" => {
+            let Some(catalog) = equip_catalog else {
+                return HandlerResult::Empty;
+            };
+            let requested = decode_repeated_varint_field(request_args, 1)
+                .into_iter()
+                .filter_map(|id| u64::try_from(id).ok())
+                .filter_map(|id| blueoath_domain::EquipId::new(id).ok())
+                .collect::<std::collections::BTreeSet<_>>();
+            if requested.is_empty() {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "equipment dismantle request is invalid",
+                ));
+            }
+            let mut removed = Vec::new();
+            let mut rewards = Vec::new();
+            for equip_id in &requested {
+                let Some(equipment) = account.dock.equipments.get(equip_id) else {
+                    continue;
+                };
+                let template_id = i32::try_from(equipment.template_id.get()).unwrap_or_default();
+                if catalog.no_resolve_templates.contains(&template_id) {
+                    continue;
+                }
+                let Some(definitions) = catalog.dismantle_rewards_by_template.get(&template_id)
+                else {
+                    continue;
+                };
+                removed.push(*equip_id);
+                rewards.extend(
+                    definitions
+                        .iter()
+                        .filter_map(|(goods_type, item_id, amount)| {
+                            (*amount > 0).then_some(ShopReward {
+                                goods_type: *goods_type,
+                                item_id: *item_id,
+                                num: *amount,
+                                instance_id: 0,
+                            })
+                        }),
+                );
+            }
+            if removed.is_empty() {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "no dismantlable equipment was selected",
+                ));
+            }
+            let removed_set = removed
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>();
+            account
+                .dock
+                .equipments
+                .retain(|equip_id, _| !removed_set.contains(equip_id));
+            for hero in account.dock.heroes.values_mut() {
+                for equip_id in &mut hero.equip_slots {
+                    if equip_id.is_some_and(|id| removed_set.contains(&id)) {
+                        *equip_id = None;
+                    }
+                }
+            }
+            for reward in &rewards {
+                if reward.goods_type == 5 {
+                    let kind = match reward.item_id {
+                        1 => Some(blueoath_domain::CurrencyKind::Gold),
+                        2 => Some(blueoath_domain::CurrencyKind::Diamond),
+                        5 => Some(blueoath_domain::CurrencyKind::Supply),
+                        30 => Some(blueoath_domain::CurrencyKind::PvePoint),
+                        _ => None,
+                    };
+                    if let Some(kind) = kind {
+                        let _ = account
+                            .resources
+                            .credit(kind, u64::try_from(reward.num).unwrap_or_default());
+                    }
+                } else if let Ok(template_id) = blueoath_domain::TemplateId::new(
+                    u64::try_from(reward.item_id).unwrap_or_default(),
+                ) {
+                    let entry = account.inventory.items.entry(template_id).or_default();
+                    *entry = entry.saturating_add(u64::try_from(reward.num).unwrap_or_default());
+                }
+            }
+            let mut equip_push = equip_list_from_typed_account(account);
+            equip_push.items.extend(removed.iter().filter_map(|id| {
+                u32::try_from(id.get()).ok().map(|equip_id| EquipInfo {
+                    equip_id,
+                    template_id: 0,
+                    ..EquipInfo::default()
+                })
+            }));
+            append_method_push(
+                pre_pushes,
+                "equip.UpdateEquipBagData",
+                EquipListCodec::encode(&equip_push),
+            );
+            append_method_push(
+                pre_pushes,
+                "bag.UpdateBagData",
+                BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            );
+            HandlerResult::Reply(Response::raw(method, encode_retire_hero_response(&rewards)))
+        }
         "equip.Enhance" => {
             let Some(catalog) = equip_catalog else {
                 return HandlerResult::Empty;
@@ -1024,5 +1127,48 @@ mod tests {
             600
         );
         assert_eq!(pushes.len(), 3);
+    }
+
+    #[test]
+    fn typed_equip_dismantle_removes_equipment_and_grants_rewards() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("equip-dismantle-typed").unwrap(),
+            "Captain",
+        );
+        let item_id = blueoath_domain::TemplateId::new(10_182).unwrap();
+        let before = account
+            .inventory
+            .items
+            .get(&item_id)
+            .copied()
+            .unwrap_or_default();
+        let mut catalog = EquipCatalog::default();
+        catalog
+            .dismantle_rewards_by_template
+            .insert(30_091, vec![(1, 10_182, 3)]);
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, 1);
+        let mut pushes = Vec::new();
+
+        let result = handle_typed(
+            &mut account,
+            "equip.Dismantle",
+            &args,
+            &mut pushes,
+            Some(&catalog),
+            None,
+        );
+
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert!(!account
+            .dock
+            .equipments
+            .contains_key(&blueoath_domain::EquipId::new(1).unwrap()));
+        assert_eq!(account.inventory.items.get(&item_id), Some(&(before + 3)));
+        assert_eq!(
+            account.dock.heroes.values().next().unwrap().equip_slots[0],
+            None
+        );
+        assert_eq!(pushes.len(), 2);
     }
 }
