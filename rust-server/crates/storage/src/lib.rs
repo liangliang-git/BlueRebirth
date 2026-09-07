@@ -2306,6 +2306,51 @@ fn project_normalized_core(
             ],
         )?;
     }
+    if let Some(damage) = account
+        .get("boss")
+        .and_then(|boss| boss.get("bosses"))
+        .and_then(Value::as_array)
+        .and_then(|bosses| bosses.first())
+        .and_then(|boss| boss.as_object())
+        .map(|boss| non_negative_field(boss, "damage"))
+    {
+        transaction.execute(
+            "INSERT INTO activity_progress(
+                profile_id, activity_id, progress_kind, value, updated_at
+             ) VALUES (?1, 'boss', 'damage:1', ?2, ?3)
+             ON CONFLICT(profile_id, activity_id, progress_kind) DO UPDATE SET
+               value = excluded.value, updated_at = excluded.updated_at",
+            params![profile_id, damage, timestamp()],
+        )?;
+    }
+    if let Some(big_activity) = account.get("bigActivity").and_then(Value::as_object) {
+        transaction.execute(
+            "INSERT INTO activity_progress(
+                profile_id, activity_id, progress_kind, value, updated_at
+             ) VALUES (?1, 'bigActivity', 'merits', ?2, ?3)
+             ON CONFLICT(profile_id, activity_id, progress_kind) DO UPDATE SET
+               value = excluded.value, updated_at = excluded.updated_at",
+            params![
+                profile_id,
+                non_negative_field(big_activity, "merits"),
+                timestamp()
+            ],
+        )?;
+    }
+    if let Some(character) = account.get("character").and_then(Value::as_object) {
+        transaction.execute(
+            "INSERT INTO activity_progress(
+                profile_id, activity_id, progress_kind, value, updated_at
+             ) VALUES (?1, 'teacher', 'prestige', ?2, ?3)
+             ON CONFLICT(profile_id, activity_id, progress_kind) DO UPDATE SET
+               value = excluded.value, updated_at = excluded.updated_at",
+            params![
+                profile_id,
+                non_negative_field(character, "teacherPrestige"),
+                timestamp()
+            ],
+        )?;
+    }
     Ok(())
 }
 

@@ -117,7 +117,7 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
     initial_state.affection_multiplier = normalize_multiplier(config.affection_multiplier);
     initial_state.building_oil_multiplier = normalize_multiplier(config.building_oil_multiplier);
     initial_state.building_gold_multiplier = normalize_multiplier(config.building_gold_multiplier);
-    initial_state.social_store = Some(store.legacy_json_accounts());
+    initial_state.social_store = Some(store.clone());
     if store.legacy_json_accounts().load(&profile_id)?.is_none() {
         store.legacy_json_accounts().save(
             &profile_id,

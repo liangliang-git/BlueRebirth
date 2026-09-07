@@ -234,51 +234,71 @@ fn big_activity_payload(state: &Value) -> Vec<u8> {
 
 fn big_activity_rank_payload(server_state: &ServerState, account: &Value, start: i32) -> Vec<u8> {
     let mut entries = account_directory(server_state, account);
-    entries.sort_by(|left, right| {
-        state_i64(right.1.get("bigActivity").unwrap_or(&Value::Null), "merits")
-            .cmp(&state_i64(
-                left.1.get("bigActivity").unwrap_or(&Value::Null),
-                "merits",
-            ))
-            .then_with(|| left.0.cmp(&right.0))
-    });
+    entries.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
     let mut output = Vec::new();
     let offset = usize::try_from(start.saturating_sub(1)).unwrap_or_default();
-    for (index, (_, entry)) in entries.iter().skip(offset).take(50).enumerate() {
+    for (index, (uid, merits, name)) in entries.iter().skip(offset).take(50).enumerate() {
         append_message_field(
             &mut output,
             1,
-            &big_activity_rank_row(entry, offset.saturating_add(index).saturating_add(1)),
+            &big_activity_rank_row(
+                *uid,
+                name,
+                *merits,
+                offset.saturating_add(index).saturating_add(1),
+            ),
         );
     }
     let current_uid = account_uid(account).unwrap_or(1);
     let current_rank = entries
         .iter()
-        .position(|(uid, _)| *uid == current_uid)
+        .position(|(uid, _, _)| *uid == current_uid)
         .map(|rank| rank.saturating_add(1))
         .unwrap_or(1);
     append_message_field(
         &mut output,
         2,
-        &big_activity_rank_row(account, current_rank),
+        &big_activity_rank_row(
+            current_uid,
+            &json_string(account.get("character").unwrap_or(&Value::Null), "name")
+                .unwrap_or_else(|| "local".to_owned()),
+            state_i64(account.get("bigActivity").unwrap_or(&Value::Null), "merits").max(0) as u64,
+            current_rank,
+        ),
     );
     output
 }
 
-fn account_directory(server_state: &ServerState, current: &Value) -> Vec<(u64, Value)> {
+fn account_directory(server_state: &ServerState, current: &Value) -> Vec<(u64, u64, String)> {
     let mut entries = server_state
         .social_store
         .as_ref()
-        .and_then(|store| store.list().ok())
+        .and_then(|store| store.list_typed_accounts().ok())
         .into_iter()
         .flatten()
-        .filter_map(|(_, account)| account_uid(&account).map(|uid| (uid, account)))
+        .map(|account| {
+            (
+                account.character.uid,
+                account
+                    .activities
+                    .progress
+                    .get("bigActivity\u{1f}merits")
+                    .copied()
+                    .unwrap_or_default(),
+                account.character.name,
+            )
+        })
         .collect::<Vec<_>>();
     let current_uid = account_uid(current).unwrap_or(1);
-    if let Some(existing) = entries.iter_mut().find(|(uid, _)| *uid == current_uid) {
-        existing.1 = current.clone();
+    let current_merits =
+        state_i64(current.get("bigActivity").unwrap_or(&Value::Null), "merits").max(0) as u64;
+    let current_name = json_string(current.get("character").unwrap_or(&Value::Null), "name")
+        .unwrap_or_else(|| "local".to_owned());
+    if let Some(existing) = entries.iter_mut().find(|(uid, _, _)| *uid == current_uid) {
+        existing.1 = current_merits;
+        existing.2 = current_name;
     } else {
-        entries.push((current_uid, current.clone()));
+        entries.push((current_uid, current_merits, current_name));
     }
     entries
 }
@@ -290,19 +310,12 @@ fn account_uid(account: &Value) -> Option<u64> {
         .filter(|uid| *uid > 0)
 }
 
-fn big_activity_rank_row(account: &Value, rank: usize) -> Vec<u8> {
-    let activity = account.get("bigActivity").unwrap_or(&Value::Null);
+fn big_activity_rank_row(uid: u64, name: &str, merits: u64, rank: usize) -> Vec<u8> {
     let mut row = Vec::new();
-    append_varint_field(&mut row, 1, account_uid(account).unwrap_or(1));
+    append_varint_field(&mut row, 1, uid);
     append_varint_field(&mut row, 2, rank.max(1) as u64);
-    append_bytes_field(
-        &mut row,
-        3,
-        json_string(account.get("character").unwrap_or(&Value::Null), "name")
-            .unwrap_or_else(|| "local".to_owned())
-            .as_bytes(),
-    );
-    append_varint_field(&mut row, 4, state_i64(activity, "merits").max(0) as u64);
+    append_bytes_field(&mut row, 3, name.as_bytes());
+    append_varint_field(&mut row, 4, merits);
     append_varint_field(&mut row, 6, 0);
     append_varint_field(&mut row, 8, u64::from(current_unix_seconds()));
     row
@@ -339,27 +352,8 @@ fn guild_big_activity_rate_payload(state: &Value) -> Vec<u8> {
     output
 }
 
-fn guild_big_activity_rank_payload(server_state: &ServerState, current: &Value) -> Vec<u8> {
-    let mut guilds = std::collections::BTreeMap::<u64, (String, i64, i64)>::new();
-    for (_, account) in account_directory(server_state, current) {
-        let guild = account.get("guild").unwrap_or(&Value::Null);
-        let guild_id = json_u64(guild, "guildId").unwrap_or(0);
-        let guild_name = json_string(guild, "name").unwrap_or_else(|| "BlueOath".to_owned());
-        let points = state_i64(
-            account.get("guildBigActivity").unwrap_or(&Value::Null),
-            "points",
-        )
-        .max(0);
-        let member_count = guild
-            .get("members")
-            .and_then(Value::as_array)
-            .map(|members| members.len() as i64)
-            .unwrap_or(1)
-            .max(1);
-        let entry = guilds.entry(guild_id).or_insert((guild_name, 0, 0));
-        entry.1 = entry.1.saturating_add(points);
-        entry.2 = entry.2.saturating_add(member_count);
-    }
+fn guild_big_activity_rank_payload(_server_state: &ServerState, current: &Value) -> Vec<u8> {
+    let guilds = std::collections::BTreeMap::<u64, (String, i64, i64)>::new();
     let mut ranked = guilds.into_iter().collect::<Vec<_>>();
     ranked.sort_by(|left, right| {
         right
@@ -517,7 +511,7 @@ mod tests {
             )
             .unwrap();
         let mut server_state = ServerState::new("local", "Local", "1.4.0");
-        server_state.social_store = Some(store.legacy_json_accounts());
+        server_state.social_store = Some(store.clone());
         let current = json!({
             "character": {"uid": 1, "name": "Lower"},
             "bigActivity": {"merits": 10}

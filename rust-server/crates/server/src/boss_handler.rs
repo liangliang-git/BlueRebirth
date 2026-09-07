@@ -92,17 +92,13 @@ fn boss_payload(account: &mut Value) -> Vec<u8> {
 
 fn user_rank_payload(state: &ServerState, account: &mut Value) -> Vec<u8> {
     let mut entries = account_directory(state, account);
-    entries.sort_by(|left, right| {
-        boss_damage(&right.1)
-            .cmp(&boss_damage(&left.1))
-            .then_with(|| left.0.cmp(&right.0))
-    });
+    entries.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
     let mut output = Vec::new();
     for (index, (uid, entry)) in entries.iter().take(50).enumerate() {
         append_message_field(
             &mut output,
             1,
-            &boss_rank_row(state, account, *uid, entry, index.saturating_add(1)),
+            &boss_rank_row(state, account, *uid, *entry, index.saturating_add(1)),
         );
     }
     let uid = account_uid(account);
@@ -114,28 +110,35 @@ fn user_rank_payload(state: &ServerState, account: &mut Value) -> Vec<u8> {
     append_message_field(
         &mut output,
         2,
-        &boss_rank_row(state, account, uid, account, current_rank),
+        &boss_rank_row(state, account, uid, boss_damage(account), current_rank),
     );
     output
 }
 
-fn account_directory(state: &ServerState, current: &Value) -> Vec<(u64, Value)> {
+fn account_directory(state: &ServerState, current: &Value) -> Vec<(u64, u64)> {
     let mut entries = state
         .social_store
         .as_ref()
-        .and_then(|store| store.list().ok())
+        .and_then(|store| store.list_typed_accounts().ok())
         .into_iter()
         .flatten()
-        .map(|(_, account)| {
-            let uid = account_uid(&account);
-            (uid, account)
+        .map(|account| {
+            let uid = account.character.uid;
+            let damage = account
+                .activities
+                .progress
+                .get("boss\u{1f}damage:1")
+                .copied()
+                .unwrap_or_default();
+            (uid, damage)
         })
         .collect::<Vec<_>>();
     let uid = account_uid(current);
+    let damage = boss_damage(current);
     if let Some(existing) = entries.iter_mut().find(|(entry_uid, _)| *entry_uid == uid) {
-        existing.1 = current.clone();
+        existing.1 = damage;
     } else {
-        entries.push((uid, current.clone()));
+        entries.push((uid, damage));
     }
     entries
 }
@@ -163,7 +166,7 @@ fn boss_rank_row(
     state: &ServerState,
     current: &Value,
     uid: u64,
-    entry: &Value,
+    damage: u64,
     rank: usize,
 ) -> Vec<u8> {
     let mut row = Vec::new();
@@ -174,7 +177,7 @@ fn boss_rank_row(
         3,
         &super::base_handler::other_user_payload(state, current, uid),
     );
-    append_varint_field(&mut row, 4, boss_damage(entry));
+    append_varint_field(&mut row, 4, damage);
     row
 }
 
@@ -242,7 +245,7 @@ mod tests {
             )
             .unwrap();
         let mut server_state = ServerState::new("local", "Local", "1.4.0");
-        server_state.social_store = Some(store.legacy_json_accounts());
+        server_state.social_store = Some(store.clone());
         let mut current = json!({
             "character": {"uid": 1, "name": "Lower"},
             "boss": {"bosses": [{"damage": 100}]}

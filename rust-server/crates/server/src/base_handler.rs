@@ -443,117 +443,93 @@ fn handle_legacy<'state, 'account, 'scratch>(
     }
 }
 
+#[derive(Clone)]
+struct TeacherRankEntry {
+    uid: u64,
+    name: String,
+    level: u32,
+    head: u32,
+    head_frame: u32,
+    prestige: u64,
+}
+
 fn teacher_rank_payload(state: &ServerState, current: &Value, begin: i32, offset: i32) -> Vec<u8> {
     let mut entries = state
         .social_store
         .as_ref()
-        .and_then(|store| store.list().ok())
+        .and_then(|store| store.list_typed_accounts().ok())
+        .unwrap_or_default()
         .into_iter()
-        .flatten()
-        .filter_map(|(_, account)| {
-            account
-                .get("character")
-                .and_then(|character| json_u64(character, "uid"))
-                .filter(|uid| *uid > 0)
-                .map(|uid| (uid, account))
+        .map(|account| TeacherRankEntry {
+            uid: account.character.uid,
+            name: account.character.name,
+            level: account.character.level,
+            head: account.character.head,
+            head_frame: account.character.head_frame,
+            prestige: account
+                .activities
+                .progress
+                .get("teacher\u{1f}prestige")
+                .copied()
+                .unwrap_or_default(),
         })
         .collect::<Vec<_>>();
-    let current_uid = current
-        .get("character")
-        .and_then(|character| json_u64(character, "uid"))
-        .unwrap_or(1);
-    if let Some(existing) = entries.iter_mut().find(|(uid, _)| *uid == current_uid) {
-        existing.1 = current.clone();
+    let current_character = current.get("character").unwrap_or(&Value::Null);
+    let current_entry = TeacherRankEntry {
+        uid: json_u64(current_character, "uid").unwrap_or(1),
+        name: json_string(current_character, "name").unwrap_or_else(|| state.name.clone()),
+        level: json_i32(current_character, "level")
+            .unwrap_or(state.level)
+            .max(0) as u32,
+        head: json_i32(current_character, "head")
+            .unwrap_or(1021051)
+            .max(0) as u32,
+        head_frame: json_i32(current_character, "headFrame")
+            .unwrap_or_default()
+            .max(0) as u32,
+        prestige: json_i32(current_character, "teacherPrestige")
+            .unwrap_or_default()
+            .max(0) as u64,
+    };
+    if let Some(existing) = entries
+        .iter_mut()
+        .find(|entry| entry.uid == current_entry.uid)
+    {
+        *existing = current_entry;
     } else {
-        entries.push((current_uid, current.clone()));
+        entries.push(current_entry);
     }
     entries.sort_by(|left, right| {
-        json_i32(
-            right.1.get("character").unwrap_or(&Value::Null),
-            "teacherPrestige",
-        )
-        .unwrap_or_default()
-        .cmp(
-            &json_i32(
-                left.1.get("character").unwrap_or(&Value::Null),
-                "teacherPrestige",
-            )
-            .unwrap_or_default(),
-        )
-        .then_with(|| left.0.cmp(&right.0))
+        right
+            .prestige
+            .cmp(&left.prestige)
+            .then_with(|| left.uid.cmp(&right.uid))
     });
 
     let start = usize::try_from(begin.saturating_sub(1)).unwrap_or_default();
     let limit = usize::try_from(offset.max(1)).unwrap_or(50).min(50);
     let mut output = Vec::new();
-    for (_, account) in entries.iter().skip(start).take(limit) {
-        append_message_field(&mut output, 1, &teacher_simple_user_payload(state, account));
+    for entry in entries.iter().skip(start).take(limit) {
+        append_message_field(&mut output, 1, &teacher_simple_user_payload(entry));
     }
     output
 }
 
-fn teacher_simple_user_payload(state: &ServerState, account: &Value) -> Vec<u8> {
-    let character = account.get("character").unwrap_or(&Value::Null);
+fn teacher_simple_user_payload(entry: &TeacherRankEntry) -> Vec<u8> {
     let mut output = Vec::new();
-    append_varint_field(&mut output, 1, json_u64(character, "uid").unwrap_or(1));
+    append_varint_field(&mut output, 1, entry.uid);
     append_varint_field(&mut output, 2, 0);
-    append_bytes_field(
-        &mut output,
-        3,
-        json_string(character, "name")
-            .unwrap_or_else(|| state.name.clone())
-            .as_bytes(),
-    );
-    append_varint_field(
-        &mut output,
-        4,
-        json_i32(character, "level").unwrap_or(state.level).max(0) as u64,
-    );
-    append_varint_field(
-        &mut output,
-        5,
-        json_i32(character, "head").unwrap_or(1021051).max(0) as u64,
-    );
-    append_varint_field(
-        &mut output,
-        6,
-        json_i32(character, "headFrame").unwrap_or_default().max(0) as u64,
-    );
-    append_varint_field(
-        &mut output,
-        7,
-        json_i32(character, "headShow").unwrap_or_default().max(0) as u64,
-    );
-    append_varint_field(
-        &mut output,
-        8,
-        json_i32(character, "fashioning").unwrap_or_default().max(0) as u64,
-    );
-    append_varint_field(
-        &mut output,
-        9,
-        json_u64(account, "guildId").unwrap_or_default(),
-    );
-    append_bytes_field(
-        &mut output,
-        10,
-        json_string(account, "guildName")
-            .unwrap_or_default()
-            .as_bytes(),
-    );
-    append_varint_field(
-        &mut output,
-        11,
-        json_i32(character, "teacherPrestige")
-            .unwrap_or_default()
-            .max(0) as u64,
-    );
+    append_bytes_field(&mut output, 3, entry.name.as_bytes());
+    append_varint_field(&mut output, 4, u64::from(entry.level));
+    append_varint_field(&mut output, 5, u64::from(entry.head));
+    append_varint_field(&mut output, 6, u64::from(entry.head_frame));
+    append_varint_field(&mut output, 7, 0);
+    append_varint_field(&mut output, 8, 0);
+    append_varint_field(&mut output, 9, 0);
+    append_bytes_field(&mut output, 10, b"");
+    append_varint_field(&mut output, 11, entry.prestige);
     append_bytes_field(&mut output, 12, b"");
-    append_varint_field(
-        &mut output,
-        13,
-        json_i32(character, "secretaryId").unwrap_or(1).max(0) as u64,
-    );
+    append_varint_field(&mut output, 13, 0);
     output
 }
 
@@ -920,57 +896,47 @@ pub(super) fn other_user_payload(
     account: &Value,
     requested_uid: u64,
 ) -> Vec<u8> {
-    let social_account = if requested_uid > 0 {
-        state.social_store.as_ref().and_then(|store| {
-            store
-                .list()
-                .ok()?
+    let typed_account = (requested_uid > 0)
+        .then(|| state.social_store.as_ref()?.list_typed_accounts().ok())
+        .flatten()
+        .and_then(|accounts| {
+            accounts
                 .into_iter()
-                .map(|(_, value)| value)
-                .find(|value| {
-                    value
-                        .get("character")
-                        .and_then(|character| json_u64(character, "uid"))
-                        == Some(requested_uid)
-                })
-        })
-    } else {
-        None
-    };
-    let source = social_account.as_ref().unwrap_or(account);
-    let character = source.get("character").unwrap_or(&Value::Null);
+                .find(|account| account.character.uid == requested_uid)
+        });
+    let character = account.get("character").unwrap_or(&Value::Null);
+    let uid = typed_account
+        .as_ref()
+        .map(|account| account.character.uid)
+        .unwrap_or_else(|| {
+            if requested_uid > 0 {
+                requested_uid
+            } else {
+                json_u64(character, "uid").unwrap_or(1)
+            }
+        });
+    let name = typed_account
+        .as_ref()
+        .map(|account| account.character.name.clone())
+        .unwrap_or_else(|| json_string(character, "name").unwrap_or_else(|| state.name.clone()));
+    let head = typed_account
+        .as_ref()
+        .map(|account| account.character.head)
+        .unwrap_or_else(|| json_i32(character, "head").unwrap_or(1021051).max(0) as u32);
+    let level = typed_account
+        .as_ref()
+        .map(|account| account.character.level)
+        .unwrap_or_else(|| json_i32(character, "level").unwrap_or(1).max(0) as u32);
+    let secretary_id = typed_account
+        .as_ref()
+        .and_then(|account| account.character.secretary_id.map(|id| id.get()))
+        .unwrap_or_else(|| json_i32(character, "secretaryId").unwrap_or(1).max(0) as u64);
     let mut output = Vec::new();
-    append_varint_field(
-        &mut output,
-        1,
-        if requested_uid > 0 {
-            requested_uid
-        } else {
-            json_u64(character, "uid").unwrap_or(1)
-        },
-    );
-    append_bytes_field(
-        &mut output,
-        2,
-        json_string(character, "name")
-            .unwrap_or_else(|| state.name.clone())
-            .as_bytes(),
-    );
-    append_varint_field(
-        &mut output,
-        3,
-        json_i32(character, "head").unwrap_or(1021051).max(0) as u64,
-    );
-    append_varint_field(
-        &mut output,
-        5,
-        json_i32(character, "level").unwrap_or(1).max(0) as u64,
-    );
-    append_varint_field(
-        &mut output,
-        10,
-        json_i32(character, "secretaryId").unwrap_or(1).max(0) as u64,
-    );
+    append_varint_field(&mut output, 1, uid);
+    append_bytes_field(&mut output, 2, name.as_bytes());
+    append_varint_field(&mut output, 3, u64::from(head));
+    append_varint_field(&mut output, 5, u64::from(level));
+    append_varint_field(&mut output, 10, secretary_id);
     output
 }
 
@@ -1065,7 +1031,7 @@ mod tests {
             )
             .unwrap();
         let mut state = ServerState::new("local", "Local", "1.4.0");
-        state.social_store = Some(store.legacy_json_accounts());
+        state.social_store = Some(store.clone());
         let own = json!({"character": {"uid": 1, "name": "Local"}});
 
         let payload = other_user_payload(&state, &own, 42);
