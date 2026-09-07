@@ -1,3 +1,4 @@
+use blueoath_domain::{AccountRepository, AccountState, ProfileId, ProfileState};
 use blueoath_storage::{ProfileStore, StorageError};
 use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -117,5 +118,82 @@ fn invalid_account_profile_id_is_rejected() {
 
     assert!(matches!(error, StorageError::InvalidProfileId));
     assert!(store.load_account("bad/id").unwrap().is_none());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn account_revision_supports_atomic_compare_and_swap() {
+    let (store, root) = store();
+    let first = json!({"profileId": "one", "gold": 10});
+    let second = json!({"profileId": "one", "gold": 20});
+
+    let revision = store
+        .save_account_with_revision("one", &first, None)
+        .unwrap();
+    assert_eq!(revision, 1);
+    assert_eq!(
+        store.load_account_with_revision("one").unwrap(),
+        Some((first.clone(), 1))
+    );
+
+    let next_revision = store
+        .save_account_with_revision("one", &second, Some(revision))
+        .unwrap();
+    assert_eq!(next_revision, 2);
+
+    let error = store
+        .save_account_with_revision("one", &first, Some(revision))
+        .unwrap_err();
+    assert!(matches!(error, StorageError::RevisionConflict { .. }));
+    assert_eq!(store.load_account("one").unwrap(), Some(second));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn opening_store_is_idempotent_and_records_schema_version() {
+    let (store, root) = store();
+    drop(store);
+    let reopened = ProfileStore::open(&root).unwrap();
+    let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
+    let version: i64 = connection
+        .query_row("SELECT version FROM schema_meta WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(version >= 5);
+    assert!(reopened.list().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn typed_repository_transaction_commits_domain_mutation() {
+    let (store, root) = store();
+    let profile_id = ProfileId::new("typed").unwrap();
+    let account = AccountState {
+        profile: Some(ProfileState {
+            id: profile_id.clone(),
+            name: "Typed Captain".to_owned(),
+            revision: 0,
+        }),
+        resources: Default::default(),
+    };
+    AccountRepository::create(&store, &account).unwrap();
+    AccountRepository::transact(&store, &profile_id, |account| {
+        account
+            .resources
+            .credit(blueoath_domain::CurrencyKind::Gold, 25)
+    })
+    .unwrap();
+
+    let loaded = AccountRepository::load(&store, &profile_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded
+            .resources
+            .amount(blueoath_domain::CurrencyKind::Gold)
+            .get(),
+        25
+    );
     let _ = std::fs::remove_dir_all(root);
 }

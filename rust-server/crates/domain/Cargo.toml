@@ -1,5 +1,5 @@
 [package]
-name = "blueoath-storage"
+name = "blueoath-domain"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,8 +8,5 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-blueoath-domain = { path = "../domain" }
-chrono.workspace = true
-rusqlite.workspace = true
-serde_json.workspace = true
+serde.workspace = true
 thiserror.workspace = true

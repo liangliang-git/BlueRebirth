@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io;
 
 use thiserror::Error;
@@ -38,6 +39,98 @@ pub struct TResponse {
     pub token: String,
     pub seq: u32,
     pub is_response: i32,
+}
+
+/// Typed protobuf request boundary used by game handlers.
+pub trait Decode: Sized {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError>;
+}
+
+/// Collects protobuf varint fields while skipping unknown fields.
+///
+/// Repeated field values are preserved in wire order. Request DTOs decide
+/// which fields may repeat and which duplicates are invalid.
+pub fn decode_varint_fields(payload: &[u8]) -> Result<BTreeMap<u32, Vec<u64>>, ProtocolError> {
+    let mut reader = PbReader::new(payload);
+    let mut fields = BTreeMap::<u32, Vec<u64>>::new();
+    while let Some((field, wire)) = reader.next_field()? {
+        if wire == 0 {
+            fields.entry(field).or_default().push(reader.read_varint()?);
+        } else {
+            reader.skip(wire)?;
+        }
+    }
+    Ok(fields)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyStartRequest {
+    pub copy_id: i32,
+    pub is_running_fight: bool,
+    pub battle_mode: i32,
+    pub anim_mode: i32,
+    pub ex_buffs: Vec<i32>,
+    pub match_type: i32,
+    pub is_pve_pt_mode: bool,
+}
+
+impl Decode for CopyStartRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let copy_values = fields.get(&2).map(Vec::as_slice).unwrap_or_default();
+        let copy_id = match copy_values {
+            [] => {
+                return Err(ProtocolError::Invalid(
+                    "copy start request is missing copy id",
+                ))
+            }
+            [_first, _second, ..] => {
+                return Err(ProtocolError::Invalid(
+                    "copy start request has duplicate copy id",
+                ))
+            }
+            [value] => to_i32(*value, "copy start request copy id is out of range")?,
+        };
+        Ok(Self {
+            copy_id,
+            is_running_fight: optional_i32(
+                &fields,
+                3,
+                "copy start request has duplicate running fight",
+            )? != 0,
+            battle_mode: optional_i32(&fields, 9, "copy start request has duplicate battle mode")?,
+            anim_mode: optional_i32(
+                &fields,
+                10,
+                "copy start request has duplicate animation mode",
+            )?,
+            ex_buffs: fields
+                .get(&12)
+                .into_iter()
+                .flatten()
+                .map(|value| to_i32(*value, "copy start request ex buff is out of range"))
+                .collect::<Result<Vec<_>, _>>()?,
+            match_type: optional_i32(&fields, 15, "copy start request has duplicate match type")?,
+            is_pve_pt_mode: optional_i32(&fields, 17, "copy start request has duplicate pve mode")?
+                != 0,
+        })
+    }
+}
+
+fn optional_i32(
+    fields: &BTreeMap<u32, Vec<u64>>,
+    field: u32,
+    duplicate_error: &'static str,
+) -> Result<i32, ProtocolError> {
+    match fields.get(&field).map(Vec::as_slice).unwrap_or_default() {
+        [] => Ok(0),
+        [value] => to_i32(*value, "typed request field is out of range"),
+        [_first, _second, ..] => Err(ProtocolError::Invalid(duplicate_error)),
+    }
+}
+
+fn to_i32(value: u64, error: &'static str) -> Result<i32, ProtocolError> {
+    i32::try_from(value).map_err(|_| ProtocolError::Invalid(error))
 }
 
 pub struct TMessageCodec;

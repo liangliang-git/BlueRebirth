@@ -8,6 +8,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+blueoath-domain = { path = "../domain" }
 blueoath-transport = { path = "../transport" }
 blueoath-storage = { path = "../storage" }
 blueoath-protocol = { path = "../protocol" }

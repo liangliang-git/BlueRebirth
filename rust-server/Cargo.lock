@@ -36,6 +36,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 
 [[package]]
+name = "blueoath-domain"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "blueoath-protocol"
 version = "0.1.0"
 dependencies = [
@@ -47,6 +55,7 @@ dependencies = [
 name = "blueoath-server"
 version = "0.1.0"
 dependencies = [
+ "blueoath-domain",
  "blueoath-protocol",
  "blueoath-storage",
  "blueoath-transport",
@@ -61,6 +70,7 @@ dependencies = [
 name = "blueoath-storage"
 version = "0.1.0"
 dependencies = [
+ "blueoath-domain",
  "chrono",
  "rusqlite",
  "serde_json",

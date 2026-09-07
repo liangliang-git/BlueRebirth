@@ -4,6 +4,9 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::catalog::*;
+use super::common::error::GameError;
+use super::common::request::RequestContext;
+use super::router::{GameMethod, MethodFamily};
 use super::wire::*;
 use super::*;
 
@@ -123,8 +126,8 @@ where
         return Ok(true);
     }
 
-    let request = TMessageCodec::decode_request(&frame.payload)?;
-    let request_args = request.args.as_deref().unwrap_or_default();
+    let request = RequestContext::from(TMessageCodec::decode_request(&frame.payload)?);
+    let request_args = request.args.as_slice();
     if std::env::var_os("BLUEOATH_TRACE_METHODS").is_some() {
         eprintln!(
             "game-login method={} args={} hex={} f1={} f2={} f3={}",
@@ -139,8 +142,9 @@ where
             decode_varint_u64_field(request_args, 3)
         );
     }
-    let is_user_info = request.method == "user.GetUserInfo";
-    let is_user_login = request.method == "user.UserLogin";
+    let method = GameMethod::parse(&request.method);
+    let is_user_info = method.is("user.GetUserInfo");
+    let is_user_login = method.is("user.UserLogin");
     let is_profile_update = matches!(
         request.method.as_str(),
         "user.SetUserSecretary"
@@ -219,7 +223,7 @@ where
             };
             legacy_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("hero.") => {
+        _ if method.is_family(MethodFamily::Hero) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -325,15 +329,15 @@ where
             }
             Some(Vec::new())
         }
-        _ if request.method.starts_with("user.")
-            || request.method.starts_with("usersvr.")
-            || request.method.starts_with("strategy.")
-            || request.method.starts_with("supportfleet.")
-            || request.method.starts_with("presetfleet.")
-            || request.method.starts_with("milestone.")
-            || request.method.starts_with("supply.")
-            || request.method.starts_with("jopen.")
-            || request.method.starts_with("guide.") =>
+        _ if method.is_family(MethodFamily::User)
+            || method.is_family(MethodFamily::UserServer)
+            || method.is_family(MethodFamily::Strategy)
+            || method.is_family(MethodFamily::SupportFleet)
+            || method.is_family(MethodFamily::PresetFleet)
+            || method.is_family(MethodFamily::Milestone)
+            || method.is_family(MethodFamily::Supply)
+            || method.is_family(MethodFamily::Jopen)
+            || method.is_family(MethodFamily::Guide) =>
         {
             let mut context = GameLoginRequestContext {
                 state,
@@ -351,7 +355,7 @@ where
             };
             base_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("guild.") => {
+        _ if method.is_family(MethodFamily::Guild) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -368,7 +372,7 @@ where
             };
             guild_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("friend.") => {
+        _ if method.is_family(MethodFamily::Friend) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -385,7 +389,7 @@ where
             };
             friend_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("chat.") => {
+        _ if method.is_family(MethodFamily::Chat) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -402,7 +406,7 @@ where
             };
             chat_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("adventure.") => {
+        _ if method.is_family(MethodFamily::Adventure) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -419,7 +423,7 @@ where
             };
             adventure_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("boss.") => {
+        _ if method.is_family(MethodFamily::Boss) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -436,7 +440,7 @@ where
             };
             boss_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("guildbox.") => {
+        _ if method.is_family(MethodFamily::GuildBox) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -453,7 +457,7 @@ where
             };
             guildbox_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("invitescore.") => {
+        _ if method.is_family(MethodFamily::InviteScore) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -529,12 +533,12 @@ where
             };
             misc_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if (request.method.starts_with("exchange.")
-            || request.method.starts_with("foodCompose.")
-            || request.method.starts_with("battlepass.")
-            || request.method.starts_with("activitybattlepass.")
-            || request.method.starts_with("magazine.")
-            || request.method.starts_with("interactionitem."))
+        _ if (method.is_family(MethodFamily::Exchange)
+            || method.is_family(MethodFamily::FoodCompose)
+            || method.is_family(MethodFamily::BattlePass)
+            || method.is_family(MethodFamily::ActivityBattlePass)
+            || method.is_family(MethodFamily::Magazine)
+            || method.is_family(MethodFamily::InteractionItem))
             && !extended_handler::handles(request.method.as_str())
             && !misc_extended_handler::handles(request.method.as_str()) =>
         {
@@ -554,7 +558,7 @@ where
             };
             misc_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("teachingsvr.") => {
+        _ if method.is_family(MethodFamily::TeachingServer) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -571,7 +575,7 @@ where
             };
             teaching_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("outpost.") => {
+        _ if method.is_family(MethodFamily::Outpost) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -588,7 +592,7 @@ where
             };
             outpost_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("shiptask.") => {
+        _ if method.is_family(MethodFamily::ShipTask) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -605,8 +609,8 @@ where
             };
             shiptask_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("sportsmeet.")
-            || request.method.starts_with("sportsmeetrank.") =>
+        _ if method.is_family(MethodFamily::SportsMeet)
+            || method.is_family(MethodFamily::SportsMeetRank) =>
         {
             let mut context = GameLoginRequestContext {
                 state,
@@ -762,8 +766,8 @@ where
                 &rewards,
             ))
         }
-        _ if request.method.starts_with("shop.")
-            || request.method.starts_with("recharge.")
+        _ if method.is_family(MethodFamily::Shop)
+            || method.is_family(MethodFamily::Recharge)
             || request.method == "bag.GetBagInfo"
             || request.method == "bag.CompositeItem"
             || request.method == "bag.SaleBagItem"
@@ -786,10 +790,10 @@ where
             };
             commerce_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("equip.")
-            || request.method.starts_with("equiptestcopy.")
-            || request.method.starts_with("equipnewtestcopy.")
-            || request.method.starts_with("equipactivity.") =>
+        _ if method.is_family(MethodFamily::Equip)
+            || method.is_family(MethodFamily::EquipTestCopy)
+            || method.is_family(MethodFamily::EquipNewTestCopy)
+            || method.is_family(MethodFamily::EquipActivity) =>
         {
             let mut context = GameLoginRequestContext {
                 state,
@@ -807,10 +811,10 @@ where
             };
             equip_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("building.")
-            || request.method.starts_with("build.")
-            || request.method.starts_with("buildnotes.")
-            || request.method.starts_with("discuss.") =>
+        _ if method.is_family(MethodFamily::Building)
+            || method.is_family(MethodFamily::Build)
+            || method.is_family(MethodFamily::BuildNotes)
+            || method.is_family(MethodFamily::Discuss) =>
         {
             let mut context = GameLoginRequestContext {
                 state,
@@ -828,7 +832,7 @@ where
             };
             building_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("buildship.") => {
+        _ if method.is_family(MethodFamily::BuildShip) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -845,9 +849,9 @@ where
             };
             buildship_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("study.")
-            || request.method.starts_with("task.")
-            || request.method.starts_with("bathroom.") =>
+        _ if method.is_family(MethodFamily::Study)
+            || method.is_family(MethodFamily::Task)
+            || method.is_family(MethodFamily::Bathroom) =>
         {
             let mut context = GameLoginRequestContext {
                 state,
@@ -865,9 +869,8 @@ where
             };
             progression_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("matchsvr.")
-            || request.method.starts_with("matchsvr_")
-            || request.method.starts_with("room.")
+        _ if method.is_family(MethodFamily::MatchServer)
+            || method.is_family(MethodFamily::Room)
             || matches!(
                 request.method.as_str(),
                 "battle.CreateRoom"
@@ -898,13 +901,13 @@ where
             };
             coop_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("copy.")
+        _ if method.is_family(MethodFamily::Copy)
             && !matches!(
                 request.method.as_str(),
                 "copy.ChooseSfLv" | "copy.GetCopy" | "copy.UnLockCopy"
             )
-            || request.method.starts_with("mopUp.")
-            || request.method.starts_with("dailycopy.")
+            || method.is_family(MethodFamily::MopUp)
+            || method.is_family(MethodFamily::DailyCopy)
             || request.method == "copyinfo.GetCopyInfo" =>
         {
             let mut context = GameLoginRequestContext {
@@ -923,7 +926,7 @@ where
             };
             battle_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("talentTree.") => {
+        _ if method.is_family(MethodFamily::TalentTree) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -940,7 +943,7 @@ where
             };
             talent_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("tower.") => {
+        _ if method.is_family(MethodFamily::Tower) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -957,7 +960,7 @@ where
             };
             tower_handler::handle(&mut context, request.method.as_str(), request_args)
         }
-        _ if request.method.starts_with("activityTower.") => {
+        _ if method.is_family(MethodFamily::ActivityTower) => {
             let mut context = GameLoginRequestContext {
                 state,
                 account: &mut account,
@@ -1120,15 +1123,22 @@ where
     // Every route emitted by JP client must complete its callback. Some legacy
     // routes have no local state model yet; persist call for later parity work
     // and return valid empty protobuf payload instead of dropping response.
-    if ret.is_none() && is_known_client_route(&request.method) {
-        if let Some(account) = account.as_deref_mut() {
-            account["lastCompatRoute"] = json!({
-                "method": request.method,
-                "args": request_args,
-                "time": current_unix_seconds(),
-            });
+    if ret.is_none() {
+        if method.is_known() {
+            if let Some(account) = account.as_deref_mut() {
+                account["lastCompatRoute"] = json!({
+                    "method": request.method,
+                    "args": request_args,
+                    "time": current_unix_seconds(),
+                });
+            }
+            ret = Some(Vec::new());
+        } else {
+            let error = GameError::UnknownMethod(request.method.clone());
+            response_err = error.client_code();
+            response_err_msg = error.to_string();
+            ret = Some(Vec::new());
         }
-        ret = Some(Vec::new());
     }
     if is_user_login {
         let now = current_unix_seconds();
@@ -1661,108 +1671,4 @@ where
         NetSocketFrameCodec::write(stream, 0, &push).await?;
     }
     Ok(true)
-}
-
-fn is_known_client_route(method: &str) -> bool {
-    const PREFIXES: &[&str] = &[
-        "hero.",
-        "user.",
-        "usersvr.",
-        "strategy.",
-        "supportfleet.",
-        "presetfleet.",
-        "milestone.",
-        "supply.",
-        "jopen.",
-        "guide.",
-        "guild.",
-        "illustrate.",
-        "friend.",
-        "shop.",
-        "bag.",
-        "recharge.",
-        "equip.",
-        "equiptestcopy.",
-        "equipnewtestcopy.",
-        "equipactivity.",
-        "building.",
-        "build.",
-        "buildnotes.",
-        "discuss.",
-        "buildship.",
-        "study.",
-        "task.",
-        "bathroom.",
-        "matchsvr.",
-        "matchsvr_",
-        "room.",
-        "copy.",
-        "mopUp.",
-        "dailycopy.",
-        "talentTree.",
-        "tower.",
-        "activityTower.",
-        "teachingsvr.",
-        "outpost.",
-        "activitybirthday.",
-        "activitychristmasshop.",
-        "activitycodeexchange.",
-        "activityextract.",
-        "activityextractur.",
-        "activityfashion.",
-        "activitypapercut.",
-        "activitysecretcopy.",
-        "activitySSR.",
-        "activitySSRrolls.",
-        "activityvalentineloveletter.",
-        "activityVideo.",
-        "adventure.",
-        "bigactivity.",
-        "boss.",
-        "chat.",
-        "guildbigactivity.",
-        "guildbigactivityrank.",
-        "guildbox.",
-        "guildOffer.",
-        "guildofferrank.",
-        "guildtask.",
-        "guildwar.",
-        "heroawaken.",
-        "invitescore.",
-        "shiptask.",
-        "sportsmeet.",
-        "sportsmeetrank.",
-        "worldevent.",
-        "worldeventrank.",
-        "exchange.",
-        "foodCompose.",
-        "battlepass.",
-        "activitybattlepass.",
-        "magazine.",
-        "interactionitem.",
-        "battle.",
-    ];
-    const EXACT: &[&str] = &[
-        "GetSvrTime",
-        "player.Login",
-        "player.GetUserInfo",
-        "player.GetUserList",
-        "player.CreateUser",
-        "cachedata.CacheData",
-        "archiveCopy.IsLoad",
-        "copyextra.AddCopyRewardCount",
-        "copyextra.UpdateCopyExtraInfo",
-        "prefs.SavePrefs",
-        "statcount.GetStatCount",
-        "sign.Sign",
-        "miniGame.StartMiniGame",
-        "alchemy.StartAlchemy",
-        "repair.RepairHero",
-        "fashion.fashionReplaceReward",
-        "bag.GetBagInfo",
-        "bag.GetNormalTreasureInfo",
-        "bag.GetSelectTreasureInfo",
-        "copyinfo.GetCopyInfo",
-    ];
-    EXACT.contains(&method) || PREFIXES.iter().any(|prefix| method.starts_with(prefix))
 }

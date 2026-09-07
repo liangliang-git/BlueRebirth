@@ -1,7 +1,5 @@
-use blueoath_protocol::*;
 use serde_json::Value;
 
-use super::super::catalog::*;
 use super::*;
 
 pub(super) fn handle<'state, 'account, 'scratch>(
@@ -353,7 +351,15 @@ pub(super) fn handle<'state, 'account, 'scratch>(
             }))
         }
         "copy.StartBase" | "copy.PvpStartBase" => {
-            let copy_id = decode_varint_field(request_args, 2);
+            let start_request = match CopyStartRequest::decode(request_args) {
+                Ok(request) => request,
+                Err(_) => {
+                    *response_err = 1;
+                    *response_err_msg = "copy start request is invalid".to_owned();
+                    return Some(Vec::new());
+                }
+            };
+            let copy_id = start_request.copy_id;
             let requested_hero_groups = decode_start_hero_groups(request_args);
             let known_copy = battle_catalog
                 .map(|catalog| catalog.copies.contains_key(&copy_id))
@@ -403,13 +409,13 @@ pub(super) fn handle<'state, 'account, 'scratch>(
                 }
             };
             let hero_ids = hero_groups.iter().flatten().copied().collect::<Vec<_>>();
-            let ex_buffs = decode_repeated_varint_field(request_args, 12);
-            let is_pve_pt_mode = decode_varint_u64_field(request_args, 17) != 0;
+            let ex_buffs = start_request.ex_buffs.clone();
+            let is_pve_pt_mode = start_request.is_pve_pt_mode;
             let start_options = BattleStartOptions {
-                is_running_fight: decode_varint_u64_field(request_args, 3) != 0,
-                battle_mode: decode_varint_field(request_args, 9),
-                anim_mode: decode_varint_field(request_args, 10),
-                match_type: decode_varint_field(request_args, 15),
+                is_running_fight: start_request.is_running_fight,
+                battle_mode: start_request.battle_mode,
+                anim_mode: start_request.anim_mode,
+                match_type: start_request.match_type,
             };
             if !known_copy || hero_ids.is_empty() {
                 *response_err = 1;

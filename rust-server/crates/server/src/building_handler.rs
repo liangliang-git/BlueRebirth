@@ -1,4 +1,3 @@
-use blueoath_protocol::*;
 use serde_json::Value;
 
 use super::*;

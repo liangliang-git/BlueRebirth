@@ -43,6 +43,34 @@ async fn game_login_session_returns_protobuf_login_response() {
 }
 
 #[tokio::test]
+async fn game_login_unknown_method_returns_explicit_error_response() {
+    let (mut client, mut server) = duplex(4096);
+    let state = ServerState::new("slot-a", "Captain", "1.4.0");
+    let request = TMessageCodec::encode_request(&TRequest {
+        method: "unknown.NotRegistered".to_owned(),
+        callback_handler: 11,
+        ..TRequest::default()
+    });
+    NetSocketFrameCodec::write(&mut client, 0, &request)
+        .await
+        .unwrap();
+
+    assert!(process_game_login_frame(&mut server, &state).await.unwrap());
+    let response = TMessageCodec::decode_response(
+        &NetSocketFrameCodec::read(&mut client)
+            .await
+            .unwrap()
+            .unwrap()
+            .payload,
+    )
+    .unwrap();
+    assert_eq!(response.err, 1);
+    assert_eq!(response.method, "unknown.NotRegistered");
+    assert_eq!(response.callback_handler, 11);
+    assert_eq!(response.ret, Some(Vec::new()));
+}
+
+#[tokio::test]
 async fn game_login_session_returns_player_bootstrap_responses() {
     for method in ["player.GetUserList", "player.CreateUser"] {
         let (mut client, mut server) = duplex(4096);

@@ -24,17 +24,22 @@ Rust server is the canonical local server. Current slice provides:
   bootstrap fields; server-local `gm-mails.json` drives repeatable `mail.GetMailList` and
   `mail.FetchItem`/`mail.FetchAllItems` rewards. Mutations use a serialized candidate-state → SQLite-save → in-memory-commit
   path.
+- `blueoath-domain`: typed profile/hero/equipment/fleet IDs, non-negative resource ledger,
+  domain errors, and database-independent `AccountRepository` transaction contract.
 - Building assignments validate ownership, duplicates, construction status, and
   `config_buildinginfo.db` capacity. `hero.RetireHero` removes dependent fleet/bath/equipment
   state, emits equipment tombstones, and applies `config_ship_main.db` breakdown rewards.
-- `blueoath-storage`: SQLite persistence compatible with existing `profiles` and `accounts` tables;
-  account JSON is stored as opaque data so newer C# fields survive a Rust round trip.
+- `blueoath-storage`: SQLite persistence with startup migrations under `rust-server/migrations/`.
+  New databases create normalized character/hero/equipment/fleet/inventory/battle/task tables,
+  foreign keys, non-negative checks, indexes, WAL, busy timeout, and account revision CAS.
+  Existing JSON snapshot methods remain only as a transition adapter while handlers migrate by domain.
 
 Run checks:
 
 ```powershell
 cargo test --manifest-path .\rust-server\Cargo.toml
 cargo clippy --manifest-path .\rust-server\Cargo.toml --all-targets -- -D warnings
+cargo fmt --manifest-path .\rust-server\Cargo.toml --all -- --check
 ```
 
 Run server:

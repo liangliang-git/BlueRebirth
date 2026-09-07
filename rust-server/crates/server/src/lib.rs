@@ -32,6 +32,7 @@ mod building_state;
 mod buildship_state;
 mod catalog;
 mod catalog_loader;
+pub mod common;
 mod config;
 mod construction_state;
 mod equip_state;
@@ -48,6 +49,7 @@ mod local_protocol;
 mod mopup_state;
 mod projection;
 mod protocol_payload;
+pub mod router;
 mod runtime;
 mod shop_state;
 mod study_state;
@@ -67,6 +69,7 @@ use building_state::*;
 use buildship_state::*;
 use catalog::*;
 use catalog_loader::*;
+use common::clock::{Clock, SystemClock};
 use config::{normalize_multiplier, normalize_profile_id, scale_reward, DEFAULT_PROFILE_ID};
 pub use config::{
     BattleOutcome, Formation, ServerConfig, ServerConfigError, ServerState, Ship, Stage,
@@ -246,10 +249,7 @@ where
 }
 
 fn current_unix_seconds() -> u32 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs().min(u64::from(u32::MAX)) as u32)
-        .unwrap_or(0)
+    SystemClock.now()
 }
 
 #[cfg(test)]

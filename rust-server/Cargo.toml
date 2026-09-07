@@ -1,5 +1,11 @@
 [workspace]
-members = ["crates/transport", "crates/server", "crates/storage", "crates/protocol"]
+members = [
+    "crates/transport",
+    "crates/server",
+    "crates/storage",
+    "crates/protocol",
+    "crates/domain",
+]
 resolver = "2"
 
 [workspace.lints.rust]
