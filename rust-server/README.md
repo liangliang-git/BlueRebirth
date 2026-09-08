@@ -38,6 +38,12 @@ Rust server is the canonical local server. Current slice provides:
   the protocol/socket boundary. Catalog references and nested drop pools are validated before
   listeners accept traffic.
 
+Server feature code is organized under `crates/server/src/features/`: `user`, `hero`, `equip`,
+`battle`, `copy`, `building`, `progression`, `task`, `tower`, `shop`, `activity`, `social`, and
+`cooperation`. Each migrated boundary keeps service orchestration separate from typed state;
+`game_login.rs` is only the protocol dispatcher and module wiring. JSON account fixtures remain
+test-only, while catalog JSON is parsed at startup into validated catalog models.
+
 Run checks:
 
 ```powershell
