@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::*;
 
 #[cfg(test)]
-pub(super) fn study_skill_state(account: &mut Value, hero_id: u64, skill_id: i32) -> bool {
+pub(crate) fn study_skill_state(account: &mut Value, hero_id: u64, skill_id: i32) -> bool {
     if hero_id == 0 || skill_id <= 0 {
         return false;
     }
@@ -48,7 +48,7 @@ pub(super) fn study_skill_state(account: &mut Value, hero_id: u64, skill_id: i32
 /// TStopStudyPSkillArg contains only HeroId. Resolve the active study row so
 /// CancelStudyPSkill and EndStudyPSkill operate on the client protocol shape.
 #[cfg(test)]
-pub(super) fn resolve_study_skill_id(
+pub(crate) fn resolve_study_skill_id(
     account: &Value,
     hero_id: u64,
     requested_skill_id: i32,
@@ -71,7 +71,7 @@ pub(super) fn resolve_study_skill_id(
 }
 
 #[cfg(test)]
-pub(super) fn study_info_payload(account: &Value, now: u32) -> Vec<u8> {
+pub(crate) fn study_info_payload(account: &Value, now: u32) -> Vec<u8> {
     let mut out = Vec::new();
     append_varint_field(&mut out, 1, 2);
     if let Some(progress) = account
@@ -109,7 +109,7 @@ pub(super) fn study_info_payload(account: &Value, now: u32) -> Vec<u8> {
 }
 
 #[cfg(test)]
-pub(super) fn start_study_state(
+pub(crate) fn start_study_state(
     account: &mut Value,
     hero_id: u64,
     skill_id: i32,
@@ -156,7 +156,7 @@ pub(super) fn start_study_state(
 }
 
 #[cfg(test)]
-pub(super) fn finish_study_state(
+pub(crate) fn finish_study_state(
     account: &mut Value,
     hero_id: u64,
     skill_id: i32,
@@ -166,7 +166,7 @@ pub(super) fn finish_study_state(
 }
 
 #[cfg(test)]
-pub(super) fn finish_study_state_force(
+pub(crate) fn finish_study_state_force(
     account: &mut Value,
     hero_id: u64,
     skill_id: i32,
@@ -176,7 +176,7 @@ pub(super) fn finish_study_state_force(
 }
 
 #[cfg(test)]
-pub(super) fn finish_study_state_inner(
+pub(crate) fn finish_study_state_inner(
     account: &mut Value,
     hero_id: u64,
     skill_id: i32,

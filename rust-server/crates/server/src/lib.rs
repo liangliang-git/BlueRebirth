@@ -54,8 +54,6 @@ mod projection;
 mod protocol_payload;
 pub mod router;
 mod runtime;
-#[path = "features/progression/study_state.rs"]
-mod study_state;
 #[path = "common/wire.rs"]
 mod wire;
 
@@ -92,6 +90,8 @@ use features::copy::mopup_state::mop_up_pass_rets;
 use features::copy::mopup_state::*;
 #[cfg(test)]
 use features::equip::state::*;
+#[cfg(test)]
+use features::progression::study_state::*;
 use features::shop::state::*;
 use features::task::state::*;
 pub use frame_service::process_frame;
@@ -104,8 +104,6 @@ use hero_state::*;
 pub use local_protocol::dispatch;
 use projection::*;
 use protocol_payload::*;
-#[cfg(test)]
-use study_state::*;
 #[cfg(test)]
 use wire::skip_wire;
 use wire::{

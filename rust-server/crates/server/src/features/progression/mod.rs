@@ -6,5 +6,5 @@ use blueoath_protocol::*;
 
 #[path = "service.rs"]
 pub(crate) mod service;
-#[allow(unused_imports)]
-pub(crate) use crate::study_state;
+#[path = "study_state.rs"]
+pub(crate) mod study_state;
