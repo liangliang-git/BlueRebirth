@@ -39,8 +39,7 @@ use super::{
     settle_mop_up_with_config, settle_support_state, ship_attributes_for_hero,
     ship_attributes_for_template, shop_costs_from_value, shop_info_payload, start_construction,
     start_study_state, start_support_state, story_memory_payload, study_info_payload,
-    study_skill_state, sync_achievement_points, sync_typed_battle_state,
-    sync_typed_daily_copy_state, sync_typed_preset_fleet_state, task_completed, task_info_payload,
+    study_skill_state, sync_achievement_points, task_completed, task_info_payload,
     task_info_payload_from_typed_account, update_bathroom_state, update_building_assignments,
     update_mop_up_state, validate_battle_attack, BattleCatalog, BattleCopy, BattleEnemy,
     BattleFleetReward, BuildShipCatalog, BuildingCatalog, BuildingConfig, ChapterCatalog,
@@ -88,7 +87,6 @@ async fn typed_user_routes_update_account_state_without_json_account() {
     process_game_login_frame_with_catalogs_typed_mut(
         &mut server,
         &state,
-        None,
         Some(&mut account),
         &catalogs,
     )
@@ -114,7 +112,6 @@ async fn typed_user_routes_update_account_state_without_json_account() {
     process_game_login_frame_with_catalogs_typed_mut(
         &mut server,
         &state,
-        None,
         Some(&mut account),
         &catalogs,
     )
@@ -122,96 +119,6 @@ async fn typed_user_routes_update_account_state_without_json_account() {
     .unwrap();
     let _ = NetSocketFrameCodec::read(&mut client).await.unwrap();
     assert_eq!(account.character.head, 1021052);
-}
-
-#[test]
-fn typed_battle_state_tracks_start_partial_pass_and_final_victory() {
-    let mut account = NewAccountFactory::create(ProfileId::new("typed-battle").unwrap(), "Battle");
-    let mut start_args = Vec::new();
-    append_varint_field(&mut start_args, 2, 10001);
-    let legacy_start = json!({
-        "battleSession": {
-            "copyId": 10001,
-            "remainingFleetIds": [1, 2]
-        }
-    });
-
-    sync_typed_battle_state(
-        Some(&mut account),
-        Some(&legacy_start),
-        "copy.StartBase",
-        &start_args,
-        100,
-    );
-    let active = account
-        .battle
-        .active
-        .as_ref()
-        .expect("typed battle started");
-    assert_eq!(active.copy_id.get(), 10001);
-    assert_eq!(active.current_fleet, 1);
-    assert_eq!(active.expires_at, 1900);
-
-    let mut partial_args = Vec::new();
-    append_varint_field(&mut partial_args, 8, 3);
-    sync_typed_battle_state(
-        Some(&mut account),
-        Some(&legacy_start),
-        "copy.PassBase",
-        &partial_args,
-        101,
-    );
-    assert_eq!(account.battle.active.as_ref().unwrap().current_fleet, 2);
-    assert!(account.battle.passed_copies.is_empty());
-
-    let legacy_finished = json!({ "battleSession": null });
-    sync_typed_battle_state(
-        Some(&mut account),
-        Some(&legacy_finished),
-        "copy.PassBase",
-        &partial_args,
-        102,
-    );
-    assert!(account.battle.active.is_none());
-    assert!(account
-        .battle
-        .passed_copies
-        .iter()
-        .any(|copy_id| copy_id.get() == 10001));
-}
-
-#[test]
-fn typed_battle_state_clears_active_session_on_defeat() {
-    let mut account =
-        NewAccountFactory::create(ProfileId::new("typed-battle-loss").unwrap(), "Battle");
-    let mut start_args = Vec::new();
-    append_varint_field(&mut start_args, 2, 10001);
-    let legacy_start = json!({
-        "battleSession": {
-            "copyId": 10001,
-            "remainingFleetIds": [1]
-        }
-    });
-    sync_typed_battle_state(
-        Some(&mut account),
-        Some(&legacy_start),
-        "copy.StartBase",
-        &start_args,
-        100,
-    );
-
-    let mut defeat_args = Vec::new();
-    append_varint_field(&mut defeat_args, 8, 9);
-    let legacy_finished = json!({ "battleSession": null });
-    sync_typed_battle_state(
-        Some(&mut account),
-        Some(&legacy_finished),
-        "copy.PassBase",
-        &defeat_args,
-        101,
-    );
-    assert!(account.battle.active.is_none());
-    assert!(account.battle.passed_copies.is_empty());
 }
 
 #[test]
@@ -296,35 +203,6 @@ fn typed_preset_fleet_round_trips_and_rejects_unowned_heroes() {
     let mut invalid = value.clone();
     invalid.fleets[0].hero_ids = vec![9999];
     assert!(!set_preset_fleet_on_typed_account(&mut account, &invalid));
-
-    let legacy = json!({
-        "presetFleet": {
-            "presetfleet": [{
-                "Name": "Legacy preset",
-                "heroList": [1],
-                "exHeroList": [],
-                "modeId": 2,
-                "strategyId": 8
-            }],
-            "NameNum": 6,
-            "redDot": 0
-        }
-    });
-    assert!(sync_typed_preset_fleet_state(&mut account, &legacy));
-    assert_eq!(
-        preset_fleet_info_from_typed_account(&account),
-        PresetFleetInfo {
-            fleets: vec![PresetFleet {
-                name: "Legacy preset".to_owned(),
-                hero_ids: vec![1],
-                ex_hero_ids: Vec::new(),
-                mode_id: 2,
-                strategy_id: 8,
-            }],
-            name_num: 6,
-            red_dot: 0,
-        }
-    );
 }
 
 #[test]
@@ -591,36 +469,6 @@ fn typed_daily_copy_projection_resets_stale_challenge_counts() {
 }
 
 #[test]
-fn typed_daily_copy_state_syncs_attempts_and_passed_copies() {
-    let mut account =
-        NewAccountFactory::create(ProfileId::new("typed-daily-sync").unwrap(), "Daily");
-    let legacy = json!({
-        "dailyCopy": {
-            "resetDay": 2,
-            "chapters": [{
-                "chapterId": 7,
-                "challengeTimes": 4,
-                "passCopy": [9001]
-            }]
-        }
-    });
-    assert!(sync_typed_daily_copy_state(&mut account, &legacy, 172_800));
-    assert_eq!(account.daily_copy.reset_day, 2);
-    assert_eq!(
-        account
-            .daily_copy
-            .challenge_times
-            .get(&blueoath_domain::ChapterId::new(7).unwrap()),
-        Some(&4)
-    );
-    assert!(account
-        .battle
-        .passed_copies
-        .iter()
-        .any(|copy_id| copy_id.get() == 9001));
-}
-
-#[test]
 fn equipment_projection_keeps_rise_common_materials_and_hero_effects() {
     let account = json!({
         "dock": {"heroes": [{
@@ -674,7 +522,6 @@ async fn teacher_rank_returns_typed_current_user_row() {
     process_game_login_frame_with_catalogs_typed_mut(
         &mut server,
         &state,
-        None,
         Some(&mut account),
         &catalogs,
     )
@@ -718,7 +565,6 @@ async fn friend_update_user_state_returns_typed_status_event() {
     process_game_login_frame_with_catalogs_typed_mut(
         &mut server,
         &state,
-        None,
         Some(&mut account),
         &catalogs,
     )
@@ -1991,15 +1837,9 @@ async fn typed_coop_route_test_request(
         .await
         .unwrap();
     let catalogs = GameLoginCatalogs::empty();
-    process_game_login_frame_with_catalogs_typed_mut(
-        &mut server,
-        state,
-        None,
-        Some(account),
-        &catalogs,
-    )
-    .await
-    .unwrap();
+    process_game_login_frame_with_catalogs_typed_mut(&mut server, state, Some(account), &catalogs)
+        .await
+        .unwrap();
     drop(server);
     let mut responses = Vec::new();
     while let Some(frame) = NetSocketFrameCodec::read(&mut client).await.unwrap() {
@@ -2027,15 +1867,9 @@ async fn typed_battle_route_test_request(
         .unwrap();
     let mut catalogs = GameLoginCatalogs::empty();
     catalogs.battle = Some(catalog);
-    process_game_login_frame_with_catalogs_typed_mut(
-        &mut server,
-        state,
-        None,
-        Some(account),
-        &catalogs,
-    )
-    .await
-    .unwrap();
+    process_game_login_frame_with_catalogs_typed_mut(&mut server, state, Some(account), &catalogs)
+        .await
+        .unwrap();
     drop(server);
     let mut responses = Vec::new();
     while let Some(frame) = NetSocketFrameCodec::read(&mut client).await.unwrap() {
@@ -2061,15 +1895,9 @@ async fn typed_route_test_request(
         .await
         .unwrap();
     let catalogs = GameLoginCatalogs::empty();
-    process_game_login_frame_with_catalogs_typed_mut(
-        &mut server,
-        state,
-        None,
-        Some(account),
-        &catalogs,
-    )
-    .await
-    .unwrap();
+    process_game_login_frame_with_catalogs_typed_mut(&mut server, state, Some(account), &catalogs)
+        .await
+        .unwrap();
     drop(server);
     let mut responses = Vec::new();
     while let Some(frame) = NetSocketFrameCodec::read(&mut client).await.unwrap() {
@@ -2098,15 +1926,9 @@ async fn typed_star_reward_route_test_request(
     let mut catalogs = GameLoginCatalogs::empty();
     catalogs.chapters = Some(chapter_catalog);
     catalogs.tasks = Some(task_catalog);
-    process_game_login_frame_with_catalogs_typed_mut(
-        &mut server,
-        state,
-        None,
-        Some(account),
-        &catalogs,
-    )
-    .await
-    .unwrap();
+    process_game_login_frame_with_catalogs_typed_mut(&mut server, state, Some(account), &catalogs)
+        .await
+        .unwrap();
     drop(server);
     let mut responses = Vec::new();
     while let Some(frame) = NetSocketFrameCodec::read(&mut client).await.unwrap() {
@@ -2435,15 +2257,9 @@ async fn guild_route_test_request(
         .await
         .unwrap();
     let catalogs = GameLoginCatalogs::empty();
-    process_game_login_frame_with_catalogs_typed_mut(
-        &mut server,
-        state,
-        None,
-        Some(account),
-        &catalogs,
-    )
-    .await
-    .unwrap();
+    process_game_login_frame_with_catalogs_typed_mut(&mut server, state, Some(account), &catalogs)
+        .await
+        .unwrap();
     drop(server);
     let mut responses = Vec::new();
     while let Some(frame) = NetSocketFrameCodec::read(&mut client).await.unwrap() {
@@ -4114,7 +3930,6 @@ async fn hero_add_exp_route_persists_level_and_emits_refreshes() {
     assert!(process_game_login_frame_with_catalogs_typed_mut(
         &mut server,
         &state,
-        None,
         Some(&mut typed_account),
         &catalogs,
     )
@@ -4262,7 +4077,6 @@ async fn study_speedup_route_refreshes_hero_study_and_bag() {
     assert!(process_game_login_frame_with_catalogs_typed_mut(
         &mut server,
         &state,
-        None,
         Some(&mut typed_account),
         &catalogs,
     )
@@ -4294,7 +4108,6 @@ async fn study_speedup_route_refreshes_hero_study_and_bag() {
     assert!(process_game_login_frame_with_catalogs_typed_mut(
         &mut server,
         &state,
-        None,
         Some(&mut typed_account),
         &catalogs,
     )

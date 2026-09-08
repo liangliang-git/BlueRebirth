@@ -93,8 +93,6 @@ pub(crate) use game_login::building_handler::handle_typed as handle_typed_buildi
 #[cfg(test)]
 use game_login::process_game_login_frame_payload_with_catalogs_typed_mut;
 use game_login::process_game_login_frame_payload_with_typed_account;
-#[cfg(test)]
-pub(crate) use game_login::sync_typed_battle_state;
 use guild_state::*;
 use hero_state::*;
 pub use local_protocol::dispatch;
@@ -223,7 +221,6 @@ where
 async fn process_game_login_frame_with_catalogs_typed_mut<S>(
     stream: &mut S,
     state: &ServerState,
-    account: Option<&mut Value>,
     typed_account: Option<&mut blueoath_domain::AccountState>,
     catalogs: &GameLoginCatalogs<'_>,
 ) -> Result<bool, ServerError>
@@ -236,7 +233,6 @@ where
     process_game_login_frame_payload_with_catalogs_typed_mut(
         stream,
         state,
-        account,
         typed_account,
         frame,
         catalogs,

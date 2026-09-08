@@ -1,6 +1,5 @@
 use blueoath_domain::AccountState;
 #[cfg(test)]
-use blueoath_domain::{ChapterId, CopyId, FleetId};
 use blueoath_game::BattleService;
 use blueoath_protocol::*;
 use blueoath_transport::NetSocketFrameCodec;
@@ -274,7 +273,6 @@ fn handler_payload(result: HandlerResult, method: &str) -> Option<Vec<u8>> {
 pub(super) async fn process_game_login_frame_payload_with_catalogs_typed_mut<S>(
     stream: &mut S,
     state: &ServerState,
-    #[cfg(test)] mut account: Option<&mut Value>,
     mut typed_account: Option<&mut AccountState>,
     frame: blueoath_transport::NetSocketFrame,
     catalogs: &GameLoginCatalogs<'_>,
@@ -282,8 +280,8 @@ pub(super) async fn process_game_login_frame_payload_with_catalogs_typed_mut<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    #[cfg(not(test))]
-    let account: Option<&mut Value> = None;
+    #[allow(unused_mut)]
+    let mut account: Option<&mut Value> = None;
 
     let GameLoginCatalogs {
         fashion: fashion_catalog,
@@ -2543,7 +2541,6 @@ where
     return process_game_login_frame_payload_with_catalogs_typed_mut(
         stream,
         state,
-        None,
         Some(typed_account),
         frame,
         catalogs,
@@ -2704,167 +2701,6 @@ fn legacy_only_method(method: &str) -> bool {
             | MethodFamily::Copy
             | MethodFamily::DailyCopy
     )
-}
-
-#[cfg(test)]
-pub(super) fn sync_typed_battle_state(
-    typed_account: Option<&mut AccountState>,
-    legacy_account: Option<&Value>,
-    method: &str,
-    request_args: &[u8],
-    now: u32,
-) {
-    sync_typed_battle_state_with_catalog(
-        typed_account,
-        legacy_account,
-        method,
-        request_args,
-        None,
-        now,
-    );
-}
-
-#[cfg(test)]
-fn sync_typed_battle_state_with_catalog(
-    typed_account: Option<&mut AccountState>,
-    legacy_account: Option<&Value>,
-    method: &str,
-    request_args: &[u8],
-    battle_catalog: Option<&BattleCatalog>,
-    now: u32,
-) {
-    let Some(typed_account) = typed_account else {
-        return;
-    };
-
-    match method {
-        "copy.StartBase" | "copy.PvpStartBase" => {
-            let Ok(request) = CopyStartRequest::decode(request_args) else {
-                return;
-            };
-            if request.copy_id <= 0 || typed_account.battle.active.is_some() {
-                return;
-            }
-            let session = legacy_account
-                .and_then(|account| account.get("battleSession"))
-                .and_then(Value::as_object)
-                .filter(|session| {
-                    session.get("copyId").and_then(Value::as_i64)
-                        == Some(i64::from(request.copy_id))
-                });
-            let fleet_id = session
-                .and_then(|session| session.get("remainingFleetIds"))
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_u64)
-                .find(|fleet_id| *fleet_id > 0)
-                .or_else(|| typed_account.fleet.fleets.keys().next().map(|id| id.get()));
-            let (Some(chapter_id), Some(copy_id), Some(fleet_id)) = (
-                ChapterId::new(request.copy_id as u64).ok(),
-                CopyId::new(request.copy_id as u64).ok(),
-                fleet_id.and_then(|id| FleetId::new(id).ok()),
-            ) else {
-                return;
-            };
-            let hero_ids = session
-                .and_then(|session| session.get("heroIds"))
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_u64)
-                .collect::<Vec<_>>();
-            let hero_ids = if hero_ids.is_empty() {
-                typed_account
-                    .fleet
-                    .fleets
-                    .get(&fleet_id)
-                    .map(|fleet| fleet.members.iter().map(|id| id.get()).collect::<Vec<_>>())
-                    .unwrap_or_default()
-            } else {
-                hero_ids
-            };
-            let supply_ok = battle_catalog.is_none()
-                || consume_battle_supply_typed(
-                    typed_account,
-                    battle_catalog,
-                    request.copy_id,
-                    &hero_ids,
-                    1,
-                );
-            if supply_ok
-                && BattleService::start(
-                    typed_account,
-                    chapter_id,
-                    copy_id,
-                    fleet_id,
-                    u64::from(now),
-                )
-                .is_ok()
-            {
-                if let Some(active) = typed_account.battle.active.as_mut() {
-                    active.expires_at = u64::from(now).saturating_add(1_800);
-                    active.remaining_fleet_ids = session
-                        .and_then(|session| session.get("remainingFleetIds"))
-                        .and_then(Value::as_array)
-                        .into_iter()
-                        .flatten()
-                        .filter_map(Value::as_u64)
-                        .filter_map(|id| u32::try_from(id).ok())
-                        .filter(|id| *id > 0)
-                        .collect();
-                    active.hero_ids = hero_ids
-                        .iter()
-                        .filter_map(|id| blueoath_domain::HeroId::new(*id).ok())
-                        .collect();
-                    active.attack_count = session
-                        .and_then(|session| session.get("attackCount"))
-                        .and_then(Value::as_u64)
-                        .and_then(|value| u32::try_from(value).ok())
-                        .unwrap_or_default();
-                }
-            }
-        }
-        "copy.PassBase" => {
-            let Some(active) = typed_account.battle.active.as_ref() else {
-                return;
-            };
-            let copy_id = active.copy_id;
-            let grade = decode_battle_pass_result(request_args).grade;
-            let victory = grade <= 0 || grade < 9;
-            let session_finished = legacy_account
-                .and_then(|account| account.get("battleSession"))
-                .is_none_or(Value::is_null);
-            if session_finished {
-                let _ = BattleService::settle(typed_account, copy_id, victory);
-            } else if victory {
-                if let Some(active) = typed_account.battle.active.as_mut() {
-                    let remaining = legacy_account
-                        .and_then(|account| account.get("battleSession"))
-                        .and_then(|session| session.get("remainingFleetIds"))
-                        .and_then(Value::as_array)
-                        .into_iter()
-                        .flatten()
-                        .filter_map(Value::as_u64)
-                        .filter_map(|id| u32::try_from(id).ok())
-                        .filter(|id| *id > 0)
-                        .collect::<Vec<_>>();
-                    if let Some(next_fleet) = remaining
-                        .first()
-                        .copied()
-                        .filter(|next| *next != active.current_fleet)
-                    {
-                        active.current_fleet = next_fleet;
-                    } else {
-                        active.current_fleet = active.current_fleet.saturating_add(1);
-                    }
-                    active.remaining_fleet_ids = remaining;
-                    active.revision = active.revision.saturating_add(1);
-                }
-            }
-        }
-        _ => {}
-    }
 }
 
 #[cfg(test)]
