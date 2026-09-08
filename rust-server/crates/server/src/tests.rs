@@ -2641,14 +2641,25 @@ async fn battle_pass_route_persists_client_time_and_hp() {
     );
     catalog.supply_cost_by_copy.insert(5011, (10, 0));
     let state = ServerState::new("battle-pass-route", "test", "1.4.0");
-    let mut account = default_account_snapshot("battle-pass-route", "test", 100);
-    account["character"]["supply"] = json!(100);
-    account["fleet"]["tactics"] = json!([{"heroInfo":[1]}]);
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("battle-pass-route").unwrap(), "test");
+    account
+        .resources
+        .debit(CurrencyKind::Supply, 9_900)
+        .unwrap();
+    account
+        .fleet
+        .fleets
+        .entry(FleetId::new(1).unwrap())
+        .or_default()
+        .members
+        .push(HeroId::new(1).unwrap());
 
     let mut start = Vec::new();
     append_varint_field(&mut start, 2, 5011);
     let start_responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start).await;
+        typed_battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start)
+            .await;
     assert!(start_responses
         .iter()
         .any(|response| response.method == "copy.StartBase" && response.err == 0));
@@ -2659,21 +2670,22 @@ async fn battle_pass_route_persists_client_time_and_hp() {
     append_varint_field(&mut attack, 3, 1);
     append_varint_field(&mut attack, 4, 900);
     let attack_responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.AttackBase", attack).await;
+        typed_battle_route_test_request(&mut account, &state, &catalog, "copy.AttackBase", attack)
+            .await;
     assert!(attack_responses
         .iter()
         .any(|response| response.method == "copy.AttackBase" && response.err == 0));
 
     let pass = battle_pass_args(5011, 2, 37, 1101, 1, 777);
     let pass_responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.PassBase", pass).await;
+        typed_battle_route_test_request(&mut account, &state, &catalog, "copy.PassBase", pass)
+            .await;
     assert!(pass_responses
         .iter()
         .any(|response| response.method == "copy.PassBase" && response.err == 0));
-    assert_eq!(account["dock"]["heroes"][0]["curHp"], 777);
-    assert!(account["battleSession"].is_null());
-    assert_eq!(account["copyProgress"]["records"][0]["grade"], 2);
-    assert_eq!(account["copyProgress"]["records"][0]["passTime"], 37);
+    assert_eq!(account.dock.heroes[&HeroId::new(1).unwrap()].hp, 777);
+    assert!(account.battle.active.is_none());
+    assert_eq!(account.battle.records[0].pass_time, 37);
 }
 
 #[tokio::test]
@@ -2694,11 +2706,20 @@ async fn battle_pass_route_settles_only_after_all_enemy_fleets() {
     catalog.supply_cost_by_copy.insert(5012, (0, 0));
 
     let state = ServerState::new("battle-pass-multi-fleet", "test", "1.4.0");
-    let mut account = default_account_snapshot("battle-pass-multi-fleet", "test", 100);
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("battle-pass-multi-fleet").unwrap(), "test");
+    account
+        .fleet
+        .fleets
+        .entry(FleetId::new(1).unwrap())
+        .or_default()
+        .members
+        .push(HeroId::new(1).unwrap());
     let mut start = Vec::new();
     append_varint_field(&mut start, 2, 5012);
     let start_responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start).await;
+        typed_battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start)
+            .await;
     assert!(start_responses
         .iter()
         .any(|response| response.method == "copy.StartBase" && response.err == 0));
@@ -2709,17 +2730,22 @@ async fn battle_pass_route_settles_only_after_all_enemy_fleets() {
     let mut first_fleet = Vec::new();
     append_varint_field(&mut first_fleet, 1, 1101);
     append_message_field(&mut first_pass, 20, &first_fleet);
-    let first_responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.PassBase", first_pass)
-            .await;
+    let first_responses = typed_battle_route_test_request(
+        &mut account,
+        &state,
+        &catalog,
+        "copy.PassBase",
+        first_pass,
+    )
+    .await;
     assert!(first_responses
         .iter()
         .any(|response| response.method == "copy.PassBase" && response.err == 0));
-    assert_eq!(account["battleSession"]["remainingFleetIds"], json!([1102]));
-    assert!(account["copyProgress"]["records"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        account.battle.active.as_ref().unwrap().remaining_fleet_ids,
+        vec![1102]
+    );
+    assert!(account.battle.records.is_empty());
 
     let mut second_pass = Vec::new();
     append_varint_field(&mut second_pass, 1, 1);
@@ -2727,14 +2753,22 @@ async fn battle_pass_route_settles_only_after_all_enemy_fleets() {
     let mut second_fleet = Vec::new();
     append_varint_field(&mut second_fleet, 1, 1102);
     append_message_field(&mut second_pass, 20, &second_fleet);
-    let second_responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.PassBase", second_pass)
-            .await;
+    let second_responses = typed_battle_route_test_request(
+        &mut account,
+        &state,
+        &catalog,
+        "copy.PassBase",
+        second_pass,
+    )
+    .await;
     assert!(second_responses
         .iter()
         .any(|response| response.method == "copy.PassBase" && response.err == 0));
-    assert!(account["battleSession"].is_null());
-    assert_eq!(account["seaProgress"]["records"][0]["copyId"], json!(5012));
+    assert!(account.battle.active.is_none());
+    assert!(account
+        .battle
+        .passed_copies
+        .contains(&blueoath_domain::CopyId::new(5012).unwrap()));
 }
 
 #[tokio::test]

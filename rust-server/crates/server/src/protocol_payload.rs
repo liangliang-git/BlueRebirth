@@ -128,6 +128,7 @@ pub(super) struct BattlePassResult {
     pub(super) mvp_hero_id: Option<u64>,
     pub(super) shipwrecked_ids: std::collections::HashSet<u64>,
     pub(super) heroes: Vec<BattleHeroResult>,
+    pub(super) passed_fleet_ids: Vec<u64>,
     pub(super) damage: i32,
 }
 
@@ -146,6 +147,7 @@ pub(super) fn battle_pass_result_from_request(
         grade: request.grade,
         battle_time: request.battle_time,
         mvp_hero_id: request.mvp_hero_id,
+        passed_fleet_ids: request.passed_fleet_ids.clone(),
         damage: request.damage,
         ..BattlePassResult::default()
     };

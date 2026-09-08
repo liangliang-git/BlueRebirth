@@ -251,7 +251,44 @@ pub(super) fn handle_typed_with_catalog(
                 ));
             };
             let result = battle_pass_result_from_request(&request);
+            save_typed_battle_hero_hp(account, &result.heroes, &hero_ids);
             let grade = if result.grade > 0 { result.grade } else { 3 };
+            let passed_fleet_ids = result.passed_fleet_ids.clone();
+            let remaining_fleet_ids = account
+                .battle
+                .active
+                .as_ref()
+                .map(|session| session.remaining_fleet_ids.clone())
+                .unwrap_or_default();
+            if !passed_fleet_ids.is_empty() && !remaining_fleet_ids.is_empty() {
+                if passed_fleet_ids.iter().any(|fleet_id| {
+                    !remaining_fleet_ids.contains(&u32::try_from(*fleet_id).unwrap_or(0))
+                }) {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "battle pass fleet is not active",
+                    ));
+                }
+                let remaining_fleet_ids = remaining_fleet_ids
+                    .into_iter()
+                    .filter(|fleet_id| !passed_fleet_ids.contains(&u64::from(*fleet_id)))
+                    .collect::<Vec<_>>();
+                if !remaining_fleet_ids.is_empty() {
+                    if let Some(active) = account.battle.active.as_mut() {
+                        active.remaining_fleet_ids = remaining_fleet_ids.clone();
+                        active.current_fleet = remaining_fleet_ids[0];
+                    }
+                    return HandlerResult::Reply(Response::raw(
+                        method,
+                        battle_pass_payload_with_rewards(
+                            i32::try_from(copy_id.get()).unwrap_or_default(),
+                            false,
+                            grade,
+                            result.battle_time,
+                            &[],
+                        ),
+                    ));
+                }
+            }
             let first_pass = BattleService::settle_at(
                 account,
                 copy_id,
@@ -831,6 +868,29 @@ fn apply_typed_sweep_experience(
         };
         let gained = scale_reward(ship_exp, mood_multiplier).max(0) as u64;
         hero.exp = hero.exp.saturating_add(gained);
+    }
+}
+
+fn save_typed_battle_hero_hp(
+    account: &mut blueoath_domain::AccountState,
+    heroes: &[BattleHeroResult],
+    allowed_hero_ids: &[blueoath_domain::HeroId],
+) {
+    for result in heroes {
+        if result.hero_id == 0
+            || (!allowed_hero_ids.is_empty()
+                && !allowed_hero_ids
+                    .iter()
+                    .any(|hero_id| hero_id.get() == result.hero_id))
+        {
+            continue;
+        }
+        let Ok(hero_id) = blueoath_domain::HeroId::new(result.hero_id) else {
+            continue;
+        };
+        if let Some(hero) = account.dock.heroes.get_mut(&hero_id) {
+            hero.hp = u64::try_from(result.hp.max(0)).unwrap_or_default();
+        }
     }
 }
 
