@@ -880,25 +880,44 @@ impl AccountState {
             if hero.level == 0 {
                 return Err(DomainError::InvalidState("hero level must be positive"));
             }
-            if hero
-                .equip_slots
-                .iter()
-                .flatten()
-                .any(|id| !self.dock.equipments.contains_key(id))
-            {
+            let mut equipped_ids = BTreeSet::new();
+            if hero.equip_slots.iter().flatten().any(|id| {
+                !equipped_ids.insert(*id)
+                    || !self.dock.equipments.contains_key(id)
+                    || self
+                        .dock
+                        .equipments
+                        .get(id)
+                        .is_some_and(|equipment| equipment.hero_id != Some(hero.id))
+            }) {
                 return Err(DomainError::InvalidState(
-                    "hero references missing equipment",
+                    "hero equipment slots are invalid",
                 ));
             }
         }
         for equipment in self.dock.equipments.values() {
             if let Some(hero_id) = equipment.hero_id {
-                if !self.dock.heroes.contains_key(&hero_id) {
+                if !self.dock.heroes.contains_key(&hero_id)
+                    || !self
+                        .dock
+                        .heroes
+                        .get(&hero_id)
+                        .is_some_and(|hero| hero.equip_slots.contains(&Some(equipment.id)))
+                {
                     return Err(DomainError::InvalidState(
-                        "equipment references missing hero",
+                        "equipment hero ownership is invalid",
                     ));
                 }
             }
+        }
+        if self
+            .character
+            .secretary_id
+            .is_some_and(|hero_id| !self.dock.heroes.contains_key(&hero_id))
+        {
+            return Err(DomainError::InvalidState(
+                "secretary references missing hero",
+            ));
         }
         for fleet in self.fleet.fleets.values() {
             if fleet.members.iter().collect::<BTreeSet<_>>().len() != fleet.members.len() {
@@ -915,9 +934,15 @@ impl AccountState {
             }
         }
         for preset in &self.fleet.presets {
+            let all_hero_ids = preset
+                .hero_ids
+                .iter()
+                .chain(preset.ex_hero_ids.iter())
+                .collect::<BTreeSet<_>>();
             if preset.hero_ids.iter().collect::<BTreeSet<_>>().len() != preset.hero_ids.len()
                 || preset.ex_hero_ids.iter().collect::<BTreeSet<_>>().len()
                     != preset.ex_hero_ids.len()
+                || all_hero_ids.len() != preset.hero_ids.len() + preset.ex_hero_ids.len()
                 || preset
                     .hero_ids
                     .iter()
@@ -1194,8 +1219,8 @@ pub trait AccountRepository {
 #[cfg(test)]
 mod tests {
     use super::{
-        CurrencyKind, DomainError, HeroId, NewAccountFactory, ProfileId, ResourceLedger,
-        SupportEntryState,
+        CurrencyKind, DomainError, EquipId, HeroId, NewAccountFactory, PresetFleetState, ProfileId,
+        ResourceLedger, SupportEntryState,
     };
 
     #[test]
@@ -1230,6 +1255,47 @@ mod tests {
         assert_eq!(account.inventory.items.len(), 13);
         assert_eq!(account.fleet.fleets.len(), 5);
         assert_eq!(account.buildings.levels.get(&1), Some(&2));
+    }
+
+    #[test]
+    fn validates_cross_feature_ownership() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("ownership").unwrap(), "Captain");
+        account
+            .dock
+            .equipments
+            .get_mut(&EquipId::new(1).unwrap())
+            .unwrap()
+            .hero_id = None;
+        assert!(matches!(
+            account.validate(),
+            Err(DomainError::InvalidState(
+                "hero equipment slots are invalid"
+            ))
+        ));
+
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("secretary").unwrap(), "Captain");
+        account.character.secretary_id = Some(HeroId::new(999).unwrap());
+        assert!(matches!(
+            account.validate(),
+            Err(DomainError::InvalidState(
+                "secretary references missing hero"
+            ))
+        ));
+
+        let mut account = NewAccountFactory::create(ProfileId::new("preset").unwrap(), "Captain");
+        account.fleet.presets.push(PresetFleetState {
+            hero_ids: vec![HeroId::new(1).unwrap()],
+            ex_hero_ids: vec![HeroId::new(1).unwrap()],
+            ..PresetFleetState::default()
+        });
+        assert!(matches!(
+            account.validate(),
+            Err(DomainError::InvalidState(
+                "preset fleet references invalid hero"
+            ))
+        ));
     }
 
     #[test]
