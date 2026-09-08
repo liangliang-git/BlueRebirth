@@ -3,7 +3,6 @@ use blueoath_domain::AccountState;
 use blueoath_game::BattleService;
 use blueoath_protocol::*;
 use blueoath_transport::NetSocketFrameCodec;
-use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::catalog::*;
@@ -280,9 +279,6 @@ pub(super) async fn process_game_login_frame_payload_with_catalogs_typed_mut<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    #[allow(unused_mut)]
-    let mut account: Option<&mut Value> = None;
-
     let GameLoginCatalogs {
         fashion: fashion_catalog,
         equip: equip_catalog,
@@ -291,19 +287,14 @@ where
         shop: shop_catalog,
         mails: mail_catalog,
         handbook_behaviours,
-        hero_memories,
         chapters: chapter_catalog,
         tasks: task_catalog,
         battle: battle_catalog,
         ..
     } = *catalogs;
     #[cfg(not(test))]
-    let _ = (fashion_catalog, handbook_behaviours, hero_memories);
+    let _ = (fashion_catalog, handbook_behaviours);
 
-    // Keep immutable view independent from mutable account so profile mutations can update
-    // the same request snapshot before response pushes are encoded.
-    let account_snapshot = account.as_deref().cloned();
-    let account_view = account_snapshot.as_ref();
     if frame.frame_type == 2 {
         NetSocketFrameCodec::write(stream, 2, &[]).await?;
         return Ok(true);
@@ -324,17 +315,6 @@ where
     let method = GameMethod::parse(&request.method);
     let known_method = method.known();
     let is_user_info = known_method == Some(KnownMethod::UserGetUserInfo);
-    #[cfg(test)]
-    let is_user_login = known_method == Some(KnownMethod::UserLogin);
-    #[cfg(test)]
-    let is_profile_update = matches!(
-        request.method.as_str(),
-        "user.SetUserSecretary"
-            | "user.ChangeName"
-            | "user.SetMessage"
-            | "user.SetPlayerHeadFrame"
-            | "user.SetHead"
-    );
     #[cfg(test)]
     let mut pre_pushes = Vec::<Vec<u8>>::new();
     #[cfg(not(test))]
@@ -432,15 +412,8 @@ where
             let user = match typed_account.as_deref() {
                 Some(account) => user_info_from_typed_account(state, account),
                 None => {
-                    #[cfg(test)]
-                    {
-                        user_info_from_account(state, account_view)
-                    }
-                    #[cfg(not(test))]
-                    {
-                        handler_error = Some(GameError::AccountUnavailable);
-                        UserInfo::default()
-                    }
+                    handler_error = Some(GameError::AccountUnavailable);
+                    UserInfo::default()
                 }
             };
             Some(UserListCodec::encode(&[user]))
@@ -449,15 +422,8 @@ where
             let user = match typed_account.as_deref() {
                 Some(account) => user_info_from_typed_account(state, account),
                 None => {
-                    #[cfg(test)]
-                    {
-                        user_info_from_account(state, account_view)
-                    }
-                    #[cfg(not(test))]
-                    {
-                        handler_error = Some(GameError::AccountUnavailable);
-                        UserInfo::default()
-                    }
+                    handler_error = Some(GameError::AccountUnavailable);
+                    UserInfo::default()
                 }
             };
             Some(PlayerUserCodec::encode(&user))
@@ -538,15 +504,8 @@ where
             let fleet = match typed_account.as_deref() {
                 Some(account) => fleet_info_from_typed_account(account),
                 None => {
-                    #[cfg(test)]
-                    {
-                        fleet_info_from_account(account_view.unwrap_or(&Value::Null))
-                    }
-                    #[cfg(not(test))]
-                    {
-                        handler_error = Some(GameError::AccountUnavailable);
-                        FleetInfo::default()
-                    }
+                    handler_error = Some(GameError::AccountUnavailable);
+                    FleetInfo::default()
                 }
             };
             Some(FleetInfoCodec::encode(&fleet))
@@ -555,15 +514,8 @@ where
             let bag = match typed_account.as_deref() {
                 Some(account) => bag_info_from_typed_account(account),
                 None => {
-                    #[cfg(test)]
-                    {
-                        bag_info_from_account(account_view.unwrap_or(&Value::Null))
-                    }
-                    #[cfg(not(test))]
-                    {
-                        handler_error = Some(GameError::AccountUnavailable);
-                        BagInfo::default()
-                    }
+                    handler_error = Some(GameError::AccountUnavailable);
+                    BagInfo::default()
                 }
             };
             Some(BagInfoCodec::encode(&bag))
@@ -588,12 +540,7 @@ where
                         Some(FleetInfoCodec::encode(&fleet))
                     }
                 } else {
-                    #[cfg(test)]
-                    {
-                        if let Some(account) = account.as_deref_mut() {
-                            set_fleet_from_account(account, &fleet);
-                        }
-                    }
+                    handler_error = Some(GameError::AccountUnavailable);
                     Some(FleetInfoCodec::encode(&fleet))
                 }
             } else {
@@ -604,15 +551,8 @@ where
             let preset = match typed_account.as_deref() {
                 Some(account) => preset_fleet_info_from_typed_account(account),
                 None => {
-                    #[cfg(test)]
-                    {
-                        preset_fleet_info_from_account(account_view.unwrap_or(&Value::Null))
-                    }
-                    #[cfg(not(test))]
-                    {
-                        handler_error = Some(GameError::AccountUnavailable);
-                        PresetFleetInfo::default()
-                    }
+                    handler_error = Some(GameError::AccountUnavailable);
+                    PresetFleetInfo::default()
                 }
             };
             Some(PresetFleetCodec::encode(&preset))
@@ -638,27 +578,8 @@ where
                             Some(payload)
                         }
                     } else {
-                        #[cfg(test)]
-                        {
-                            if let Some(account) = account.as_deref_mut() {
-                                set_preset_fleet_from_account(account, &preset);
-                                let payload = PresetFleetCodec::encode(
-                                    &preset_fleet_info_from_account(account),
-                                );
-                                append_method_push(
-                                    &mut post_pushes,
-                                    "presetfleet.PresetFleetsInfo",
-                                    payload.clone(),
-                                );
-                                Some(payload)
-                            } else {
-                                Some(PresetFleetCodec::encode(&preset))
-                            }
-                        }
-                        #[cfg(not(test))]
-                        {
-                            Some(PresetFleetCodec::encode(&preset))
-                        }
+                        handler_error = Some(GameError::AccountUnavailable);
+                        Some(Vec::new())
                     }
                 }
                 _ => {
@@ -673,26 +594,13 @@ where
             let user = match typed_account.as_deref() {
                 Some(account) => user_info_from_typed_account(state, account),
                 None => {
-                    #[cfg(test)]
-                    {
-                        user_info_from_account(state, account_view)
-                    }
-                    #[cfg(not(test))]
-                    {
-                        handler_error = Some(GameError::AccountUnavailable);
-                        UserInfo::default()
-                    }
+                    handler_error = Some(GameError::AccountUnavailable);
+                    UserInfo::default()
                 }
             };
             Some(UserInfoCodec::encode(&user))
         }
         _ if known_method == Some(KnownMethod::UserLogin) => {
-            #[cfg(test)]
-            let now = current_unix_seconds();
-            #[cfg(test)]
-            if let Some(account) = account.as_deref_mut() {
-                advance_task_event(account, task_catalog, 1, 1, now);
-            }
             if let Some(typed) = typed_account.as_deref_mut() {
                 advance_typed_task_event(typed, task_catalog, 1, 1);
                 let mut login_effects = ResponseEffects::default();
@@ -711,15 +619,6 @@ where
                     &mut post_pushes,
                     &mut handler_error,
                 );
-            } else {
-                #[cfg(test)]
-                if let Some(account) = account.as_deref() {
-                    append_method_push(
-                        &mut post_pushes,
-                        "task.TaskInfo",
-                        task_info_payload(account, task_catalog),
-                    );
-                }
             }
             Some(UserLoginCodec::encode_response("ok", "", 0))
         }
@@ -730,10 +629,6 @@ where
                         account.character.secretary_id = u64::try_from(typed.secretary_id)
                             .ok()
                             .and_then(|id| blueoath_domain::HeroId::new(id).ok());
-                    }
-                    #[cfg(test)]
-                    if let Some(account) = account.as_deref_mut() {
-                        set_character_i64(account, "secretaryId", typed.secretary_id);
                     }
                 }
                 Err(_) => {
@@ -750,10 +645,6 @@ where
                     if let Some(account) = typed_account.as_mut() {
                         account.character.name = typed.name.clone();
                     }
-                    #[cfg(test)]
-                    if let Some(account) = account.as_deref_mut() {
-                        set_character_string(account, "name", typed.name);
-                    }
                 }
                 Err(_) => {
                     handler_error = Some(GameError::Internal("name request is invalid".to_owned()));
@@ -766,10 +657,6 @@ where
                 Ok(typed) => {
                     if let Some(account) = typed_account.as_mut() {
                         account.character.message = typed.message.clone();
-                    }
-                    #[cfg(test)]
-                    if let Some(account) = account.as_deref_mut() {
-                        set_character_string(account, "message", typed.message);
                     }
                 }
                 Err(_) => {
@@ -785,10 +672,6 @@ where
                     if let Some(account) = typed_account.as_mut() {
                         account.character.head_frame = typed.head_frame.max(0) as u32;
                     }
-                    #[cfg(test)]
-                    if let Some(account) = account.as_deref_mut() {
-                        set_character_i64(account, "headFrame", typed.head_frame);
-                    }
                 }
                 Err(_) => {
                     handler_error = Some(GameError::Internal(
@@ -803,10 +686,6 @@ where
                 Ok(typed) => {
                     if let Some(account) = typed_account.as_mut() {
                         account.character.head = typed.head.max(0) as u32;
-                    }
-                    #[cfg(test)]
-                    if let Some(account) = account.as_deref_mut() {
-                        set_character_i64(account, "head", typed.head);
                     }
                 }
                 Err(_) => {
@@ -1372,52 +1251,6 @@ where
             current_unix_seconds(),
             &[],
         )),
-        #[cfg(test)]
-        "mail.FetchItem" | "mail.FetchAllItems" => {
-            let fetch_one = request.method == "mail.FetchItem";
-            let mid = MailIdRequest::decode(request_args)
-                .map(|request| request.mail_id)
-                .unwrap_or_default();
-            let mut rewards = Vec::new();
-            if let Some(account) = account.as_deref_mut() {
-                for mail in mail_catalog.unwrap_or_default() {
-                    if fetch_one && mail.mid != mid {
-                        continue;
-                    }
-                    apply_mail_reward(account, mail);
-                    rewards.push(ShopReward {
-                        goods_type: mail.goods_type,
-                        item_id: mail.config_id,
-                        num: mail.num,
-                        instance_id: 0,
-                    });
-                }
-                if !rewards.is_empty() {
-                    append_method_push(
-                        &mut pre_pushes,
-                        "user.UpdateUserInfo",
-                        UserInfoCodec::encode(&user_info_from_account(state, Some(account))),
-                    );
-                    append_method_push(
-                        &mut pre_pushes,
-                        "bag.UpdateBagData",
-                        BagInfoCodec::encode(&bag_info_from_account(account)),
-                    );
-                }
-            }
-            if rewards.is_empty() {
-                handler_error = Some(GameError::Internal(if fetch_one {
-                    "mail was not found".to_owned()
-                } else {
-                    "mail list is empty".to_owned()
-                }));
-            }
-            Some(encode_mail_list_response(
-                mail_catalog.unwrap_or_default(),
-                current_unix_seconds(),
-                &rewards,
-            ))
-        }
         _ if method.is_family(MethodFamily::Shop)
             || method.is_family(MethodFamily::Recharge)
             || known_method == Some(KnownMethod::BagGetInfo)
@@ -1918,55 +1751,8 @@ where
                     Some(Vec::new())
                 }
             } else {
-                #[cfg(test)]
-                {
-                    if let Some(account) = account.as_deref_mut() {
-                        let level = commander_level(account);
-                        if level < SEA_DIFFICULTY_UNLOCK_LEVEL && requested > 1 {
-                            handler_error = Some(GameError::Internal(
-                                "sea difficulty unlocks at commander level 60".to_owned(),
-                            ));
-                            Some(Vec::new())
-                        } else {
-                            set_sea_difficulty(account, requested);
-                            let fallback_catalog;
-                            let catalog = match chapter_catalog {
-                                Some(catalog) => catalog,
-                                None => {
-                                    fallback_catalog = ChapterCatalog::fallback();
-                                    &fallback_catalog
-                                }
-                            };
-                            let passed = completed_copy_ids(account, "seaProgress");
-                            let pass_counts = completed_copy_counts(account, "seaProgress");
-                            append_method_push(
-                                &mut post_pushes,
-                                "copy.GetCopy",
-                                CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
-                                    &catalog.sea,
-                                    copy_progress_max_or_initial(
-                                        &catalog.sea,
-                                        &passed,
-                                        catalog.sea_initial,
-                                    ),
-                                    &passed,
-                                    &pass_counts,
-                                    sea_difficulty_for_account(account),
-                                ),
-                            );
-                            Some(Vec::new())
-                        }
-                    } else {
-                        handler_error =
-                            Some(GameError::Internal("account is unavailable".to_owned()));
-                        Some(Vec::new())
-                    }
-                }
-                #[cfg(not(test))]
-                {
-                    handler_error = Some(GameError::Internal("account is unavailable".to_owned()));
-                    Some(Vec::new())
-                }
+                handler_error = Some(GameError::AccountUnavailable);
+                Some(Vec::new())
             }
         }
         "copy.GetCopy" => {
@@ -1995,33 +1781,16 @@ where
                         .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
                         .collect::<Vec<_>>()
                 })
-                .unwrap_or_else(|| {
-                    account_view
-                        .map(|account| match copy_type {
-                            2 => completed_copy_ids(account, "seaProgress"),
-                            _ => completed_copy_ids(account, "copyProgress"),
-                        })
-                        .unwrap_or_default()
-                });
+                .unwrap_or_default();
             Some(match copy_type {
                 2 => {
-                    let pass_counts = if typed_account.is_some() {
-                        Vec::new()
-                    } else {
-                        account_view
-                            .map(|account| completed_copy_counts(account, "seaProgress"))
-                            .unwrap_or_default()
-                    };
+                    let pass_counts = Vec::new();
                     CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
                         &catalog.sea,
                         copy_progress_max_or_initial(&catalog.sea, &passed, catalog.sea_initial),
                         &passed,
                         &pass_counts,
-                        if typed_account.is_some() {
-                            1
-                        } else {
-                            account_view.map(sea_difficulty_for_account).unwrap_or(1)
-                        },
+                        1,
                     )
                 }
                 33 => CopyInfoCodec::encode(
@@ -2081,7 +1850,6 @@ where
                         .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
                         .collect::<Vec<_>>()
                 })
-                .or_else(|| account_view.map(|account| completed_copy_ids(account, "copyProgress")))
                 .unwrap_or_default();
             Some(CopyInfoCodec::encode_with_progress(
                 1,
@@ -2103,129 +1871,6 @@ where
 
             ret = Some(Vec::new());
         }
-    }
-    #[cfg(test)]
-    if is_user_login && typed_account.is_none() {
-        let now = current_unix_seconds();
-        let fallback_catalog;
-        let catalog = match chapter_catalog {
-            Some(catalog) => catalog,
-            None => {
-                fallback_catalog = ChapterCatalog::fallback();
-                &fallback_catalog
-            }
-        };
-        let max_id = |ids: &[i32]| ids.iter().copied().max().unwrap_or_default();
-        let plot_progress = account_view
-            .map(|account| completed_copy_ids(account, "copyProgress"))
-            .unwrap_or_default();
-        let sea_progress = account_view
-            .map(|account| completed_copy_ids(account, "seaProgress"))
-            .unwrap_or_default();
-        let sea_difficulty = account_view.map(sea_difficulty_for_account).unwrap_or(1);
-        #[allow(unused_mut)]
-        let mut pushes = vec![
-            (
-                "user.UpdateUserInfo",
-                UserInfoCodec::encode(&user_info_from_account(state, account_view)),
-            ),
-            (
-                "guide.GuideInfo",
-                GuideInfoCodec::encode_initial_progress_completed(),
-            ),
-            (
-                "copy.GetCopy",
-                CopyInfoCodec::encode_with_progress(
-                    1,
-                    &catalog.plot,
-                    copy_progress_max_or_first(&catalog.plot, &plot_progress),
-                    &plot_progress,
-                ),
-            ),
-            (
-                "copy.GetCopy",
-                CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
-                    &catalog.sea,
-                    copy_progress_max_or_initial(&catalog.sea, &sea_progress, catalog.sea_initial),
-                    &sea_progress,
-                    &completed_copy_counts(account_view.unwrap_or(&Value::Null), "seaProgress"),
-                    sea_difficulty,
-                ),
-            ),
-            (
-                "copy.GetCopy",
-                CopyInfoCodec::encode(33, &catalog.mubar, max_id(&catalog.mubar)),
-            ),
-            (
-                "copy.GetCopy",
-                CopyInfoCodec::encode(9, &catalog.daily, max_id(&catalog.daily)),
-            ),
-            (
-                "dailycopy.UpdateDailyCopyData",
-                DailyCopyCodec::encode_with_progress(
-                    &catalog.daily_chapters,
-                    &catalog.daily_groups,
-                    &daily_copy_progress_from_account(account_view, now),
-                    &daily_copy_group_progress_from_account(account_view, "groups", now),
-                    &daily_copy_group_progress_from_account(account_view, "extraGroups", now),
-                ),
-            ),
-            (
-                "illustrate.IllustrateInfo",
-                illustrate_info_payload(
-                    account_view.unwrap_or(&Value::Null),
-                    handbook_behaviours,
-                    hero_memories,
-                ),
-            ),
-            ("illustrate.OldIllustrateInfo", Vec::new()),
-            (
-                "illustrate.Memory",
-                story_memory_payload(chapter_catalog.map(|catalog| catalog.memories.as_slice())),
-            ),
-        ];
-        #[cfg(test)]
-        if !catalog.equip_new_test.is_empty() {
-            pushes.push((
-                "copy.GetCopy",
-                CopyInfoCodec::encode(34, &catalog.equip_new_test, max_id(&catalog.equip_new_test)),
-            ));
-            pushes.push((
-                "equipnewtestcopy.UpdateEquipNewData",
-                equip_handler::equip_new_test_copy_payload(account_view.unwrap_or(&Value::Null)),
-            ));
-        }
-        for (method, payload) in pushes {
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: method.to_owned(),
-                ret: Some(payload),
-                time: now,
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
-        }
-        let goods_copy_push = TMessageCodec::encode_response(&TResponse {
-            method: "goodscopy.UpdateData".to_owned(),
-            ret: Some(goods_copy_snapshot_payload(
-                account_view.unwrap_or(&Value::Null),
-                chapter_catalog,
-            )),
-            time: now,
-            ..TResponse::default()
-        });
-        post_pushes.push(goods_copy_push);
-        let talent_catalog = current_talent_catalog();
-        let talent_payload = typed_account
-            .as_deref()
-            .map(|account| talent_tree_payload_typed(account, &talent_catalog))
-            .unwrap_or_default();
-        let push = TMessageCodec::encode_response(&TResponse {
-            method: "talentTree.TalentTreeAllList".to_owned(),
-            ret: Some(talent_payload),
-            time: now,
-            ..TResponse::default()
-        });
-        post_pushes.push(push);
     }
     let trace_ret_len = ret.as_ref().map(Vec::len).unwrap_or_default();
     let trace_method = request.method.clone();
@@ -2267,24 +1912,8 @@ where
     }
     NetSocketFrameCodec::write(stream, 0, &response).await?;
     #[cfg(test)]
-    if is_profile_update {
-        if let Some(account) = account.as_deref() {
-            let push = TMessageCodec::encode_response(&TResponse {
-                method: "user.UpdateUserInfo".to_owned(),
-                ret: Some(UserInfoCodec::encode(&user_info_from_account(
-                    state,
-                    Some(account),
-                ))),
-                time: current_unix_seconds(),
-                ..TResponse::default()
-            });
-            NetSocketFrameCodec::write(stream, 0, &push).await?;
-        }
-    }
-    #[cfg(test)]
-    if is_user_info && (account.is_some() || typed_account.is_some()) {
-        let account = account.as_deref().unwrap_or(&Value::Null);
-        let typed_account_view = typed_account.as_deref();
+    if is_user_info && typed_account.is_some() {
+        let typed_account = typed_account.as_deref().expect("typed account bootstrap");
         // Match the C# post-GetUserInfo bootstrap prefix. These state snapshots must
         // arrive before inventory pushes: the client enters MainStage and reads them
         // synchronously from its login state machine.
@@ -2313,11 +1942,10 @@ where
 
         let push = TMessageCodec::encode_response(&TResponse {
             method: "user.GetUserInfo".to_owned(),
-            ret: Some(UserInfoCodec::encode(
-                &typed_account_view
-                    .map(|typed| user_info_from_typed_account(state, typed))
-                    .unwrap_or_else(|| user_info_from_account(state, Some(account))),
-            )),
+            ret: Some(UserInfoCodec::encode(&user_info_from_typed_account(
+                state,
+                typed_account,
+            ))),
             time: now,
             ..TResponse::default()
         });
@@ -2326,30 +1954,22 @@ where
         for (method, ret) in [
             (
                 "build.BuildsInfo",
-                typed_account_view
-                    .map(|typed| building_handler::typed_construction_info_payload(typed, now))
-                    .unwrap_or_else(|| construction_info_payload(account, now)),
+                building_handler::typed_construction_info_payload(typed_account, now),
             ),
             (
                 "bathroom.BathroomInfo",
-                typed_account_view
-                    .map(progression_handler::bathroom_info_payload_from_typed)
-                    .unwrap_or_else(|| bathroom_info_payload(account)),
+                progression_handler::bathroom_info_payload_from_typed(typed_account),
             ),
             (
                 "study.GetStudyInfo",
-                typed_account_view
-                    .map(|typed| progression_handler::study_info_payload_from_typed(typed, now))
-                    .unwrap_or_else(|| study_info_payload(account, now)),
+                progression_handler::study_info_payload_from_typed(typed_account, now),
             ),
             // TaskInfo: explicit teaching-stage row + daily count. Repeated task groups
             // may be empty when this Rust profile has no task catalog; persisted teaching
             // reward ids are retained so the client does not re-offer claimed rewards.
             (
                 "task.TaskInfo",
-                typed_account_view
-                    .map(|typed| task_info_payload_from_typed_account(typed, task_catalog))
-                    .unwrap_or_else(|| task_info_payload(account, task_catalog)),
+                task_info_payload_from_typed_account(typed_account, task_catalog),
             ),
         ] {
             let push = TMessageCodec::encode_response(&TResponse {
@@ -2363,44 +1983,37 @@ where
 
         let push = TMessageCodec::encode_response(&TResponse {
             method: "bag.UpdateBagData".to_owned(),
-            ret: Some(BagInfoCodec::encode(
-                &typed_account_view
-                    .map(bag_info_from_typed_account)
-                    .unwrap_or_else(|| bag_info_from_account(account)),
-            )),
+            ret: Some(BagInfoCodec::encode(&bag_info_from_typed_account(
+                typed_account,
+            ))),
             time: current_unix_seconds(),
             ..TResponse::default()
         });
         NetSocketFrameCodec::write(stream, 0, &push).await?;
         let push = TMessageCodec::encode_response(&TResponse {
             method: "fashion.updateData".to_owned(),
-            ret: Some(FashionListCodec::encode(
-                &typed_account_view
-                    .map(|typed| fashion_list_from_typed_account(typed, fashion_catalog))
-                    .unwrap_or_else(|| fashion_list_from_account(account, fashion_catalog)),
-            )),
+            ret: Some(FashionListCodec::encode(&fashion_list_from_typed_account(
+                typed_account,
+                fashion_catalog,
+            ))),
             time: current_unix_seconds(),
             ..TResponse::default()
         });
         NetSocketFrameCodec::write(stream, 0, &push).await?;
         let push = TMessageCodec::encode_response(&TResponse {
             method: "equip.UpdateEquipBagData".to_owned(),
-            ret: Some(EquipListCodec::encode(
-                &typed_account_view
-                    .map(equip_list_from_typed_account)
-                    .unwrap_or_else(|| equip_list_from_account(account, equip_catalog)),
-            )),
+            ret: Some(EquipListCodec::encode(&equip_list_from_typed_account(
+                typed_account,
+            ))),
             time: current_unix_seconds(),
             ..TResponse::default()
         });
         NetSocketFrameCodec::write(stream, 0, &push).await?;
         let push = TMessageCodec::encode_response(&TResponse {
             method: "hero.UpdateHeroBagData".to_owned(),
-            ret: Some(HeroBagCodec::encode(
-                &typed_account_view
-                    .map(hero_bag_from_typed_account)
-                    .unwrap_or_else(|| hero_bag_from_account(account)),
-            )),
+            ret: Some(HeroBagCodec::encode(&hero_bag_from_typed_account(
+                typed_account,
+            ))),
             time: current_unix_seconds(),
             ..TResponse::default()
         });
@@ -2408,9 +2021,7 @@ where
         let push = TMessageCodec::encode_response(&TResponse {
             method: "building.UpdateBuildingInfo".to_owned(),
             ret: Some(UserBuildingInfoCodec::encode(
-                &typed_account_view
-                    .map(|typed| building_info_from_typed_account(typed, current_unix_seconds()))
-                    .unwrap_or_else(|| building_info_from_account(account, current_unix_seconds())),
+                &building_info_from_typed_account(typed_account, current_unix_seconds()),
             )),
             time: current_unix_seconds(),
             ..TResponse::default()
@@ -2418,11 +2029,9 @@ where
         NetSocketFrameCodec::write(stream, 0, &push).await?;
         let push = TMessageCodec::encode_response(&TResponse {
             method: "tactic.GetHerosTactic".to_owned(),
-            ret: Some(FleetInfoCodec::encode(
-                &typed_account_view
-                    .map(fleet_info_from_typed_account)
-                    .unwrap_or_else(|| fleet_info_from_account(account)),
-            )),
+            ret: Some(FleetInfoCodec::encode(&fleet_info_from_typed_account(
+                typed_account,
+            ))),
             time: current_unix_seconds(),
             ..TResponse::default()
         });
@@ -2443,13 +2052,10 @@ where
         NetSocketFrameCodec::write(stream, 0, &push).await?;
         let push = TMessageCodec::encode_response(&TResponse {
             method: "buildship.BuildShipInfo".to_owned(),
-            ret: Some(
-                typed_account_view
-                    .map(|typed| buildship_info_payload_from_typed(typed, current_unix_seconds()))
-                    .unwrap_or_else(|| {
-                        buildship_info_payload(Some(account), current_unix_seconds())
-                    }),
-            ),
+            ret: Some(buildship_info_payload_from_typed(
+                typed_account,
+                current_unix_seconds(),
+            )),
             time: current_unix_seconds(),
             ..TResponse::default()
         });
@@ -2457,31 +2063,22 @@ where
         let push = TMessageCodec::encode_response(&TResponse {
             method: "presetfleet.PresetFleetsInfo".to_owned(),
             ret: Some(PresetFleetCodec::encode(
-                &typed_account_view
-                    .map(preset_fleet_info_from_typed_account)
-                    .unwrap_or_else(|| preset_fleet_info_from_account(account)),
+                &preset_fleet_info_from_typed_account(typed_account),
             )),
             time: current_unix_seconds(),
             ..TResponse::default()
         });
         NetSocketFrameCodec::write(stream, 0, &push).await?;
         for (method, ret) in [
-            (
-                "illustrate.IllustrateInfo",
-                typed_account_view
-                    .map(|typed| {
-                        let template_ids = typed
-                            .dock
-                            .heroes
-                            .values()
-                            .map(|hero| hero.template_id.get() as i32)
-                            .collect::<Vec<_>>();
-                        illustrate_info_payload_for_templates(&template_ids, handbook_behaviours)
-                    })
-                    .unwrap_or_else(|| {
-                        illustrate_info_payload(account, handbook_behaviours, hero_memories)
-                    }),
-            ),
+            ("illustrate.IllustrateInfo", {
+                let template_ids = typed_account
+                    .dock
+                    .heroes
+                    .values()
+                    .map(|hero| hero.template_id.get() as i32)
+                    .collect::<Vec<_>>();
+                illustrate_info_payload_for_templates(&template_ids, handbook_behaviours)
+            }),
             ("illustrate.OldIllustrateInfo", Vec::new()),
             (
                 "illustrate.Memory",
@@ -2497,9 +2094,7 @@ where
             NetSocketFrameCodec::write(stream, 0, &push).await?;
         }
         let talent_catalog = current_talent_catalog();
-        let talent_payload = typed_account_view
-            .map(|typed| talent_tree_payload_typed(typed, &talent_catalog))
-            .unwrap_or_default();
+        let talent_payload = talent_tree_payload_typed(typed_account, &talent_catalog);
         let push = TMessageCodec::encode_response(&TResponse {
             method: "talentTree.TalentTreeAllList".to_owned(),
             ret: Some(talent_payload),
