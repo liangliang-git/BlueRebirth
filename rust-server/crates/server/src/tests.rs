@@ -3867,7 +3867,10 @@ fn typed_mail_reward_updates_domain_resources_and_inventory() {
     };
     let reward = apply_typed_mail_reward(&mut account, &currency_mail).unwrap();
     assert_eq!(reward.goods_type, 5);
-    assert_eq!(account.resources.amount(CurrencyKind::Gold).get(), 25);
+    assert_eq!(
+        account.resources.amount(CurrencyKind::Gold).get(),
+        99_999_999 + 25
+    );
 
     let item_mail = MailTemplate {
         mid: 2,

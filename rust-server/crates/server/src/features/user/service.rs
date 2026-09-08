@@ -1494,7 +1494,7 @@ mod tests {
                 .resources
                 .amount(blueoath_domain::CurrencyKind::Gold)
                 .get(),
-            1_000
+            99_999_999 + 1_000
         );
         assert_eq!(effects.into_parts().0.len(), 1);
     }

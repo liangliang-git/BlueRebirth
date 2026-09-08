@@ -1118,6 +1118,10 @@ impl NewAccountFactory {
             .expect("starter diamond balance is bounded");
         account
             .resources
+            .credit(CurrencyKind::Gold, 99_999_999)
+            .expect("starter gold balance is bounded");
+        account
+            .resources
             .credit(CurrencyKind::Supply, 10_000)
             .expect("starter supply balance is bounded");
 
@@ -1256,6 +1260,10 @@ mod tests {
         assert!(account.validate().is_ok());
         assert_eq!(account.character.level, 1);
         assert!(account.profile.is_some());
+        assert_eq!(
+            account.resources.amount(CurrencyKind::Gold).get(),
+            99_999_999
+        );
         assert_eq!(account.dock.heroes.len(), 1);
         assert_eq!(account.dock.equipments.len(), 2);
         assert_eq!(account.inventory.items.len(), 13);

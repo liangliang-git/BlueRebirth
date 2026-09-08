@@ -531,7 +531,7 @@ mod tests {
                 .resources
                 .amount(blueoath_domain::CurrencyKind::Gold)
                 .get(),
-            70
+            99_999_999 + 100 - 30
         );
         assert_eq!(
             account.inventory.items[&blueoath_domain::TemplateId::new(30_001).unwrap()],
@@ -603,7 +603,7 @@ mod tests {
                 .resources
                 .amount(blueoath_domain::CurrencyKind::Gold)
                 .get(),
-            90
+            99_999_999 + 100 - 10
         );
         assert_eq!(effects.into_parts().0.len(), 3);
     }
@@ -645,7 +645,7 @@ mod tests {
                 .resources
                 .amount(blueoath_domain::CurrencyKind::Gold)
                 .get(),
-            3
+            99_999_999 + 3
         );
     }
 }

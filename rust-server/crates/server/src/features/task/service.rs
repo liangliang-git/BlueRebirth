@@ -256,7 +256,7 @@ mod tests {
                 .resources
                 .amount(blueoath_domain::CurrencyKind::Gold)
                 .get(),
-            100
+            99_999_999 + 100
         );
         let (_, pushes, error) = effects.into_parts();
         assert_eq!(pushes.len(), 3);

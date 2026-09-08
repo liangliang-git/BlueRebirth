@@ -906,7 +906,10 @@ mod tests {
             .load_typed_account(&profile_id)
             .unwrap()
             .expect("account should remain available");
-        assert_eq!(loaded.resources.amount(CurrencyKind::Gold).get(), 10);
+        assert_eq!(
+            loaded.resources.amount(CurrencyKind::Gold).get(),
+            99_999_999 + 10
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }
