@@ -83,7 +83,7 @@ fn typed_user_rank_payload(
         append_message_field(
             &mut row,
             3,
-            &super::base_handler::other_user_payload_typed(state, current, *uid),
+            &crate::features::user::service::other_user_payload_typed(state, current, *uid),
         );
         append_varint_field(&mut row, 4, *damage);
         append_message_field(&mut output, 1, &row);
@@ -99,7 +99,11 @@ fn typed_user_rank_payload(
     append_message_field(
         &mut current_row,
         3,
-        &super::base_handler::other_user_payload_typed(state, current, current.character.uid),
+        &crate::features::user::service::other_user_payload_typed(
+            state,
+            current,
+            current.character.uid,
+        ),
     );
     append_varint_field(&mut current_row, 4, current_damage);
     append_message_field(&mut output, 2, &current_row);

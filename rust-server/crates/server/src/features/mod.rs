@@ -14,8 +14,6 @@ pub(crate) mod activity_extra_handler;
 pub(crate) mod activity_handler;
 #[path = "activity/adventure_service.rs"]
 pub(crate) mod adventure_handler;
-#[path = "user/service.rs"]
-pub(crate) mod base_handler;
 #[path = "battle/service.rs"]
 pub(crate) mod battle_handler;
 #[path = "social/boss_service.rs"]
@@ -54,8 +52,6 @@ pub(crate) mod hero_handler;
 pub(crate) mod invitescore_handler;
 #[path = "activity/misc_service.rs"]
 pub(crate) mod misc_extended_handler;
-#[path = "user/misc_service.rs"]
-pub(crate) mod misc_handler;
 #[path = "building/outpost_service.rs"]
 pub(crate) mod outpost_handler;
 #[path = "progression/service.rs"]
@@ -68,8 +64,6 @@ pub(crate) mod sportsmeet_handler;
 pub(crate) mod talent_handler;
 #[path = "task/service.rs"]
 pub(crate) mod task_handler;
-#[path = "user/teaching_service.rs"]
-pub(crate) mod teaching_handler;
 #[path = "tower/service.rs"]
 pub(crate) mod tower_handler;
 
