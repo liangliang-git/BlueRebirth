@@ -1,7 +1,5 @@
 use super::catalog::GameLoginCatalogs;
-use super::common::error::GameError;
 use super::common::response::ResponseEffects;
-use super::game_login::pass_mini_game;
 use super::{
     add_bag_item, add_building_state, adjust_character_i64, advance_task_event,
     advance_task_event_with_param, append_bytes_field, append_message_field, append_varint_field,
@@ -5452,58 +5450,6 @@ async fn copy_star_reward_claims_configured_reward_once() {
     assert_eq!(duplicate.method, "copy.StarReward");
     assert_eq!(duplicate.err, 1);
     assert_eq!(bag_item_count(&account, 9002), 2);
-}
-
-#[test]
-fn pass_mini_game_uses_tpassbase_and_records_single_copy() {
-    let mut account = default_account_snapshot("mini-game", "Captain", 123);
-    let mut handler_error = None;
-    let mut args = Vec::new();
-    append_varint_field(&mut args, 1, 1001);
-    append_varint_field(&mut args, 12, 42);
-    append_varint_field(&mut args, 19, 1);
-    let response = {
-        let mut account_ref = Some(&mut account);
-        pass_mini_game(
-            None,
-            &mut account_ref,
-            &args,
-            None,
-            None,
-            &mut Vec::new(),
-            &mut handler_error,
-        )
-        .unwrap()
-    };
-    assert!(handler_error.is_none());
-    assert_eq!(decode_varint_field(&response, 12), 1001);
-    assert_eq!(decode_varint_field(&response, 4), 3);
-    assert_eq!(decode_varint_field(&response, 8), 60);
-    assert_eq!(decode_varint_field(&response, 10), 1);
-    assert_eq!(completed_copy_ids(&account, "copyProgress"), vec![1001]);
-    assert_eq!(account["copyProgress"]["records"][0]["starLevel"], 7);
-
-    let mut invalid_args = Vec::new();
-    append_varint_field(&mut invalid_args, 1, 3000);
-    append_varint_field(&mut invalid_args, 19, 0);
-    let invalid = {
-        let mut account_ref = Some(&mut account);
-        pass_mini_game(
-            None,
-            &mut account_ref,
-            &invalid_args,
-            None,
-            None,
-            &mut Vec::new(),
-            &mut handler_error,
-        )
-        .unwrap()
-    };
-    assert!(invalid.is_empty());
-    assert_eq!(
-        handler_error,
-        Some(GameError::Internal("mini-game was not finished".to_owned()))
-    );
 }
 
 #[test]

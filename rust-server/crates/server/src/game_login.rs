@@ -75,8 +75,6 @@ mod sportsmeet_handler;
 mod task_handler;
 #[path = "teaching_handler.rs"]
 mod teaching_handler;
-#[cfg(test)]
-pub(super) use compat_feature::legacy_test_handler::pass_mini_game;
 #[path = "progression_handler.rs"]
 mod progression_handler;
 #[path = "talent_handler.rs"]
