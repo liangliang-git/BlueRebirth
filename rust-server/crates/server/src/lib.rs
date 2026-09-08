@@ -27,8 +27,6 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
-#[path = "features/user/state.rs"]
-mod account_defaults;
 #[cfg(test)]
 mod account_state;
 mod bootstrap;
@@ -55,11 +53,6 @@ mod runtime;
 #[path = "common/wire.rs"]
 mod wire;
 
-#[cfg(test)]
-pub(crate) use account_defaults::default_account_snapshot;
-#[cfg(test)]
-use account_defaults::user_info_from_account;
-use account_defaults::user_info_from_typed_account;
 #[cfg(test)]
 use account_state::*;
 pub use blueoath_game::{
@@ -94,6 +87,11 @@ use features::shop::state::*;
 #[cfg(test)]
 use features::social::state::*;
 use features::task::state::*;
+#[cfg(test)]
+pub(crate) use features::user::state::default_account_snapshot;
+#[cfg(test)]
+use features::user::state::user_info_from_account;
+use features::user::state::user_info_from_typed_account;
 pub use frame_service::process_frame;
 use frame_service::{prepare_local_request, storage_failure_response};
 #[cfg(test)]

@@ -6,7 +6,7 @@ use serde_json::Value;
 use super::*;
 
 #[cfg(test)]
-pub(super) fn default_account_snapshot(profile_id: &str, name: &str, now: u32) -> Value {
+pub(crate) fn default_account_snapshot(profile_id: &str, name: &str, now: u32) -> Value {
     let reset_day = (i64::from(now) + 8 * 60 * 60) / 86_400;
     let reset_week = (reset_day + 3) / 7;
 
@@ -253,7 +253,7 @@ pub(super) fn default_account_snapshot(profile_id: &str, name: &str, now: u32) -
 }
 
 #[cfg(test)]
-pub(super) fn user_info_from_account(state: &ServerState, account: Option<&Value>) -> UserInfo {
+pub(crate) fn user_info_from_account(state: &ServerState, account: Option<&Value>) -> UserInfo {
     let fallback = UserInfo {
         uid: 1,
         uname: state.name.clone(),
@@ -329,7 +329,7 @@ pub(super) fn user_info_from_account(state: &ServerState, account: Option<&Value
     }
 }
 
-pub(super) fn user_info_from_typed_account(
+pub(crate) fn user_info_from_typed_account(
     state: &ServerState,
     account: &blueoath_domain::AccountState,
 ) -> UserInfo {
