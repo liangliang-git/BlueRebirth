@@ -389,7 +389,7 @@ pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountStat
         .collect();
     HeroBag {
         heroes,
-        bag_size: 200,
+        bag_size: i32::try_from(account.ship_dock_capacity()).unwrap_or(i32::MAX),
     }
 }
 
@@ -681,7 +681,7 @@ pub(super) fn equip_list_from_typed_account(account: &blueoath_domain::AccountSt
         .map(equip_info_from_typed_equipment)
         .collect();
     EquipList {
-        bag_size: 2000,
+        bag_size: i32::try_from(account.equipment_dock_capacity()).unwrap_or(i32::MAX),
         items,
         nums: Vec::new(),
     }

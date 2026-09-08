@@ -74,6 +74,16 @@ pub(crate) fn handle_typed(
     }
     let has_hero_reward = rewards.iter().any(|reward| reward.goods_type == 3);
     let has_equip_reward = rewards.iter().any(|reward| reward.goods_type == 2);
+    let has_ship_dock_expansion = rewards.iter().any(|reward| {
+        reward.goods_type == 14
+            && reward.item_id
+                == i32::try_from(blueoath_domain::SHIP_DOCK_EXPANSION_ITEM_ID).unwrap()
+    });
+    let has_equipment_dock_expansion = rewards.iter().any(|reward| {
+        reward.goods_type == 14
+            && reward.item_id
+                == i32::try_from(blueoath_domain::EQUIPMENT_DOCK_EXPANSION_ITEM_ID).unwrap()
+    });
     let has_fashion_reward = rewards.iter().any(|reward| reward.goods_type == 18);
     for reward in &mut rewards {
         let _ = grant_typed_task_reward_with_fashion(account, reward, fashion_catalog);
@@ -88,13 +98,13 @@ pub(crate) fn handle_typed(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_typed_account(account)),
     ));
-    if has_hero_reward {
+    if has_hero_reward || has_ship_dock_expansion {
         effects.push_post(Response::raw(
             "hero.UpdateHeroBagData",
             HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
         ));
     }
-    if has_equip_reward {
+    if has_equip_reward || has_equipment_dock_expansion {
         effects.push_post(Response::raw(
             "equip.UpdateEquipBagData",
             EquipListCodec::encode(&equip_list_from_typed_account(account)),
@@ -186,13 +196,23 @@ fn handle_all_rewards(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_typed_account(account)),
     ));
-    if response_rewards.iter().any(|reward| reward.goods_type == 3) {
+    if response_rewards.iter().any(|reward| {
+        reward.goods_type == 3
+            || (reward.goods_type == 14
+                && reward.item_id
+                    == i32::try_from(blueoath_domain::SHIP_DOCK_EXPANSION_ITEM_ID).unwrap())
+    }) {
         effects.push_post(Response::raw(
             "hero.UpdateHeroBagData",
             HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
         ));
     }
-    if response_rewards.iter().any(|reward| reward.goods_type == 2) {
+    if response_rewards.iter().any(|reward| {
+        reward.goods_type == 2
+            || (reward.goods_type == 14
+                && reward.item_id
+                    == i32::try_from(blueoath_domain::EQUIPMENT_DOCK_EXPANSION_ITEM_ID).unwrap())
+    }) {
         effects.push_post(Response::raw(
             "equip.UpdateEquipBagData",
             EquipListCodec::encode(&equip_list_from_typed_account(account)),

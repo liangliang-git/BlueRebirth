@@ -1209,7 +1209,7 @@ pub(crate) fn handle_typed(
                 "hero.UpdateHeroBagData",
                 HeroBagCodec::encode(&HeroBag {
                     heroes: deleted,
-                    bag_size: 200,
+                    bag_size: i32::try_from(account.ship_dock_capacity()).unwrap_or(i32::MAX),
                 }),
             ));
             effects.push_pre(Response::raw(

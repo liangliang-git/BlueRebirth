@@ -437,17 +437,27 @@ fn append_typed_shop_pushes(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_typed_account(account)),
     ));
-    if reward.goods_type == 2 {
+    if reward.goods_type == 2
+        || (reward.goods_type == 14
+            && reward.item_id
+                == i32::try_from(blueoath_domain::EQUIPMENT_DOCK_EXPANSION_ITEM_ID).unwrap())
+    {
         effects.push_pre(Response::raw(
             "equip.UpdateEquipBagData",
             EquipListCodec::encode(&equip_list_from_typed_account(account)),
         ));
-    } else if reward.goods_type == 3 {
+    }
+    if reward.goods_type == 3
+        || (reward.goods_type == 14
+            && reward.item_id
+                == i32::try_from(blueoath_domain::SHIP_DOCK_EXPANSION_ITEM_ID).unwrap())
+    {
         effects.push_pre(Response::raw(
             "hero.UpdateHeroBagData",
             HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
         ));
-    } else if reward.goods_type == 18 {
+    }
+    if reward.goods_type == 18 {
         effects.push_pre(Response::raw(
             "fashion.updateData",
             FashionListCodec::encode(&fashion_list_from_typed_account(account, fashion_catalog)),
@@ -540,6 +550,55 @@ mod tests {
         let (pushes, _, error) = effects.into_parts();
         assert_eq!(pushes.len(), 2);
         assert!(error.is_none());
+    }
+
+    #[test]
+    fn typed_shop_buy_expands_ship_dock_and_pushes_new_capacity() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("typed-shop-dock-expansion").unwrap(),
+            "Captain",
+        );
+        let mut shop = ShopCatalog::default();
+        shop.goods_by_id.insert(
+            7,
+            ShopGood {
+                shop_id: 1,
+                goods_type: 14,
+                item_id: i32::try_from(blueoath_domain::SHIP_DOCK_EXPANSION_ITEM_ID).unwrap(),
+                num: 1,
+                costs: vec![ShopCost {
+                    goods_type: 5,
+                    item_id: 2,
+                    amount: 1,
+                }],
+            },
+        );
+        let state = ServerState::new("typed-shop-dock-expansion", "Captain", "1.0.0");
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, 1);
+        append_varint_field(&mut args, 2, 7);
+        append_varint_field(&mut args, 3, 1);
+        let mut effects = ResponseEffects::default();
+
+        let result = handle_typed(
+            &mut account,
+            &state,
+            "shop.BuyGoods",
+            &args,
+            &mut effects,
+            CommerceTypedCatalogs {
+                shop: Some(&shop),
+                fashion: None,
+            },
+        );
+
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert_eq!(account.ship_dock_capacity(), 210);
+        let (pushes, _, error) = effects.into_parts();
+        assert!(error.is_none());
+        assert!(pushes
+            .iter()
+            .any(|push| push.method == "hero.UpdateHeroBagData"));
     }
 
     #[test]

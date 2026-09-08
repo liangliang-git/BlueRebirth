@@ -536,7 +536,9 @@ fn receive_typed_construction(
     };
     indexes.sort_unstable();
     indexes.dedup();
-    if account.dock.heroes.len().saturating_add(indexes.len()) > 200 {
+    if account.dock.heroes.len().saturating_add(indexes.len())
+        > usize::try_from(account.ship_dock_capacity()).unwrap_or(usize::MAX)
+    {
         return None;
     }
     let selected = indexes

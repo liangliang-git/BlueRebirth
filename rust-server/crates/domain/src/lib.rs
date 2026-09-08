@@ -4,6 +4,11 @@ use std::fmt;
 use thiserror::Error;
 
 pub const HERO_MOOD_INITIAL: u32 = 1_500_000;
+pub const DEFAULT_SHIP_DOCK_CAPACITY: u32 = 200;
+pub const DEFAULT_EQUIPMENT_DOCK_CAPACITY: u32 = 2_000;
+pub const SHIP_DOCK_EXPANSION_ITEM_ID: u64 = 140_001;
+pub const EQUIPMENT_DOCK_EXPANSION_ITEM_ID: u64 = 140_002;
+pub const DOCK_EXPANSION_SIZE: u64 = 10;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum DomainError {
@@ -853,6 +858,29 @@ impl AccountState {
         }
     }
 
+    pub fn ship_dock_capacity(&self) -> u32 {
+        expanded_capacity(
+            DEFAULT_SHIP_DOCK_CAPACITY,
+            self.inventory_amount(SHIP_DOCK_EXPANSION_ITEM_ID),
+        )
+    }
+
+    pub fn equipment_dock_capacity(&self) -> u32 {
+        expanded_capacity(
+            DEFAULT_EQUIPMENT_DOCK_CAPACITY,
+            self.inventory_amount(EQUIPMENT_DOCK_EXPANSION_ITEM_ID),
+        )
+    }
+
+    fn inventory_amount(&self, template_id: u64) -> u64 {
+        self.inventory
+            .items
+            .iter()
+            .find(|(id, _)| id.get() == template_id)
+            .map(|(_, amount)| *amount)
+            .unwrap_or_default()
+    }
+
     pub fn validate(&self) -> Result<(), DomainError> {
         if self.character.uid == 0 {
             return Err(DomainError::InvalidState("character uid must be positive"));
@@ -1098,6 +1126,12 @@ impl AccountState {
     }
 }
 
+fn expanded_capacity(base: u32, expansion_count: u64) -> u32 {
+    let capacity =
+        u64::from(base).saturating_add(expansion_count.saturating_mul(DOCK_EXPANSION_SIZE));
+    u32::try_from(capacity).unwrap_or(u32::MAX)
+}
+
 pub struct NewAccountFactory;
 
 impl NewAccountFactory {
@@ -1230,7 +1264,8 @@ pub trait AccountRepository {
 mod tests {
     use super::{
         CurrencyKind, DomainError, EquipId, HeroId, NewAccountFactory, PresetFleetState, ProfileId,
-        ResourceLedger, SupportEntryState,
+        ResourceLedger, SupportEntryState, TemplateId, EQUIPMENT_DOCK_EXPANSION_ITEM_ID,
+        SHIP_DOCK_EXPANSION_ITEM_ID,
     };
 
     #[test]
@@ -1269,6 +1304,23 @@ mod tests {
         assert_eq!(account.inventory.items.len(), 13);
         assert_eq!(account.fleet.fleets.len(), 5);
         assert_eq!(account.buildings.levels.get(&1), Some(&2));
+    }
+
+    #[test]
+    fn expansion_items_increase_persisted_dock_capacities() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("dock-capacity").unwrap(), "Captain");
+        account
+            .inventory
+            .items
+            .insert(TemplateId::new(SHIP_DOCK_EXPANSION_ITEM_ID).unwrap(), 2);
+        account.inventory.items.insert(
+            TemplateId::new(EQUIPMENT_DOCK_EXPANSION_ITEM_ID).unwrap(),
+            3,
+        );
+
+        assert_eq!(account.ship_dock_capacity(), 220);
+        assert_eq!(account.equipment_dock_capacity(), 2_030);
     }
 
     #[test]

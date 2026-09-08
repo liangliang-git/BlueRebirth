@@ -36,7 +36,8 @@ pub(crate) fn handle_typed(
                 ));
             }
             let snapshot = account.clone();
-            if account.dock.heroes.len().saturating_add(pulls as usize) > 200
+            if account.dock.heroes.len().saturating_add(pulls as usize)
+                > usize::try_from(account.ship_dock_capacity()).unwrap_or(usize::MAX)
                 || !consume_typed_build_cost(account, catalog, pool_id, pulls)
             {
                 return HandlerResult::Error(GameError::InvalidState(
