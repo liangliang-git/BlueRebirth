@@ -1131,7 +1131,7 @@ fn handle_typed_treasure(
     ))
 }
 
-#[cfg(test)]
+#[cfg(any())]
 pub(crate) mod legacy_test_handler {
     use serde_json::{json, Value};
 

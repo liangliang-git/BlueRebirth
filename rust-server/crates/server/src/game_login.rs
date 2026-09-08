@@ -533,33 +533,9 @@ where
             let result = if typed_account.is_some() {
                 HandlerResult::Error(GameError::InvalidRequest("compat request is not supported"))
             } else {
-                #[cfg(test)]
-                {
-                    let mut context = GameLoginRequestContext {
-                        state,
-                        account: &mut account,
-                        catalogs: *catalogs,
-                        pre_pushes: &mut pre_pushes,
-                        post_pushes: &mut post_pushes,
-                        handler_error: &mut handler_error,
-                        pass_details: &mut pass_details,
-                        pass_rewards: &mut pass_rewards,
-                        pass_hero_ids: &mut pass_hero_ids,
-                        pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                        pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                    };
-                    compat_feature::legacy_test_handler::handle(
-                        &mut context,
-                        request.method.as_str(),
-                        request_args,
-                    )
-                }
-                #[cfg(not(test))]
-                {
-                    HandlerResult::Error(GameError::InvalidRequest(
-                        "compat request requires typed account",
-                    ))
-                }
+                HandlerResult::Error(GameError::InvalidRequest(
+                    "compat request requires typed account",
+                ))
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
@@ -1833,33 +1809,9 @@ where
                     ))
                 }
             } else {
-                #[cfg(test)]
-                {
-                    let mut context = GameLoginRequestContext {
-                        state,
-                        account: &mut account,
-                        catalogs: *catalogs,
-                        pre_pushes: &mut pre_pushes,
-                        post_pushes: &mut post_pushes,
-                        handler_error: &mut handler_error,
-                        pass_details: &mut pass_details,
-                        pass_rewards: &mut pass_rewards,
-                        pass_hero_ids: &mut pass_hero_ids,
-                        pass_mvp_hero_id: &mut pass_mvp_hero_id,
-                        pass_shipwrecked_ids: &mut pass_shipwrecked_ids,
-                    };
-                    battle_handler::legacy_test_handler::handle(
-                        &mut context,
-                        request.method.as_str(),
-                        request_args,
-                    )
-                }
-                #[cfg(not(test))]
-                {
-                    HandlerResult::Error(GameError::InvalidRequest(
-                        "battle request requires typed account",
-                    ))
-                }
+                HandlerResult::Error(GameError::InvalidRequest(
+                    "battle request requires typed account",
+                ))
             };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());

@@ -945,7 +945,7 @@ fn daily_copy_enter_payload(start_base_ret: &[u8]) -> Vec<u8> {
     payload
 }
 
-#[cfg(test)]
+#[cfg(any())]
 pub(crate) mod legacy_test_handler {
     use super::*;
 
