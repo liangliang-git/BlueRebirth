@@ -1,6 +1,10 @@
 //! Hero feature service, compatibility, and state boundary.
 
+#[cfg(test)]
+use crate::account_state::*;
 use crate::common;
+#[cfg(test)]
+use crate::common::json::*;
 use crate::*;
 use blueoath_protocol::*;
 
@@ -8,5 +12,6 @@ use blueoath_protocol::*;
 pub(crate) mod compat_service;
 #[path = "service.rs"]
 pub(crate) mod service;
-#[allow(unused_imports)]
-pub(crate) use crate::hero_state as state;
+#[path = "state.rs"]
+pub(crate) mod state;
+pub(crate) use state::*;

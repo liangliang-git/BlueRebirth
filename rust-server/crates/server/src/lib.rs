@@ -42,8 +42,6 @@ pub(crate) use features::equip::service::{
     equip_activity_payload, equip_new_test_copy_payload, equip_test_copy_payload,
     mark_equip_activity_reward, mark_new_test_reward, resolve_new_test_reward,
 };
-#[path = "features/hero/state.rs"]
-mod hero_state;
 mod local_protocol;
 mod projection;
 #[path = "common/protocol_payload.rs"]
@@ -81,6 +79,7 @@ use features::copy::mopup_state::mop_up_pass_rets;
 use features::copy::mopup_state::*;
 #[cfg(test)]
 use features::equip::state::*;
+use features::hero::state::*;
 #[cfg(test)]
 use features::progression::study_state::*;
 use features::shop::state::*;
@@ -97,7 +96,6 @@ use frame_service::{prepare_local_request, storage_failure_response};
 #[cfg(test)]
 use game_login::process_game_login_frame_payload_with_catalogs_typed_mut;
 use game_login::process_game_login_frame_payload_with_typed_account;
-use hero_state::*;
 pub use local_protocol::dispatch;
 use projection::*;
 use protocol_payload::*;

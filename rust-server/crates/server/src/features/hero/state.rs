@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use super::*;
 
 #[cfg(test)]
-pub(super) fn hero_intensify_state(
+pub(crate) fn hero_intensify_state(
     account: &mut Value,
     catalog: &ShipIntensifyCatalog,
     hero_id: u64,
@@ -196,7 +196,7 @@ pub(super) fn hero_intensify_state(
 }
 
 #[cfg(test)]
-pub(super) fn hero_change_equip_state(
+pub(crate) fn hero_change_equip_state(
     account: &mut Value,
     hero_id: u64,
     slot: u64,
@@ -206,7 +206,7 @@ pub(super) fn hero_change_equip_state(
 }
 
 #[cfg(test)]
-pub(super) fn hero_change_equip_state_for_type(
+pub(crate) fn hero_change_equip_state_for_type(
     account: &mut Value,
     hero_id: u64,
     slot: u64,
@@ -348,7 +348,7 @@ fn hero_states_mut(hero: &mut serde_json::Map<String, Value>, equip_type: u64) -
 }
 
 #[cfg(test)]
-pub(super) fn hero_auto_equip_state(
+pub(crate) fn hero_auto_equip_state(
     account: &mut Value,
     equip_type: u64,
     units: &[(u64, Vec<(u64, u64)>)],
@@ -373,7 +373,7 @@ pub(super) fn hero_auto_equip_state(
 }
 
 #[cfg(test)]
-pub(super) fn hero_auto_unequip_state(
+pub(crate) fn hero_auto_unequip_state(
     account: &mut Value,
     equip_type: u64,
     hero_ids: &[u64],
@@ -407,7 +407,7 @@ pub(super) fn hero_auto_unequip_state(
 }
 
 #[cfg(test)]
-pub(super) fn hero_equip_binding_state(
+pub(crate) fn hero_equip_binding_state(
     account: &mut Value,
     hero_id: u64,
     equip_id: u64,
@@ -437,7 +437,7 @@ pub(super) fn hero_equip_binding_state(
 }
 
 #[cfg(test)]
-pub(super) fn hero_equip_unbinding_state(
+pub(crate) fn hero_equip_unbinding_state(
     account: &mut Value,
     hero_id: u64,
     equip_id: u64,
@@ -470,7 +470,7 @@ pub(super) fn hero_equip_unbinding_state(
 }
 
 #[cfg(test)]
-pub(super) fn hero_equip_effect_state(
+pub(crate) fn hero_equip_effect_state(
     account: &mut Value,
     hero_id: u64,
     effects: &[(i32, Vec<i32>)],
@@ -488,7 +488,7 @@ pub(super) fn hero_equip_effect_state(
 }
 
 #[cfg(test)]
-pub(super) fn hero_equip_lock_transplant_state(
+pub(crate) fn hero_equip_lock_transplant_state(
     account: &mut Value,
     hero_ids: &[u64],
     equip_type: u64,
@@ -553,7 +553,7 @@ pub(super) fn hero_equip_lock_transplant_state(
 }
 
 #[cfg(test)]
-pub(super) fn hero_advance_max_level_state(
+pub(crate) fn hero_advance_max_level_state(
     account: &mut Value,
     catalog: &ShipAdvanceCatalog,
     hero_id: u64,
@@ -599,7 +599,7 @@ pub(super) fn hero_advance_max_level_state(
 }
 
 #[cfg(test)]
-pub(super) fn hero_advance_mub_state(
+pub(crate) fn hero_advance_mub_state(
     account: &mut Value,
     catalog: &ShipBreakCatalog,
     hero_id: u64,
@@ -691,7 +691,7 @@ pub(super) fn hero_advance_mub_state(
 }
 
 #[cfg(test)]
-pub(super) fn hero_remould_state(
+pub(crate) fn hero_remould_state(
     account: &mut Value,
     catalog: &ShipRemouldCatalog,
     hero_id: u64,
@@ -855,7 +855,7 @@ pub(super) fn hero_remould_state(
 
 #[allow(dead_code)]
 #[cfg(test)]
-pub(super) fn fashion_equip_state(
+pub(crate) fn fashion_equip_state(
     account: &mut Value,
     catalog: Option<&FashionList>,
     hero_id: u64,
@@ -918,7 +918,7 @@ pub(super) fn fashion_equip_state(
 }
 
 #[cfg(test)]
-pub(super) fn hero_advance_state(
+pub(crate) fn hero_advance_state(
     account: &mut Value,
     catalog: &ShipBreakCatalog,
     hero_id: u64,
@@ -1072,7 +1072,7 @@ pub(super) fn hero_advance_state(
 }
 
 #[cfg(test)]
-pub(super) fn consume_hero_skill_upgrade_materials(
+pub(crate) fn consume_hero_skill_upgrade_materials(
     account: &mut Value,
     catalog: &HeroSkillUpgradeCatalog,
     skill_id: i32,
@@ -1102,7 +1102,7 @@ pub(super) fn consume_hero_skill_upgrade_materials(
 }
 
 #[cfg(test)]
-pub(super) fn retire_heroes_state(
+pub(crate) fn retire_heroes_state(
     account: &mut Value,
     hero_ids: &[u64],
     is_dis_equip: bool,
@@ -1214,7 +1214,7 @@ pub(super) fn retire_heroes_state(
 }
 
 #[cfg(test)]
-pub(super) fn encode_hero_delete_payload(account: &Value, hero_ids: &[u64]) -> Vec<u8> {
+pub(crate) fn encode_hero_delete_payload(account: &Value, hero_ids: &[u64]) -> Vec<u8> {
     let bag_size = account
         .get("dock")
         .and_then(|dock| json_i32(dock, "bagSize"))
@@ -1232,7 +1232,7 @@ pub(super) fn encode_hero_delete_payload(account: &Value, hero_ids: &[u64]) -> V
 }
 
 #[cfg(test)]
-pub(super) fn encode_hero_intensify_payload(
+pub(crate) fn encode_hero_intensify_payload(
     account: &Value,
     target_id: u64,
     consumed_ids: &[u64],
@@ -1257,7 +1257,7 @@ pub(super) fn encode_hero_intensify_payload(
 }
 
 #[cfg(test)]
-pub(super) fn apply_hero_breakdown_rewards(
+pub(crate) fn apply_hero_breakdown_rewards(
     account: &mut Value,
     retired_templates: &[i32],
     catalog: Option<&HeroBreakdownCatalog>,
@@ -1292,7 +1292,7 @@ pub(super) fn apply_hero_breakdown_rewards(
     rewards
 }
 
-pub(super) fn encode_retire_hero_response(rewards: &[ShopReward]) -> Vec<u8> {
+pub(crate) fn encode_retire_hero_response(rewards: &[ShopReward]) -> Vec<u8> {
     let mut output = Vec::new();
     for reward in rewards {
         let mut nested = Vec::new();
@@ -1305,7 +1305,7 @@ pub(super) fn encode_retire_hero_response(rewards: &[ShopReward]) -> Vec<u8> {
 }
 
 #[cfg(test)]
-pub(super) fn encode_hero_bag_push(account: &Value) -> Vec<u8> {
+pub(crate) fn encode_hero_bag_push(account: &Value) -> Vec<u8> {
     TMessageCodec::encode_response(&TResponse {
         method: "hero.UpdateHeroBagData".to_owned(),
         ret: Some(HeroBagCodec::encode(&hero_bag_from_account(account))),
@@ -1314,7 +1314,7 @@ pub(super) fn encode_hero_bag_push(account: &Value) -> Vec<u8> {
     })
 }
 #[cfg(test)]
-pub(super) fn illustrate_info_payload(
+pub(crate) fn illustrate_info_payload(
     account: &Value,
     handbook_behaviours: Option<&[i32]>,
     hero_memories: Option<&[(i32, i32)]>,
@@ -1371,7 +1371,7 @@ pub(super) fn illustrate_info_payload(
     output
 }
 
-pub(super) fn illustrate_info_payload_for_templates(
+pub(crate) fn illustrate_info_payload_for_templates(
     template_ids: &[i32],
     handbook_behaviours: Option<&[i32]>,
 ) -> Vec<u8> {
@@ -1390,7 +1390,7 @@ pub(super) fn illustrate_info_payload_for_templates(
     output
 }
 
-pub(super) fn illustrate_info_payload_for_entries(entries: &[(i32, Vec<i32>)]) -> Vec<u8> {
+pub(crate) fn illustrate_info_payload_for_entries(entries: &[(i32, Vec<i32>)]) -> Vec<u8> {
     let now = current_unix_seconds();
     let mut output = Vec::new();
     for (illustrate_id, behaviours) in entries {
@@ -1412,7 +1412,7 @@ pub(super) fn illustrate_info_payload_for_entries(entries: &[(i32, Vec<i32>)]) -
 }
 
 #[cfg(test)]
-pub(super) fn illustrate_info_payload_for_rewards(
+pub(crate) fn illustrate_info_payload_for_rewards(
     rewards: &[ShopReward],
     handbook_behaviours: Option<&[i32]>,
 ) -> Option<Vec<u8>> {
@@ -1448,7 +1448,7 @@ fn append_illustrate_info_item(
     append_message_field(output, 1, &item);
 }
 
-pub(super) fn story_memory_payload(memories: Option<&[(i32, i32)]>) -> Vec<u8> {
+pub(crate) fn story_memory_payload(memories: Option<&[(i32, i32)]>) -> Vec<u8> {
     let mut output = Vec::new();
     if let Some(memories) = memories {
         for (chapter_id, index) in memories {
