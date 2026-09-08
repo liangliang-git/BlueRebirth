@@ -32,7 +32,20 @@ impl Response {
     }
 
     pub fn encode(self, callback_handler: u32, token: String, time: u32) -> Vec<u8> {
+        self.encode_with_error(callback_handler, token, time, 0, String::new())
+    }
+
+    pub fn encode_with_error(
+        self,
+        callback_handler: u32,
+        token: String,
+        time: u32,
+        error_code: i32,
+        error_message: String,
+    ) -> Vec<u8> {
         TMessageCodec::encode_response(&TResponse {
+            err: error_code,
+            err_msg: error_message,
             method: self.method,
             ret: Some(self.payload),
             callback_handler,

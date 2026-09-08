@@ -1708,7 +1708,6 @@ pub(super) fn goods_copy_snapshot_payload(
 /// C# performs this before both GetData and SelectEx; doing it here keeps server-owned state
 /// stable after client disconnects and ensures unknown client IDs cannot be persisted.
 #[cfg(test)]
-#[cfg(test)]
 pub(super) fn normalize_daily_copy_state(
     account: &mut Value,
     chapter_catalog: Option<&ChapterCatalog>,

@@ -8,7 +8,6 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use super::catalog::*;
 use super::common::error::GameError;
 use super::common::request::RequestContext;
-#[cfg(not(test))]
 use super::common::response::Response;
 use super::common::response::{HandlerResult, ResponseEffects};
 use super::router::{GameMethod, KnownMethod, MethodFamily};
@@ -263,10 +262,12 @@ fn apply_response_effects(
     }
 }
 
-fn handler_payload(result: HandlerResult, method: &str) -> Option<Vec<u8>> {
-    result
-        .into_response(method)
-        .map(|response| response.payload)
+fn response_payload(method: &str, payload: Vec<u8>) -> Option<Response> {
+    Some(Response::raw(method, payload))
+}
+
+fn handler_payload(result: HandlerResult, method: &str) -> Option<Response> {
+    result.into_response(method)
 }
 
 pub(super) async fn process_game_login_frame_payload_with_catalogs_typed_mut<S>(
@@ -357,7 +358,7 @@ where
             if CopyIdRequest::decode(request_args).is_err() {
                 handler_error = Some(GameError::InvalidRequest("copy id is invalid"));
             }
-            Some(Vec::new())
+            response_payload(request.method.as_str(), Vec::new())
         }
         _ if typed_account.is_some()
             && activity_handler::handles_typed(request.method.as_str()) =>
@@ -399,15 +400,16 @@ where
             handler_error = Some(GameError::InvalidRequest(
                 "request family has no typed handler",
             ));
-            Some(Vec::new())
+            response_payload(request.method.as_str(), Vec::new())
         }
-        _ if known_method == Some(KnownMethod::PlayerLogin) => {
-            Some(GameLoginCodec::encode_response(&TRetLogin {
+        _ if known_method == Some(KnownMethod::PlayerLogin) => response_payload(
+            request.method.as_str(),
+            GameLoginCodec::encode_response(&TRetLogin {
                 ret: "ok".to_owned(),
                 feign_role_id: state.profile_id.clone(),
                 err_code: 0,
-            }))
-        }
+            }),
+        ),
         _ if known_method == Some(KnownMethod::PlayerGetUserList) => {
             let user = match typed_account.as_deref() {
                 Some(account) => user_info_from_typed_account(state, account),
@@ -416,7 +418,7 @@ where
                     UserInfo::default()
                 }
             };
-            Some(UserListCodec::encode(&[user]))
+            response_payload(request.method.as_str(), UserListCodec::encode(&[user]))
         }
         _ if known_method == Some(KnownMethod::PlayerCreateUser) => {
             let user = match typed_account.as_deref() {
@@ -426,7 +428,7 @@ where
                     UserInfo::default()
                 }
             };
-            Some(PlayerUserCodec::encode(&user))
+            response_payload(request.method.as_str(), PlayerUserCodec::encode(&user))
         }
         _ if known_method == Some(KnownMethod::CacheData)
             || known_method == Some(KnownMethod::RepairHero)
@@ -508,7 +510,7 @@ where
                     FleetInfo::default()
                 }
             };
-            Some(FleetInfoCodec::encode(&fleet))
+            response_payload(request.method.as_str(), FleetInfoCodec::encode(&fleet))
         }
         _ if known_method == Some(KnownMethod::BagGetInfo) => {
             let bag = match typed_account.as_deref() {
@@ -518,7 +520,7 @@ where
                     BagInfo::default()
                 }
             };
-            Some(BagInfoCodec::encode(&bag))
+            response_payload(request.method.as_str(), BagInfoCodec::encode(&bag))
         }
         _ if known_method == Some(KnownMethod::TacticSetHeros) => {
             let fleet = match FleetInfo::decode(request_args) {
@@ -535,16 +537,16 @@ where
                         handler_error = Some(GameError::InvalidRequest(
                             "fleet tactic contains invalid or unowned hero",
                         ));
-                        Some(Vec::new())
+                        response_payload(request.method.as_str(), Vec::new())
                     } else {
-                        Some(FleetInfoCodec::encode(&fleet))
+                        response_payload(request.method.as_str(), FleetInfoCodec::encode(&fleet))
                     }
                 } else {
                     handler_error = Some(GameError::AccountUnavailable);
-                    Some(FleetInfoCodec::encode(&fleet))
+                    response_payload(request.method.as_str(), FleetInfoCodec::encode(&fleet))
                 }
             } else {
-                Some(Vec::new())
+                response_payload(request.method.as_str(), Vec::new())
             }
         }
         _ if known_method == Some(KnownMethod::PresetFleetInfo) => {
@@ -555,7 +557,7 @@ where
                     PresetFleetInfo::default()
                 }
             };
-            Some(PresetFleetCodec::encode(&preset))
+            response_payload(request.method.as_str(), PresetFleetCodec::encode(&preset))
         }
         _ if known_method == Some(KnownMethod::PresetFleetSet) => {
             match PresetFleetCodec::decode(request_args) {
@@ -565,7 +567,7 @@ where
                             handler_error = Some(GameError::InvalidRequest(
                                 "preset fleet contains invalid or unowned hero",
                             ));
-                            Some(Vec::new())
+                            response_payload(request.method.as_str(), Vec::new())
                         } else {
                             let payload = PresetFleetCodec::encode(
                                 &preset_fleet_info_from_typed_account(typed),
@@ -575,18 +577,18 @@ where
                                 "presetfleet.PresetFleetsInfo",
                                 payload.clone(),
                             );
-                            Some(payload)
+                            response_payload(request.method.as_str(), payload)
                         }
                     } else {
                         handler_error = Some(GameError::AccountUnavailable);
-                        Some(Vec::new())
+                        response_payload(request.method.as_str(), Vec::new())
                     }
                 }
                 _ => {
                     handler_error = Some(GameError::Internal(
                         "preset fleet request is invalid".to_owned(),
                     ));
-                    Some(Vec::new())
+                    response_payload(request.method.as_str(), Vec::new())
                 }
             }
         }
@@ -598,7 +600,7 @@ where
                     UserInfo::default()
                 }
             };
-            Some(UserInfoCodec::encode(&user))
+            response_payload(request.method.as_str(), UserInfoCodec::encode(&user))
         }
         _ if known_method == Some(KnownMethod::UserLogin) => {
             if let Some(typed) = typed_account.as_deref_mut() {
@@ -620,7 +622,10 @@ where
                     &mut handler_error,
                 );
             }
-            Some(UserLoginCodec::encode_response("ok", "", 0))
+            response_payload(
+                request.method.as_str(),
+                UserLoginCodec::encode_response("ok", "", 0),
+            )
         }
         "user.SetUserSecretary" => {
             match SetSecretaryRequest::decode(request_args) {
@@ -637,7 +642,7 @@ where
                     ));
                 }
             }
-            Some(Vec::new())
+            response_payload(request.method.as_str(), Vec::new())
         }
         "user.ChangeName" => {
             match ChangeNameRequest::decode(request_args) {
@@ -650,7 +655,7 @@ where
                     handler_error = Some(GameError::Internal("name request is invalid".to_owned()));
                 }
             }
-            Some(Vec::new())
+            response_payload(request.method.as_str(), Vec::new())
         }
         "user.SetMessage" => {
             match SetMessageRequest::decode(request_args) {
@@ -664,7 +669,7 @@ where
                         Some(GameError::Internal("message request is invalid".to_owned()));
                 }
             }
-            Some(Vec::new())
+            response_payload(request.method.as_str(), Vec::new())
         }
         "user.SetPlayerHeadFrame" => {
             match SetHeadFrameRequest::decode(request_args) {
@@ -679,7 +684,7 @@ where
                     ));
                 }
             }
-            Some(Vec::new())
+            response_payload(request.method.as_str(), Vec::new())
         }
         "user.SetHead" => {
             match SetHeadRequest::decode(request_args) {
@@ -692,7 +697,7 @@ where
                     handler_error = Some(GameError::Internal("head request is invalid".to_owned()));
                 }
             }
-            Some(Vec::new())
+            response_payload(request.method.as_str(), Vec::new())
         }
         _ if method.is_family(MethodFamily::User)
             || method.is_family(MethodFamily::UserServer)
@@ -1236,21 +1241,27 @@ where
                     BagInfoCodec::encode(&bag_info_from_typed_account(account)),
                 );
             }
-            Some(encode_mail_list_response(
-                mail_catalog.unwrap_or_default(),
-                current_unix_seconds(),
-                &rewards,
-            ))
+            response_payload(
+                request.method.as_str(),
+                encode_mail_list_response(
+                    mail_catalog.unwrap_or_default(),
+                    current_unix_seconds(),
+                    &rewards,
+                ),
+            )
         }
         "mail.GetMailList"
         | "mail.OpenMail"
         | "mail.DeleteMail"
         | "mail.DeleteAllMail"
-        | "mail.ReceiveNewMail" => Some(encode_mail_list_response(
-            mail_catalog.unwrap_or_default(),
-            current_unix_seconds(),
-            &[],
-        )),
+        | "mail.ReceiveNewMail" => response_payload(
+            request.method.as_str(),
+            encode_mail_list_response(
+                mail_catalog.unwrap_or_default(),
+                current_unix_seconds(),
+                &[],
+            ),
+        ),
         _ if method.is_family(MethodFamily::Shop)
             || method.is_family(MethodFamily::Recharge)
             || known_method == Some(KnownMethod::BagGetInfo)
@@ -1395,7 +1406,7 @@ where
                 .as_ref()
                 .map(|typed| task_info_payload_from_typed_account(typed, task_catalog));
             match result {
-                Some(payload) => Some(payload),
+                Some(payload) => response_payload(request.method.as_str(), payload),
                 None => {
                     handler_error = Some(GameError::InvalidRequest(
                         "task info requires typed account",
@@ -1547,10 +1558,13 @@ where
             handler_payload(result, request.method.as_str())
         }
         "dailycopy.UpdateDailyCopyData" => typed_account.as_ref().map(|typed| {
-            daily_copy_snapshot_payload_from_typed_account(
-                typed,
-                chapter_catalog,
-                current_unix_seconds(),
+            Response::raw(
+                request.method.as_str(),
+                daily_copy_snapshot_payload_from_typed_account(
+                    typed,
+                    chapter_catalog,
+                    current_unix_seconds(),
+                ),
             )
         }),
         _ if method.is_family(MethodFamily::MopUp) && typed_account.is_some() => {
@@ -1703,20 +1717,20 @@ where
                 .map(|catalog| catalog.sea.contains(&copy_id))
                 .unwrap_or(copy_id > 0);
             if copy_id < 0 {
-                Some(Vec::new())
+                response_payload(request.method.as_str(), Vec::new())
             } else if !known_copy {
                 handler_error = Some(GameError::Internal("sea copy is invalid".to_owned()));
-                Some(Vec::new())
+                response_payload(request.method.as_str(), Vec::new())
             } else if !(1..=7).contains(&requested) {
                 handler_error = Some(GameError::Internal("sea difficulty is invalid".to_owned()));
-                Some(Vec::new())
+                response_payload(request.method.as_str(), Vec::new())
             } else if let Some(account) = typed_account.as_deref_mut() {
                 let level = i32::try_from(account.character.level).unwrap_or(i32::MAX);
                 if level < SEA_DIFFICULTY_UNLOCK_LEVEL && requested > 1 {
                     handler_error = Some(GameError::Internal(
                         "sea difficulty unlocks at commander level 60".to_owned(),
                     ));
-                    Some(Vec::new())
+                    response_payload(request.method.as_str(), Vec::new())
                 } else {
                     account.sea.difficulty = requested as u32;
                     let fallback_catalog;
@@ -1748,11 +1762,11 @@ where
                             account.sea.difficulty as i32,
                         ),
                     );
-                    Some(Vec::new())
+                    response_payload(request.method.as_str(), Vec::new())
                 }
             } else {
                 handler_error = Some(GameError::AccountUnavailable);
-                Some(Vec::new())
+                response_payload(request.method.as_str(), Vec::new())
             }
         }
         "copy.GetCopy" => {
@@ -1782,54 +1796,61 @@ where
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            Some(match copy_type {
-                2 => {
-                    let pass_counts = Vec::new();
-                    CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
-                        &catalog.sea,
-                        copy_progress_max_or_initial(&catalog.sea, &passed, catalog.sea_initial),
-                        &passed,
-                        &pass_counts,
+            response_payload(
+                request.method.as_str(),
+                match copy_type {
+                    2 => {
+                        let pass_counts = Vec::new();
+                        CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
+                            &catalog.sea,
+                            copy_progress_max_or_initial(
+                                &catalog.sea,
+                                &passed,
+                                catalog.sea_initial,
+                            ),
+                            &passed,
+                            &pass_counts,
+                            1,
+                        )
+                    }
+                    33 => CopyInfoCodec::encode(
+                        33,
+                        &catalog.mubar,
+                        catalog.mubar.iter().copied().max().unwrap_or_default(),
+                    ),
+                    10 => CopyInfoCodec::encode(
+                        10,
+                        &catalog.goods_copy,
+                        catalog.goods_copy.iter().copied().max().unwrap_or_default(),
+                    ),
+                    24 => CopyInfoCodec::encode(
+                        24,
+                        &catalog.tower,
+                        catalog.tower.iter().copied().max().unwrap_or_default(),
+                    ),
+                    34 => CopyInfoCodec::encode(
+                        34,
+                        &catalog.equip_new_test,
+                        catalog
+                            .equip_new_test
+                            .iter()
+                            .copied()
+                            .max()
+                            .unwrap_or_default(),
+                    ),
+                    9 => CopyInfoCodec::encode(
+                        9,
+                        &catalog.daily,
+                        catalog.daily.iter().copied().max().unwrap_or_default(),
+                    ),
+                    _ => CopyInfoCodec::encode_with_progress(
                         1,
-                    )
-                }
-                33 => CopyInfoCodec::encode(
-                    33,
-                    &catalog.mubar,
-                    catalog.mubar.iter().copied().max().unwrap_or_default(),
-                ),
-                10 => CopyInfoCodec::encode(
-                    10,
-                    &catalog.goods_copy,
-                    catalog.goods_copy.iter().copied().max().unwrap_or_default(),
-                ),
-                24 => CopyInfoCodec::encode(
-                    24,
-                    &catalog.tower,
-                    catalog.tower.iter().copied().max().unwrap_or_default(),
-                ),
-                34 => CopyInfoCodec::encode(
-                    34,
-                    &catalog.equip_new_test,
-                    catalog
-                        .equip_new_test
-                        .iter()
-                        .copied()
-                        .max()
-                        .unwrap_or_default(),
-                ),
-                9 => CopyInfoCodec::encode(
-                    9,
-                    &catalog.daily,
-                    catalog.daily.iter().copied().max().unwrap_or_default(),
-                ),
-                _ => CopyInfoCodec::encode_with_progress(
-                    1,
-                    &catalog.plot,
-                    copy_progress_max_or_first(&catalog.plot, &passed),
-                    &passed,
-                ),
-            })
+                        &catalog.plot,
+                        copy_progress_max_or_first(&catalog.plot, &passed),
+                        &passed,
+                    ),
+                },
+            )
         }
         "copy.UnLockCopy" => {
             let fallback_catalog;
@@ -1851,12 +1872,15 @@ where
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            Some(CopyInfoCodec::encode_with_progress(
-                1,
-                &catalog.plot,
-                copy_progress_max_or_first(&catalog.plot, &passed),
-                &passed,
-            ))
+            response_payload(
+                request.method.as_str(),
+                CopyInfoCodec::encode_with_progress(
+                    1,
+                    &catalog.plot,
+                    copy_progress_max_or_first(&catalog.plot, &passed),
+                    &passed,
+                ),
+            )
         }
         _ => None,
     };
@@ -1864,32 +1888,33 @@ where
     // empty protobuf payload without mutating account state.
     if ret.is_none() {
         if method.is_known() {
-            ret = Some(Vec::new());
+            ret = response_payload(request.method.as_str(), Vec::new());
         } else {
             let error = GameError::UnknownMethod(request.method.clone());
             handler_error = Some(error.clone());
 
-            ret = Some(Vec::new());
+            ret = response_payload(request.method.as_str(), Vec::new());
         }
     }
-    let trace_ret_len = ret.as_ref().map(Vec::len).unwrap_or_default();
+    let trace_ret_len = ret
+        .as_ref()
+        .map(|response| response.payload.len())
+        .unwrap_or_default();
     let trace_method = request.method.clone();
     let (client_error_code, client_error_message) = handler_error
         .as_ref()
         .map(|error| (error.client_code(), error.to_string()))
         .unwrap_or((0, String::new()));
     let trace_err_msg = client_error_message.clone();
-    let response = TMessageCodec::encode_response(&TResponse {
-        err: client_error_code,
-        err_msg: client_error_message,
-        method: request.method,
-        ret,
-        callback_handler: request.callback_handler,
-        time: current_unix_seconds(),
-        token: request.token,
-        is_response: 1,
-        ..TResponse::default()
-    });
+    let response = ret
+        .expect("known or unknown route always creates callback response")
+        .encode_with_error(
+            request.callback_handler,
+            request.token,
+            current_unix_seconds(),
+            client_error_code,
+            client_error_message,
+        );
     if std::env::var_os("BLUEOATH_TRACE_METHODS").is_some() {
         eprintln!(
             "game-login result method={} err={} msg={} ret={} pre_pushes={} post_pushes={}",
