@@ -158,6 +158,11 @@ pub(super) fn hero_bag_from_account(account: &Value) -> HeroBag {
 }
 
 pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountState) -> HeroBag {
+    let now = current_unix_seconds();
+    let create_time = u32::try_from(account.character.create_time)
+        .ok()
+        .filter(|value| *value != 0)
+        .unwrap_or(now);
     let heroes = account
         .dock
         .heroes
@@ -193,6 +198,8 @@ pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountStat
             change_name_time: i32::try_from(hero.change_name_time).unwrap_or(i32::MAX),
             level: i32::try_from(hero.level).unwrap_or(i32::MAX),
             exp: i32::try_from(hero.exp).unwrap_or(i32::MAX),
+            create_time: i32::try_from(create_time).unwrap_or(i32::MAX),
+            update_time: i32::try_from(now).unwrap_or(i32::MAX),
             affection: i32::try_from(hero.affection).unwrap_or(i32::MAX),
             cur_hp: i64::try_from(hero.hp).unwrap_or(i64::MAX),
             mood: i32::try_from(hero.mood).unwrap_or(i32::MAX),

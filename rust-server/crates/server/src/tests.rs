@@ -69,6 +69,8 @@ fn typed_starter_hero_has_default_fashioning_for_home_model() {
 
     assert_eq!(bag.heroes[0].template_id, 10_210_511);
     assert_eq!(bag.heroes[0].fashioning, 1_021_051);
+    assert!(bag.heroes[0].create_time > 0);
+    assert!(bag.heroes[0].update_time > 0);
 }
 
 #[tokio::test]
