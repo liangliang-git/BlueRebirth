@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+#[cfg(test)]
 use serde_json::Value;
 
 use super::*;
@@ -422,6 +423,7 @@ pub(super) fn battle_start_payload_from_typed_account(
     output
 }
 
+#[cfg(test)]
 fn select_battle_heroes<'a>(all_heroes: &'a [Value], requested_ids: &[i32]) -> Vec<&'a Value> {
     if requested_ids.is_empty() {
         return all_heroes.iter().take(6).collect();
@@ -449,6 +451,7 @@ fn select_battle_heroes<'a>(all_heroes: &'a [Value], requested_ids: &[i32]) -> V
     }
 }
 
+#[cfg(test)]
 fn encode_battle_fleet(
     heroes: &[&Value],
     fleet_index: usize,
@@ -877,6 +880,7 @@ pub(super) fn validate_battle_attack(
     .then_some(i64::from(enemy_id))
 }
 
+#[cfg(test)]
 pub(super) fn battle_copy_passed(account: &Value, copy_id: i32) -> bool {
     let has_record = |value: &Value| {
         value
@@ -901,6 +905,7 @@ pub(super) fn battle_copy_passed(account: &Value, copy_id: i32) -> bool {
             })
 }
 
+#[cfg(test)]
 pub(super) fn completed_copy_ids(account: &Value, progress_key: &str) -> Vec<i32> {
     account
         .get(progress_key)
@@ -920,6 +925,7 @@ pub(super) fn completed_copy_ids(account: &Value, progress_key: &str) -> Vec<i32
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn completed_copy_counts(account: &Value, progress_key: &str) -> Vec<(i32, i32)> {
     account
         .get(progress_key)
@@ -980,12 +986,14 @@ pub(super) fn copy_request_type(payload: &[u8]) -> i32 {
         .unwrap_or(1)
 }
 
+#[cfg(test)]
 pub(super) fn commander_level(account: &Value) -> i32 {
     json_i32(account.get("character").unwrap_or(account), "level")
         .unwrap_or_default()
         .max(1)
 }
 
+#[cfg(test)]
 pub(super) fn sea_difficulty_for_account(account: &Value) -> i32 {
     if commander_level(account) < SEA_DIFFICULTY_UNLOCK_LEVEL {
         return 1;

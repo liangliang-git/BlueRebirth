@@ -11,6 +11,7 @@ const ZERO_TRACKED_BAG_ITEMS: &[i32] = &[
     10029, 10030, 10031, // construction resources
 ];
 
+#[cfg(test)]
 pub(super) fn json_i64_any(value: &Value) -> i64 {
     value.as_i64().unwrap_or_default()
 }
@@ -266,6 +267,7 @@ pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountStat
     }
 }
 
+#[cfg(test)]
 fn equip_groups_from_hero(hero: &Value) -> Vec<HeroEquipGroup> {
     let normal_ids = hero
         .get("equipSlots")
@@ -1623,6 +1625,7 @@ pub(super) fn daily_copy_group_progress_from_account(
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn daily_copy_reset_required(daily: Option<&Value>, now: u32) -> bool {
     let reset_day = (u64::from(now) + 8 * 60 * 60) / 86_400;
     daily
@@ -1653,6 +1656,7 @@ pub(super) fn daily_copy_snapshot_payload(
     )
 }
 
+#[cfg(test)]
 pub(super) fn goods_copy_snapshot_payload(
     account: &Value,
     chapter_catalog: Option<&ChapterCatalog>,
@@ -1703,6 +1707,7 @@ pub(super) fn goods_copy_snapshot_payload(
 /// Normalize persisted DailyCopy state to configured chapters/groups and current China day.
 /// C# performs this before both GetData and SelectEx; doing it here keeps server-owned state
 /// stable after client disconnects and ensures unknown client IDs cannot be persisted.
+#[cfg(test)]
 #[cfg(test)]
 pub(super) fn normalize_daily_copy_state(
     account: &mut Value,
