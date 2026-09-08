@@ -32,7 +32,11 @@ Rust server is the canonical local server. Current slice provides:
 - `blueoath-storage`: SQLite persistence with startup migrations under `rust-server/migrations/`.
   New databases create normalized character/hero/equipment/fleet/inventory/battle/task tables,
   foreign keys, non-negative checks, indexes, WAL, busy timeout, and account revision CAS.
-  Existing JSON snapshot methods remain only as a transition adapter while handlers migrate by domain.
+  Typed `AccountRepository` transactions validate domain invariants before commit; account data is
+  not stored in `account_json` or `state_json` catch-all columns.
+- Server handlers return typed `HandlerResult`/`ResponseEffects`; protobuf bytes are encoded only at
+  the protocol/socket boundary. Catalog references and nested drop pools are validated before
+  listeners accept traffic.
 
 Run checks:
 
@@ -40,6 +44,7 @@ Run checks:
 cargo test --manifest-path .\rust-server\Cargo.toml
 cargo clippy --manifest-path .\rust-server\Cargo.toml --all-targets -- -D warnings
 cargo fmt --manifest-path .\rust-server\Cargo.toml --all -- --check
+cargo build --manifest-path .\rust-server\Cargo.toml --workspace --release
 ```
 
 Run server:
