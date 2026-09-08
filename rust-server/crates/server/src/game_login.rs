@@ -813,10 +813,10 @@ where
         _ if method.is_family(MethodFamily::Boss) => {
             let result = if let Some(typed) = typed_account.as_mut() {
                 let result = boss_handler::handle_typed(state, typed, request.method.as_str());
-                if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
-                    result
-                } else {
+                if matches!(result, HandlerResult::Empty) {
                     HandlerResult::Error(GameError::InvalidRequest("boss request is not supported"))
+                } else {
+                    result
                 }
             } else {
                 HandlerResult::Error(GameError::InvalidRequest("boss requires typed account"))
@@ -905,12 +905,12 @@ where
                     request.method.as_str(),
                     request_args,
                 );
-                if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
-                    result
-                } else {
+                if matches!(result, HandlerResult::Empty) {
                     HandlerResult::Error(GameError::InvalidRequest(
                         "activity request is not supported",
                     ))
+                } else {
+                    result
                 }
             } else {
                 HandlerResult::Error(GameError::InvalidRequest(
@@ -1294,12 +1294,12 @@ where
                     &mut commerce_effects,
                     commerce_handler::CommerceTypedCatalogs { shop: shop_catalog },
                 );
-                if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
-                    result
-                } else {
+                if matches!(result, HandlerResult::Empty) {
                     HandlerResult::Error(GameError::InvalidRequest(
                         "commerce request is not supported",
                     ))
+                } else {
+                    result
                 }
             } else {
                 HandlerResult::Error(GameError::InvalidRequest("commerce requires typed account"))
@@ -1365,12 +1365,12 @@ where
                         gold_multiplier: state.building_gold_multiplier,
                     },
                 );
-                if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
-                    result
-                } else {
+                if matches!(result, HandlerResult::Empty) {
                     HandlerResult::Error(GameError::InvalidRequest(
                         "building request is not supported",
                     ))
+                } else {
+                    result
                 }
             } else {
                 HandlerResult::Error(GameError::InvalidRequest(
@@ -1627,7 +1627,7 @@ where
                         &mut battle_effects,
                     ),
                 );
-                if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
+                if !matches!(result, HandlerResult::Empty) {
                     typed_handled = true;
                     result
                 } else {

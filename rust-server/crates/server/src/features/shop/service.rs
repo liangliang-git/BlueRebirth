@@ -16,6 +16,10 @@ pub(crate) fn handle_typed(
     catalogs: CommerceTypedCatalogs<'_>,
 ) -> HandlerResult {
     match method {
+        // Local builds do not have a payment provider.  The client still sends
+        // this callback when opening/confirming a recharge item; acknowledge it
+        // without mutating the account or granting paid goods.
+        "recharge.DirectBuyItem" => HandlerResult::Reply(Response::raw(method, Vec::new())),
         "shop.GetShopsInfo" | "shop.UpdateShopInfo" => {
             HandlerResult::Reply(Response::raw(method, shop_info_payload(catalogs.shop)))
         }
@@ -418,6 +422,25 @@ mod tests {
     use crate::common::response::HandlerResult;
 
     use super::*;
+
+    #[test]
+    fn local_recharge_purchase_is_acknowledged_without_payment_side_effects() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("typed-recharge").unwrap(),
+            "Captain",
+        );
+        let before = account.clone();
+        let result = handle_typed(
+            &mut account,
+            &ServerState::new("typed-recharge", "Captain", "1.0.0"),
+            "recharge.DirectBuyItem",
+            &[0x08, 0x01, 0x10, 0x01],
+            &mut ResponseEffects::default(),
+            CommerceTypedCatalogs { shop: None },
+        );
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert_eq!(account, before);
+    }
 
     #[test]
     fn typed_shop_buy_updates_resources_and_inventory() {
