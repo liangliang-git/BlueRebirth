@@ -219,63 +219,6 @@ where
         .await
 }
 
-/// Compatibility adapter for focused route tests that need to override one catalog.
-/// Production paths use [`GameLoginCatalogs`] directly.
-#[cfg(test)]
-#[allow(clippy::too_many_arguments)]
-async fn process_game_login_frame_with_catalog_mut<S>(
-    stream: &mut S,
-    state: &ServerState,
-    account: Option<&mut Value>,
-    fashion_catalog: Option<&FashionList>,
-    equip_catalog: Option<&EquipCatalog>,
-    hero_level_catalog: Option<&HeroLevelCatalog>,
-    shop_catalog: Option<&ShopCatalog>,
-    mail_catalog: Option<&[MailTemplate]>,
-    handbook_behaviours: Option<&[i32]>,
-    hero_memories: Option<&[(i32, i32)]>,
-    chapter_catalog: Option<&ChapterCatalog>,
-    task_catalog: Option<&TaskCatalog>,
-    battle_catalog: Option<&BattleCatalog>,
-    hero_breakdown_catalog: Option<&HeroBreakdownCatalog>,
-    building_catalog: Option<&BuildingCatalog>,
-) -> Result<bool, ServerError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let catalogs = GameLoginCatalogs {
-        fashion: fashion_catalog,
-        equip: equip_catalog,
-        hero_level: hero_level_catalog,
-        shop: shop_catalog,
-        mails: mail_catalog,
-        handbook_behaviours,
-        hero_memories,
-        chapters: chapter_catalog,
-        tasks: task_catalog,
-        battle: battle_catalog,
-        hero_breakdown: hero_breakdown_catalog,
-        buildings: building_catalog,
-        equip_new_test: None,
-        affection: None,
-        combination: None,
-    };
-    process_game_login_frame_with_catalogs_mut(stream, state, account, &catalogs).await
-}
-
-#[cfg(test)]
-async fn process_game_login_frame_with_catalogs_mut<S>(
-    stream: &mut S,
-    state: &ServerState,
-    account: Option<&mut Value>,
-    catalogs: &GameLoginCatalogs<'_>,
-) -> Result<bool, ServerError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    process_game_login_frame_with_catalogs_typed_mut(stream, state, account, None, catalogs).await
-}
-
 #[cfg(test)]
 async fn process_game_login_frame_with_catalogs_typed_mut<S>(
     stream: &mut S,

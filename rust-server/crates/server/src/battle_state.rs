@@ -619,7 +619,6 @@ pub(super) fn battle_position_fleet_id(
     }
 }
 
-#[cfg(test)]
 pub(super) fn battle_fleet_aliases(
     copy_id: i32,
     battle_catalog: Option<&BattleCatalog>,

@@ -32,11 +32,11 @@ use super::{
     mark_battle_fleet_passed, mop_up_pass_rets, mop_up_payload, mop_up_payload_with_pass_rets,
     normalize_daily_copy_state, normalize_task_state, prepare_local_request,
     preset_fleet_info_from_account, preset_fleet_info_from_typed_account,
-    process_game_login_frame_with_catalog_mut, process_game_login_frame_with_catalogs_typed_mut,
-    receive_construction, record_battle_pass, renovate_equip_state, resolve_study_skill_id,
-    return_shop_buy_response, scale_reward, sea_difficulty_for_account, set_fleet_on_typed_account,
-    set_preset_fleet_from_account, set_preset_fleet_on_typed_account, set_sea_difficulty,
-    settle_mop_up, settle_mop_up_with_config, settle_support_state, ship_attributes_for_hero,
+    process_game_login_frame_with_catalogs_typed_mut, receive_construction, record_battle_pass,
+    renovate_equip_state, resolve_study_skill_id, return_shop_buy_response, scale_reward,
+    sea_difficulty_for_account, set_fleet_on_typed_account, set_preset_fleet_from_account,
+    set_preset_fleet_on_typed_account, set_sea_difficulty, settle_mop_up,
+    settle_mop_up_with_config, settle_support_state, ship_attributes_for_hero,
     ship_attributes_for_template, shop_costs_from_value, shop_info_payload, start_construction,
     start_study_state, start_support_state, story_memory_payload, study_info_payload,
     study_skill_state, sync_achievement_points, sync_typed_battle_state,
@@ -1974,50 +1974,6 @@ fn typed_battle_supply_debit_is_atomic_and_validates_owned_heroes() {
     assert_eq!(account, after);
 }
 
-async fn battle_route_test_request(
-    account: &mut serde_json::Value,
-    state: &ServerState,
-    catalog: &BattleCatalog,
-    method: &str,
-    args: Vec<u8>,
-) -> Vec<blueoath_protocol::TResponse> {
-    let (mut client, mut server) = duplex(1_048_576);
-    let request = TMessageCodec::encode_request(&TRequest {
-        method: method.to_owned(),
-        args: Some(args),
-        callback_handler: 71,
-        ..TRequest::default()
-    });
-    NetSocketFrameCodec::write(&mut client, 0, &request)
-        .await
-        .unwrap();
-    process_game_login_frame_with_catalog_mut(
-        &mut server,
-        state,
-        Some(account),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(catalog),
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-    drop(server);
-    let mut responses = Vec::new();
-    while let Some(frame) = NetSocketFrameCodec::read(&mut client).await.unwrap() {
-        responses.push(TMessageCodec::decode_response(&frame.payload).unwrap());
-    }
-    responses
-}
-
 async fn typed_coop_route_test_request(
     account: &mut blueoath_domain::AccountState,
     state: &ServerState,
@@ -2071,6 +2027,77 @@ async fn typed_battle_route_test_request(
         .unwrap();
     let mut catalogs = GameLoginCatalogs::empty();
     catalogs.battle = Some(catalog);
+    process_game_login_frame_with_catalogs_typed_mut(
+        &mut server,
+        state,
+        None,
+        Some(account),
+        &catalogs,
+    )
+    .await
+    .unwrap();
+    drop(server);
+    let mut responses = Vec::new();
+    while let Some(frame) = NetSocketFrameCodec::read(&mut client).await.unwrap() {
+        responses.push(TMessageCodec::decode_response(&frame.payload).unwrap());
+    }
+    responses
+}
+
+async fn typed_route_test_request(
+    account: &mut blueoath_domain::AccountState,
+    state: &ServerState,
+    method: &str,
+    args: Vec<u8>,
+) -> Vec<blueoath_protocol::TResponse> {
+    let (mut client, mut server) = duplex(16_384);
+    let request = TMessageCodec::encode_request(&TRequest {
+        method: method.to_owned(),
+        args: Some(args),
+        callback_handler: 75,
+        ..TRequest::default()
+    });
+    NetSocketFrameCodec::write(&mut client, 0, &request)
+        .await
+        .unwrap();
+    let catalogs = GameLoginCatalogs::empty();
+    process_game_login_frame_with_catalogs_typed_mut(
+        &mut server,
+        state,
+        None,
+        Some(account),
+        &catalogs,
+    )
+    .await
+    .unwrap();
+    drop(server);
+    let mut responses = Vec::new();
+    while let Some(frame) = NetSocketFrameCodec::read(&mut client).await.unwrap() {
+        responses.push(TMessageCodec::decode_response(&frame.payload).unwrap());
+    }
+    responses
+}
+
+async fn typed_star_reward_route_test_request(
+    account: &mut blueoath_domain::AccountState,
+    state: &ServerState,
+    chapter_catalog: &ChapterCatalog,
+    task_catalog: &TaskCatalog,
+    args: Vec<u8>,
+) -> Vec<blueoath_protocol::TResponse> {
+    let (mut client, mut server) = duplex(16_384);
+    let request = TMessageCodec::encode_request(&TRequest {
+        method: "copy.StarReward".to_owned(),
+        args: Some(args),
+        callback_handler: 75,
+        ..TRequest::default()
+    });
+    NetSocketFrameCodec::write(&mut client, 0, &request)
+        .await
+        .unwrap();
+    let mut catalogs = GameLoginCatalogs::empty();
+    catalogs.chapters = Some(chapter_catalog);
+    catalogs.tasks = Some(task_catalog);
     process_game_login_frame_with_catalogs_typed_mut(
         &mut server,
         state,
@@ -2268,45 +2295,40 @@ async fn copy_extra_and_pvp_ready_routes_return_typed_state() {
 
 #[tokio::test]
 async fn choose_sea_safe_level_uses_copy_id_and_safe_level_fields() {
-    let mut account = default_account_snapshot("safe-level", "Captain", 123);
-    account["character"]["level"] = json!(60);
+    let mut account = NewAccountFactory::create(ProfileId::new("safe-level").unwrap(), "Captain");
+    account.character.level = 60;
     let state = ServerState::new("safe-level", "Captain", "1.4.0");
-    let catalog = BattleCatalog::default();
     let mut args = Vec::new();
     append_varint_field(&mut args, 1, 1_600_100);
     append_varint_field(&mut args, 2, 5);
 
-    let responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.ChooseSfLv", args).await;
+    let responses = typed_route_test_request(&mut account, &state, "copy.ChooseSfLv", args).await;
     let response = responses
         .iter()
         .find(|response| response.method == "copy.ChooseSfLv")
         .expect("safe level response");
     assert_eq!(response.err, 0);
-    assert_eq!(account["character"]["seaDifficulty"], 5);
+    assert_eq!(account.sea.difficulty, 5);
 }
 
 #[tokio::test]
 async fn daily_copy_enter_returns_nested_start_base_and_opens_session() {
     let state = ServerState::new("daily-enter", "Captain", "1.4.0");
-    let mut account = default_account_snapshot("daily-enter", "Captain", 123);
-    let mut catalog = BattleCatalog::default();
-    catalog.copies.insert(
-        10001,
-        BattleCopy {
-            config_id: 10001,
-            copy_type: 1,
-            fleet_ids: vec![1000100],
-        },
-    );
+    let mut account = NewAccountFactory::create(ProfileId::new("daily-enter").unwrap(), "Captain");
+    account
+        .fleet
+        .fleets
+        .entry(FleetId::new(1).unwrap())
+        .or_default()
+        .members
+        .push(HeroId::new(1).unwrap());
     let mut args = Vec::new();
     append_varint_field(&mut args, 1, 1);
     append_varint_field(&mut args, 2, 10001);
     append_varint_field(&mut args, 3, 1);
 
     let responses =
-        battle_route_test_request(&mut account, &state, &catalog, "dailycopy.CopyEnter", args)
-            .await;
+        typed_route_test_request(&mut account, &state, "dailycopy.CopyEnter", args).await;
     let response = responses
         .iter()
         .find(|response| response.method == "dailycopy.CopyEnter")
@@ -2315,8 +2337,14 @@ async fn daily_copy_enter_returns_nested_start_base_and_opens_session() {
     let start = decode_repeated_message_field(response.ret.as_deref().unwrap_or_default(), 1);
     assert_eq!(start.len(), 1);
     assert_eq!(decode_varint_field(&start[0], 6), 10001);
-    assert_eq!(account["battleSession"]["copyId"], 10001);
-    assert_eq!(account["dailyCopy"]["chapters"][0]["lastTacticId"], 1);
+    assert_eq!(account.battle.active.as_ref().unwrap().copy_id.get(), 10001);
+    assert_eq!(
+        account
+            .daily_copy
+            .challenge_times
+            .get(&blueoath_domain::ChapterId::new(1).unwrap()),
+        Some(&1)
+    );
     assert!(responses
         .iter()
         .any(|response| response.method == "dailycopy.UpdateDailyCopyData"));
@@ -2789,15 +2817,25 @@ async fn battle_pass_placeholder_advances_one_enemy_fleet_for_one_client_encount
     catalog.supply_cost_by_copy.insert(5013, (0, 0));
 
     let state = ServerState::new("battle-pass-placeholder-multi", "test", "1.4.0");
-    let mut account = default_account_snapshot("battle-pass-placeholder-multi", "test", 100);
+    let mut account = NewAccountFactory::create(
+        ProfileId::new("battle-pass-placeholder-multi").unwrap(),
+        "test",
+    );
+    account
+        .fleet
+        .fleets
+        .entry(FleetId::new(1).unwrap())
+        .or_default()
+        .members
+        .push(HeroId::new(1).unwrap());
     let mut start = Vec::new();
     append_varint_field(&mut start, 2, 5013);
-    battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start).await;
+    typed_battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start).await;
 
     let mut placeholder = Vec::new();
     append_varint_field(&mut placeholder, 1, 1);
     append_varint_field(&mut placeholder, 8, 3);
-    let first_responses = battle_route_test_request(
+    let first_responses = typed_battle_route_test_request(
         &mut account,
         &state,
         &catalog,
@@ -2808,11 +2846,11 @@ async fn battle_pass_placeholder_advances_one_enemy_fleet_for_one_client_encount
     assert!(first_responses
         .iter()
         .any(|response| response.method == "copy.PassBase" && response.err == 0));
-    assert_eq!(account["battleSession"]["remainingFleetIds"], json!([1102]));
-    assert!(account["seaProgress"]["records"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        account.battle.active.as_ref().unwrap().remaining_fleet_ids,
+        vec![1102]
+    );
+    assert!(account.battle.records.is_empty());
 }
 
 #[tokio::test]
@@ -2825,15 +2863,31 @@ async fn bundled_weekly_sea_copy_repeats_after_one_placeholder_pass() {
     assert_eq!(battle_session_fleet_ids(1601000, Some(&catalog)).len(), 3);
 
     let state = ServerState::new("bundled-weekly-sea-repeat", "test", "1.4.0");
-    let mut account = default_account_snapshot("bundled-weekly-sea-repeat", "test", 100);
-    account["character"]["supply"] = json!(100_000);
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("bundled-weekly-sea-repeat").unwrap(), "test");
+    account
+        .resources
+        .credit(CurrencyKind::Supply, 90_000)
+        .unwrap();
+    account
+        .fleet
+        .fleets
+        .entry(FleetId::new(1).unwrap())
+        .or_default()
+        .members
+        .push(HeroId::new(1).unwrap());
 
     for expected_count in [1, 2] {
         let mut start = Vec::new();
         append_varint_field(&mut start, 2, 1601000);
-        let start_responses =
-            battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start)
-                .await;
+        let start_responses = typed_battle_route_test_request(
+            &mut account,
+            &state,
+            &catalog,
+            "copy.StartBase",
+            start,
+        )
+        .await;
         assert!(start_responses
             .iter()
             .any(|response| response.method == "copy.StartBase" && response.err == 0));
@@ -2842,22 +2896,28 @@ async fn bundled_weekly_sea_copy_repeats_after_one_placeholder_pass() {
             let mut pass = Vec::new();
             append_varint_field(&mut pass, 1, 1);
             append_varint_field(&mut pass, 8, 3);
-            let pass_responses =
-                battle_route_test_request(&mut account, &state, &catalog, "copy.PassBase", pass)
-                    .await;
+            let pass_responses = typed_battle_route_test_request(
+                &mut account,
+                &state,
+                &catalog,
+                "copy.PassBase",
+                pass,
+            )
+            .await;
             assert!(pass_responses
                 .iter()
                 .any(|response| response.method == "copy.PassBase" && response.err == 0));
             if encounter < 2 {
-                assert!(!account["battleSession"].is_null());
+                assert!(account.battle.active.is_some());
             } else {
-                assert!(account["battleSession"].is_null());
+                assert!(account.battle.active.is_none());
             }
         }
-        assert_eq!(
-            account["seaProgress"]["records"][0]["passCount"],
-            expected_count
-        );
+        assert!(account
+            .battle
+            .passed_copies
+            .contains(&blueoath_domain::CopyId::new(1601000).unwrap()));
+        assert_eq!(account.battle.records.len(), expected_count);
     }
 }
 
@@ -2911,32 +2971,41 @@ async fn battle_pass_route_grade_nine_clears_session_without_progress_or_rewards
     );
     catalog.supply_cost_by_copy.insert(5011, (10, 0));
     let state = ServerState::new("battle-fail-route", "test", "1.4.0");
-    let mut account = default_account_snapshot("battle-fail-route", "test", 100);
-    account["character"]["supply"] = json!(100);
-    account["fleet"]["tactics"] = json!([{"heroInfo":[1]}]);
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("battle-fail-route").unwrap(), "test");
+    account
+        .resources
+        .debit(CurrencyKind::Supply, 9_900)
+        .unwrap();
+    account
+        .fleet
+        .fleets
+        .entry(FleetId::new(1).unwrap())
+        .or_default()
+        .members
+        .push(HeroId::new(1).unwrap());
 
     let mut start = Vec::new();
     append_varint_field(&mut start, 2, 5011);
-    battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start).await;
+    typed_battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start).await;
     let mut attack = Vec::new();
     append_varint_field(&mut attack, 1, 2);
     append_varint_field(&mut attack, 2, 5011);
     append_varint_field(&mut attack, 3, 1);
     append_varint_field(&mut attack, 4, 900);
-    battle_route_test_request(&mut account, &state, &catalog, "copy.AttackBase", attack).await;
+    typed_battle_route_test_request(&mut account, &state, &catalog, "copy.AttackBase", attack)
+        .await;
 
     let pass = battle_pass_args(5011, 9, 12, 1101, 1, 555);
     let pass_responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.PassBase", pass).await;
+        typed_battle_route_test_request(&mut account, &state, &catalog, "copy.PassBase", pass)
+            .await;
     assert!(pass_responses
         .iter()
         .any(|response| response.method == "copy.PassBase" && response.err == 0));
-    assert!(account["battleSession"].is_null());
-    assert!(account["copyProgress"]["records"]
-        .as_array()
-        .unwrap()
-        .is_empty());
-    assert_eq!(account["dock"]["heroes"][0]["curHp"], 555);
+    assert!(account.battle.active.is_none());
+    assert!(account.battle.records.is_empty());
+    assert_eq!(account.dock.heroes[&HeroId::new(1).unwrap()].hp, 555);
 }
 
 #[tokio::test]
@@ -2960,14 +3029,25 @@ async fn battle_pass_accepts_client_placeholder_base_without_attack_or_fleet_fie
     );
     catalog.supply_cost_by_copy.insert(5011, (10, 0));
     let state = ServerState::new("battle-pass-placeholder", "test", "1.4.0");
-    let mut account = default_account_snapshot("battle-pass-placeholder", "test", 100);
-    account["character"]["supply"] = json!(100);
-    account["fleet"]["tactics"] = json!([{"heroInfo":[1]}]);
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("battle-pass-placeholder").unwrap(), "test");
+    account
+        .resources
+        .debit(CurrencyKind::Supply, 9_900)
+        .unwrap();
+    account
+        .fleet
+        .fleets
+        .entry(FleetId::new(1).unwrap())
+        .or_default()
+        .members
+        .push(HeroId::new(1).unwrap());
 
     let mut start = Vec::new();
     append_varint_field(&mut start, 2, 5011);
     let start_responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start).await;
+        typed_battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start)
+            .await;
     assert!(start_responses
         .iter()
         .any(|response| response.method == "copy.StartBase" && response.err == 0));
@@ -2977,12 +3057,13 @@ async fn battle_pass_accepts_client_placeholder_base_without_attack_or_fleet_fie
     append_varint_field(&mut pass, 8, 3);
     append_varint_field(&mut pass, 12, 12);
     let pass_responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.PassBase", pass).await;
+        typed_battle_route_test_request(&mut account, &state, &catalog, "copy.PassBase", pass)
+            .await;
     assert!(pass_responses
         .iter()
         .any(|response| response.method == "copy.PassBase" && response.err == 0));
-    assert!(account["battleSession"].is_null());
-    assert_eq!(account["copyProgress"]["records"][0]["copyId"], 5011);
+    assert!(account.battle.active.is_none());
+    assert_eq!(account.battle.records[0].copy_id.get(), 5011);
 }
 
 #[tokio::test]
@@ -3004,9 +3085,17 @@ async fn tutorial_start_falls_back_when_field_13_is_fleet_reference() {
             ..BattleEnemy::default()
         },
     );
+    catalog.supply_cost_by_copy.insert(100, (0, 0));
 
     let state = ServerState::new("tutorial-test", "test", "1.4.0");
-    let mut account = default_account_snapshot("tutorial-test", "test", 100);
+    let mut account = NewAccountFactory::create(ProfileId::new("tutorial-test").unwrap(), "test");
+    account
+        .fleet
+        .fleets
+        .entry(FleetId::new(1).unwrap())
+        .or_default()
+        .members
+        .push(HeroId::new(1).unwrap());
 
     let mut fleet_reference = Vec::new();
     append_varint_field(&mut fleet_reference, 1, 999);
@@ -3016,12 +3105,16 @@ async fn tutorial_start_falls_back_when_field_13_is_fleet_reference() {
     append_message_field(&mut start, 13, &fleet_reference);
 
     let responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start).await;
+        typed_battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start)
+            .await;
 
     assert!(responses
         .iter()
         .any(|response| response.method == "copy.StartBase" && response.err == 0));
-    assert_eq!(account["battleSession"]["heroIds"], json!([1]));
+    assert_eq!(
+        account.battle.active.as_ref().unwrap().hero_ids,
+        vec![HeroId::new(1).unwrap()]
+    );
 }
 
 #[tokio::test]
@@ -3043,15 +3136,24 @@ async fn start_base_collects_all_client_fleet_groups() {
             ..BattleEnemy::default()
         },
     );
+    catalog.supply_cost_by_copy.insert(100, (0, 0));
 
     let state = ServerState::new("multi-fleet-test", "test", "1.4.0");
-    let mut account = default_account_snapshot("multi-fleet-test", "test", 100);
-    let mut second_hero = account["dock"]["heroes"][0].clone();
-    second_hero["heroId"] = json!(2);
-    account["dock"]["heroes"]
-        .as_array_mut()
-        .unwrap()
-        .push(second_hero);
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("multi-fleet-test").unwrap(), "test");
+    let hero_one = HeroId::new(1).unwrap();
+    let hero_two = HeroId::new(2).unwrap();
+    let mut second_hero = account.dock.heroes[&hero_one].clone();
+    second_hero.id = hero_two;
+    second_hero.equip_slots = vec![None; 6];
+    account.dock.heroes.insert(hero_two, second_hero);
+    account
+        .fleet
+        .fleets
+        .entry(FleetId::new(1).unwrap())
+        .or_default()
+        .members
+        .push(hero_one);
     let mut first = Vec::new();
     append_varint_field(&mut first, 1, 1);
     let mut second = Vec::new();
@@ -3062,10 +3164,13 @@ async fn start_base_collects_all_client_fleet_groups() {
     append_message_field(&mut start, 13, &second);
 
     let responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start).await;
+        typed_battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start)
+            .await;
 
-    assert_eq!(account["battleSession"]["heroIds"], json!([1, 2]));
-    assert_eq!(account["battleSession"]["heroGroups"], json!([[1], [2]]));
+    assert_eq!(
+        account.battle.active.as_ref().unwrap().hero_ids,
+        vec![hero_one, hero_two]
+    );
     assert!(responses.iter().any(|response| {
         response.method == "copy.StartBase"
             && response
@@ -3088,9 +3193,18 @@ async fn start_base_persists_daily_flags_and_ex_buffs() {
     );
     catalog.fleet_enemies.insert(100, vec![101]);
     catalog.enemies.insert(101, BattleEnemy::default());
+    catalog.supply_cost_by_copy.insert(100, (0, 0));
 
     let state = ServerState::new("daily-flags-test", "test", "1.4.0");
-    let mut account = default_account_snapshot("daily-flags-test", "test", 100);
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("daily-flags-test").unwrap(), "test");
+    account
+        .fleet
+        .fleets
+        .entry(FleetId::new(1).unwrap())
+        .or_default()
+        .members
+        .push(HeroId::new(1).unwrap());
     let mut start = Vec::new();
     append_varint_field(&mut start, 2, 100);
     let mut fleet = Vec::new();
@@ -3100,36 +3214,38 @@ async fn start_base_persists_daily_flags_and_ex_buffs() {
     append_varint_field(&mut start, 12, 7002);
     append_varint_field(&mut start, 17, 1);
 
-    battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start).await;
-
-    assert_eq!(account["battleSession"]["exBuff"], json!([7001, 7002]));
-    assert_eq!(account["battleSession"]["isPvePtMode"], json!(true));
+    let responses =
+        typed_battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start)
+            .await;
+    assert!(responses
+        .iter()
+        .any(|response| response.method == "copy.StartBase" && response.err == 0));
+    assert!(account.battle.active.is_some());
 }
 
 #[tokio::test]
 async fn copy_info_route_returns_daily_record_payload() {
     let state = ServerState::new("copy-info-test", "test", "1.4.0");
-    let mut account = default_account_snapshot("copy-info-test", "test", 100);
-    account["copyRecords"] = json!([{
-        "copyId": 100,
-        "passTime": 37,
-        "recTime": 99,
-        "strategyId": 17,
-        "heroIds": [1],
-        "exBuff": [7001, 7002]
-    }]);
+    let mut account = NewAccountFactory::create(ProfileId::new("copy-info-test").unwrap(), "test");
+    account
+        .battle
+        .records
+        .push(blueoath_domain::CopyRecordState {
+            copy_id: blueoath_domain::CopyId::new(100).unwrap(),
+            hero_ids: vec![HeroId::new(1).unwrap()],
+            pass_time: 37,
+            secret_id: 0,
+            strategy_id: 17,
+            power: 0,
+            record_time: 99,
+            ex_buffs: vec![7001, 7002],
+        });
     let mut request = Vec::new();
     append_varint_field(&mut request, 1, 100);
     append_varint_field(&mut request, 2, 3);
 
-    let responses = battle_route_test_request(
-        &mut account,
-        &state,
-        &BattleCatalog::default(),
-        "copyinfo.GetCopyInfo",
-        request,
-    )
-    .await;
+    let responses =
+        typed_route_test_request(&mut account, &state, "copyinfo.GetCopyInfo", request).await;
     let response = responses
         .iter()
         .find(|response| response.method == "copyinfo.GetCopyInfo")
@@ -3675,99 +3791,48 @@ fn incremental_illustration_payload_deduplicates_ship_templates() {
 
 #[tokio::test]
 async fn illustrate_behaviour_route_persists_requested_entry() {
-    let mut account = default_account_snapshot("illustrate-route", "Captain", 123);
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("illustrate-route").unwrap(), "Captain");
     let mut entry = Vec::new();
     append_varint_field(&mut entry, 1, 1021051);
     append_varint_field(&mut entry, 2, 7001);
     let mut args = Vec::new();
     append_message_field(&mut args, 1, &entry);
-    let request = TMessageCodec::encode_request(&TRequest {
-        method: "illustrate.AddBehaviour".to_owned(),
-        args: Some(args),
-        ..TRequest::default()
-    });
-    let (mut client, mut server) = duplex(16_384);
-    NetSocketFrameCodec::write(&mut client, 0, &request)
-        .await
-        .unwrap();
-    process_game_login_frame_with_catalog_mut(
-        &mut server,
+    let responses = typed_route_test_request(
+        &mut account,
         &ServerState::new("illustrate-route", "Captain", "1.4.0"),
-        Some(&mut account),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        "illustrate.AddBehaviour",
+        args,
     )
-    .await
-    .unwrap();
-    let push = TMessageCodec::decode_response(
-        &NetSocketFrameCodec::read(&mut client)
-            .await
-            .unwrap()
-            .unwrap()
-            .payload,
-    )
-    .unwrap();
-    assert_eq!(push.method, "illustrate.IllustrateInfo");
-    assert_eq!(account["illustrate"]["entries"][0]["illustrateId"], 1021051);
+    .await;
+    assert_eq!(responses[0].method, "illustrate.IllustrateInfo");
     assert_eq!(
-        account["illustrate"]["entries"][0]["behaviourList"],
-        json!([7001])
+        account
+            .activities
+            .progress
+            .get("compat:illustrate:1021051:behaviour:7001"),
+        Some(&1)
     );
 }
 
 #[tokio::test]
 async fn illustrate_vow_list_route_persists_selected_heroes() {
-    let mut account = default_account_snapshot("illustrate-vow-list", "Captain", 123);
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("illustrate-vow-list").unwrap(), "Captain");
     let mut args = Vec::new();
     append_varint_field(&mut args, 1, 1);
-    let request = TMessageCodec::encode_request(&TRequest {
-        method: "illustrate.ModiVowHeroList".to_owned(),
-        args: Some(args),
-        ..TRequest::default()
-    });
-    let (mut client, mut server) = duplex(16_384);
-    NetSocketFrameCodec::write(&mut client, 0, &request)
-        .await
-        .unwrap();
-    process_game_login_frame_with_catalog_mut(
-        &mut server,
+    let responses = typed_route_test_request(
+        &mut account,
         &ServerState::new("illustrate-vow-list", "Captain", "1.4.0"),
-        Some(&mut account),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        "illustrate.ModiVowHeroList",
+        args,
     )
-    .await
-    .unwrap();
-    let push = TMessageCodec::decode_response(
-        &NetSocketFrameCodec::read(&mut client)
-            .await
-            .unwrap()
-            .unwrap()
-            .payload,
-    )
-    .unwrap();
-    assert_eq!(push.method, "illustrate.IllustrateInfo");
-    assert_eq!(account["illustrate"]["vowHeroIds"], json!([1]));
+    .await;
+    assert_eq!(responses[0].method, "illustrate.IllustrateInfo");
+    assert_eq!(
+        account.activities.progress.get("compat:illustrate:vow:1"),
+        Some(&1)
+    );
 }
 
 #[test]
@@ -4110,83 +4175,56 @@ async fn hero_add_exp_route_persists_level_and_emits_refreshes() {
 
 #[tokio::test]
 async fn hero_marry_route_consumes_oath_ring_and_updates_hero() {
-    let mut account = default_account_snapshot("marry-route", "Captain", 123);
-    account["bag"]["items"] = json!([{"templateId": 10180, "num": 1}]);
+    let mut account = NewAccountFactory::create(ProfileId::new("marry-route").unwrap(), "Captain");
+    account
+        .inventory
+        .items
+        .insert(TemplateId::new(10180).unwrap(), 1);
     let mut args = Vec::new();
     append_varint_field(&mut args, 1, 1);
     append_varint_field(&mut args, 2, 1);
-    let request = TMessageCodec::encode_request(&TRequest {
-        method: "hero.Marry".to_owned(),
-        args: Some(args),
-        ..TRequest::default()
-    });
-    let (mut client, mut server) = duplex(16_384);
-    NetSocketFrameCodec::write(&mut client, 0, &request)
-        .await
-        .unwrap();
     let state = ServerState::new("marry-route", "Captain", "1.4.0");
-    process_game_login_frame_with_catalog_mut(
-        &mut server,
-        &state,
-        Some(&mut account),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-    assert_ne!(account["dock"]["heroes"][0]["marryTime"], json!(0));
-    assert_eq!(account["dock"]["heroes"][0]["marryType"], json!(1));
-    assert_eq!(account["bag"]["items"][0]["num"], json!(0));
+    let responses = typed_route_test_request(&mut account, &state, "hero.Marry", args).await;
+    assert_eq!(responses[0].method, "hero.UpdateHeroBagData");
+    assert!(
+        account
+            .activities
+            .progress
+            .get("compat:hero:1:marryTime")
+            .copied()
+            .unwrap_or_default()
+            > 0
+    );
+    assert_eq!(
+        account.activities.progress.get("compat:hero:1:marryType"),
+        Some(&1)
+    );
+    assert_eq!(
+        account
+            .inventory
+            .items
+            .get(&TemplateId::new(10180).unwrap()),
+        None
+    );
 }
 
 #[tokio::test]
 async fn repair_route_restores_damaged_heroes() {
-    let mut account = default_account_snapshot("repair-route", "Captain", 123);
-    account["dock"]["heroes"][0]["curHp"] = json!(1);
+    let mut account = NewAccountFactory::create(ProfileId::new("repair-route").unwrap(), "Captain");
+    account
+        .dock
+        .heroes
+        .get_mut(&HeroId::new(1).unwrap())
+        .unwrap()
+        .hp = 1;
     let mut args = Vec::new();
     append_varint_field(&mut args, 1, 1);
-    let request = TMessageCodec::encode_request(&TRequest {
-        method: "repair.RepairHero".to_owned(),
-        args: Some(args),
-        ..TRequest::default()
-    });
-    let (mut client, mut server) = duplex(16_384);
-    NetSocketFrameCodec::write(&mut client, 0, &request)
-        .await
-        .unwrap();
     let state = ServerState::new("repair-route", "Captain", "1.4.0");
-    process_game_login_frame_with_catalog_mut(
-        &mut server,
-        &state,
-        Some(&mut account),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let responses = typed_route_test_request(&mut account, &state, "repair.RepairHero", args).await;
+    assert_eq!(responses[0].method, "hero.UpdateHeroBagData");
     assert_eq!(
-        account["dock"]["heroes"][0]["curHp"],
-        json!(10_000_000_000i64)
+        account.dock.heroes[&HeroId::new(1).unwrap()].hp,
+        10_000_000_000
     );
 }
 
@@ -4995,20 +5033,28 @@ async fn sea_battle_pass_accepts_position_anchor_fleet_id() {
     catalog.supply_cost_by_copy.insert(1610100, (0, 0));
 
     let state = ServerState::new("sea-anchor-pass", "test", "1.4.0");
-    let mut account = default_account_snapshot("sea-anchor-pass", "test", 100);
+    let mut account = NewAccountFactory::create(ProfileId::new("sea-anchor-pass").unwrap(), "test");
+    account
+        .fleet
+        .fleets
+        .entry(FleetId::new(1).unwrap())
+        .or_default()
+        .members
+        .push(HeroId::new(1).unwrap());
     let mut start = Vec::new();
     append_varint_field(&mut start, 2, 1610100);
-    battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start).await;
+    typed_battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start).await;
 
     let mut attack = Vec::new();
     append_varint_field(&mut attack, 1, 2);
     append_varint_field(&mut attack, 2, 1610100);
     append_varint_field(&mut attack, 3, 1);
     append_varint_field(&mut attack, 4, 1610111);
-    battle_route_test_request(&mut account, &state, &catalog, "copy.AttackBase", attack).await;
+    typed_battle_route_test_request(&mut account, &state, &catalog, "copy.AttackBase", attack)
+        .await;
 
     let attached_pass = battle_pass_args(1610100, 3, 30, 161010001, 1, 1000);
-    let responses = battle_route_test_request(
+    let responses = typed_battle_route_test_request(
         &mut account,
         &state,
         &catalog,
@@ -5019,10 +5065,10 @@ async fn sea_battle_pass_accepts_position_anchor_fleet_id() {
     assert!(responses
         .iter()
         .any(|response| response.method == "copy.PassBase" && response.err == 0));
-    assert!(!account["battleSession"].is_null());
+    assert!(account.battle.active.is_some());
 
     let attached_pass = battle_pass_args(1610100, 3, 30, 161010002, 1, 1000);
-    battle_route_test_request(
+    typed_battle_route_test_request(
         &mut account,
         &state,
         &catalog,
@@ -5036,22 +5082,27 @@ async fn sea_battle_pass_accepts_position_anchor_fleet_id() {
     append_varint_field(&mut attack, 2, 1610100);
     append_varint_field(&mut attack, 3, 1);
     append_varint_field(&mut attack, 4, 1610101);
-    battle_route_test_request(&mut account, &state, &catalog, "copy.AttackBase", attack).await;
+    typed_battle_route_test_request(&mut account, &state, &catalog, "copy.AttackBase", attack)
+        .await;
 
     let pass = battle_pass_args(1610100, 3, 30, 160010000, 1, 1000);
     let responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.PassBase", pass).await;
+        typed_battle_route_test_request(&mut account, &state, &catalog, "copy.PassBase", pass)
+            .await;
     assert!(responses
         .iter()
         .any(|response| response.method == "copy.PassBase" && response.err == 0));
-    assert!(account["battleSession"].is_null());
-    assert_eq!(account["seaProgress"]["records"][0]["copyId"], 1610100);
+    assert!(account.battle.active.is_none());
+    assert!(account
+        .battle
+        .passed_copies
+        .contains(&blueoath_domain::CopyId::new(1610100).unwrap()));
 
     // Sea stages are repeatable. A pass only updates progress; it must not
     // invalidate the next StartBase session.
     let mut start_again = Vec::new();
     append_varint_field(&mut start_again, 2, 1610100);
-    let responses = battle_route_test_request(
+    let responses = typed_battle_route_test_request(
         &mut account,
         &state,
         &catalog,
@@ -5067,7 +5118,7 @@ async fn sea_battle_pass_accepts_position_anchor_fleet_id() {
     append_varint_field(&mut attack_again, 2, 1610100);
     append_varint_field(&mut attack_again, 3, 1);
     append_varint_field(&mut attack_again, 4, 1610111);
-    battle_route_test_request(
+    typed_battle_route_test_request(
         &mut account,
         &state,
         &catalog,
@@ -5075,7 +5126,7 @@ async fn sea_battle_pass_accepts_position_anchor_fleet_id() {
         attack_again,
     )
     .await;
-    battle_route_test_request(
+    typed_battle_route_test_request(
         &mut account,
         &state,
         &catalog,
@@ -5083,7 +5134,7 @@ async fn sea_battle_pass_accepts_position_anchor_fleet_id() {
         battle_pass_args(1610100, 3, 30, 161010001, 1, 1000),
     )
     .await;
-    battle_route_test_request(
+    typed_battle_route_test_request(
         &mut account,
         &state,
         &catalog,
@@ -5096,7 +5147,7 @@ async fn sea_battle_pass_accepts_position_anchor_fleet_id() {
     append_varint_field(&mut attack_again, 2, 1610100);
     append_varint_field(&mut attack_again, 3, 1);
     append_varint_field(&mut attack_again, 4, 1610101);
-    battle_route_test_request(
+    typed_battle_route_test_request(
         &mut account,
         &state,
         &catalog,
@@ -5104,7 +5155,7 @@ async fn sea_battle_pass_accepts_position_anchor_fleet_id() {
         attack_again,
     )
     .await;
-    battle_route_test_request(
+    typed_battle_route_test_request(
         &mut account,
         &state,
         &catalog,
@@ -5112,7 +5163,7 @@ async fn sea_battle_pass_accepts_position_anchor_fleet_id() {
         battle_pass_args(1610100, 3, 30, 160010000, 1, 1000),
     )
     .await;
-    assert_eq!(account["seaProgress"]["records"][0]["passCount"], 2);
+    assert_eq!(account.battle.records.len(), 2);
 }
 
 #[test]
@@ -5428,8 +5479,12 @@ fn chapter_catalog_tracks_first_story_sea_stage() {
 
 #[tokio::test]
 async fn copy_star_reward_claims_configured_reward_once() {
-    let mut account = default_account_snapshot("copy-star-reward", "Captain", 123);
-    account["copyProgress"]["records"] = json!([{"copyId": 5011, "starLevel": 7}]);
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("copy-star-reward").unwrap(), "Captain");
+    account
+        .battle
+        .passed_copies
+        .insert(blueoath_domain::CopyId::new(5011).unwrap());
 
     let chapter_catalog = ChapterCatalog::from_rows([(
         18001,
@@ -5442,61 +5497,29 @@ async fn copy_star_reward_claims_configured_reward_once() {
     )]);
     let mut task_catalog = TaskCatalog::default();
     task_catalog.rewards_by_id.insert(9001, vec![(1, 9002, 2)]);
-    let request = TMessageCodec::encode_request(&TRequest {
-        method: "copy.StarReward".to_owned(),
-        args: Some({
-            let mut args = Vec::new();
-            append_varint_field(&mut args, 1, 18001);
-            append_varint_field(&mut args, 2, 1);
-            args
-        }),
-        callback_handler: 75,
-        ..TRequest::default()
-    });
-    let (mut client, mut server) = duplex(1_048_576);
-    NetSocketFrameCodec::write(&mut client, 0, &request)
-        .await
-        .unwrap();
     let state = ServerState::new("copy-star-reward", "Captain", "1.4.0");
-    process_game_login_frame_with_catalog_mut(
-        &mut server,
+    let mut args = Vec::new();
+    append_varint_field(&mut args, 1, 18001);
+    append_varint_field(&mut args, 2, 1);
+    let responses = typed_star_reward_route_test_request(
+        &mut account,
         &state,
-        Some(&mut account),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(&chapter_catalog),
-        Some(&task_catalog),
-        None,
-        None,
-        None,
+        &chapter_catalog,
+        &task_catalog,
+        args.clone(),
     )
-    .await
-    .unwrap();
-    drop(server);
-
-    let mut responses = Vec::new();
-    while let Some(frame) = NetSocketFrameCodec::read(&mut client).await.unwrap() {
-        responses.push(TMessageCodec::decode_response(&frame.payload).unwrap());
-    }
-    assert_eq!(responses.len(), 5);
-    assert_eq!(responses[0].method, "hero.UpdateHeroBagData");
-    assert_eq!(responses[1].method, "bag.UpdateBagData");
-    assert_eq!(responses[2].method, "equip.UpdateEquipBagData");
-    assert_eq!(responses[3].method, "user.UpdateUserInfo");
-    assert_eq!(responses[4].method, "copy.StarReward");
-    assert_eq!(responses[4].err, 0);
-    assert_eq!(responses[4].callback_handler, 75);
-    assert_eq!(bag_item_count(&account, 9002), 2);
+    .await;
+    assert_eq!(responses.len(), 2);
+    assert_eq!(responses[0].method, "bag.UpdateBagData");
+    assert_eq!(responses[1].method, "copy.StarReward");
+    assert_eq!(responses[1].err, 0);
+    assert_eq!(responses[1].callback_handler, 75);
     assert_eq!(
-        account["copyStarRewards"],
-        json!([{"chapterId": 18001, "index": 1}])
+        account.inventory.items.get(&TemplateId::new(9002).unwrap()),
+        Some(&2)
     );
-    let reward = decode_repeated_message_field(responses[4].ret.as_deref().unwrap(), 1)
+    assert!(account.battle.claimed_star_rewards.contains(&(18001, 1)));
+    let reward = decode_repeated_message_field(responses[1].ret.as_deref().unwrap(), 1)
         .into_iter()
         .next()
         .unwrap();
@@ -5504,40 +5527,23 @@ async fn copy_star_reward_claims_configured_reward_once() {
     assert_eq!(decode_varint_field(&reward, 2), 9002);
     assert_eq!(decode_varint_field(&reward, 3), 2);
 
-    let (mut client, mut server) = duplex(16_384);
-    NetSocketFrameCodec::write(&mut client, 0, &request)
-        .await
-        .unwrap();
-    process_game_login_frame_with_catalog_mut(
-        &mut server,
+    let duplicate = typed_star_reward_route_test_request(
+        &mut account,
         &state,
-        Some(&mut account),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(&chapter_catalog),
-        Some(&task_catalog),
-        None,
-        None,
-        None,
+        &chapter_catalog,
+        &task_catalog,
+        args,
     )
     .await
-    .unwrap();
-    let duplicate = TMessageCodec::decode_response(
-        &NetSocketFrameCodec::read(&mut client)
-            .await
-            .unwrap()
-            .unwrap()
-            .payload,
-    )
+    .into_iter()
+    .last()
     .unwrap();
     assert_eq!(duplicate.method, "copy.StarReward");
     assert_eq!(duplicate.err, 1);
-    assert_eq!(bag_item_count(&account, 9002), 2);
+    assert_eq!(
+        account.inventory.items.get(&TemplateId::new(9002).unwrap()),
+        Some(&2)
+    );
 }
 
 #[test]
@@ -6165,162 +6171,75 @@ fn preset_fleet_state_round_trips_through_account_projection() {
 
 #[tokio::test]
 async fn preset_fleet_route_persists_and_pushes_updated_snapshot() {
-    let mut account = default_account_snapshot("preset-route", "Preset", 100);
+    let mut account = NewAccountFactory::create(ProfileId::new("preset-route").unwrap(), "Preset");
     let value = PresetFleetInfo {
         fleets: vec![PresetFleet {
             name: "Route fleet".to_owned(),
             hero_ids: vec![1],
-            ex_hero_ids: vec![8],
+            ex_hero_ids: Vec::new(),
             mode_id: 2,
             strategy_id: 3,
         }],
         name_num: 5,
         red_dot: 1,
     };
-    let (mut client, mut server) = duplex(1_048_576);
-    let request = TMessageCodec::encode_request(&TRequest {
-        method: "presetfleet.SetPresetFleets".to_owned(),
-        args: Some(PresetFleetCodec::encode(&value)),
-        callback_handler: 72,
-        ..TRequest::default()
-    });
-    NetSocketFrameCodec::write(&mut client, 0, &request)
-        .await
-        .unwrap();
-    process_game_login_frame_with_catalog_mut(
-        &mut server,
+    let responses = typed_route_test_request(
+        &mut account,
         &ServerState::new("preset-route", "Preset", "1.0.0"),
-        Some(&mut account),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        "presetfleet.SetPresetFleets",
+        PresetFleetCodec::encode(&value),
     )
-    .await
-    .unwrap();
-    drop(server);
-
-    let response = TMessageCodec::decode_response(
-        &NetSocketFrameCodec::read(&mut client)
-            .await
-            .unwrap()
-            .unwrap()
-            .payload,
-    )
-    .unwrap();
-    let push = TMessageCodec::decode_response(
-        &NetSocketFrameCodec::read(&mut client)
-            .await
-            .unwrap()
-            .unwrap()
-            .payload,
-    )
-    .unwrap();
-    assert_eq!(response.err, 0);
-    assert_eq!(response.method, "presetfleet.SetPresetFleets");
-    assert_eq!(push.method, "presetfleet.PresetFleetsInfo");
-    assert_eq!(preset_fleet_info_from_account(&account), value);
+    .await;
+    assert_eq!(responses[0].err, 0);
+    assert_eq!(responses[0].method, "presetfleet.SetPresetFleets");
+    assert_eq!(responses[1].method, "presetfleet.PresetFleetsInfo");
+    assert_eq!(preset_fleet_info_from_typed_account(&account), value);
 }
 
 #[tokio::test]
 async fn copy_history_fleet_routes_return_and_delete_records() {
-    let mut account = default_account_snapshot("history-route", "Captain", 42);
-    account["copyRecords"] = json!([{
-        "copyId": 2001,
-        "passTime": 37,
-        "recTime": 99,
-        "strategyId": 17,
-        "heroIds": [1]
-    }]);
+    let mut account =
+        NewAccountFactory::create(ProfileId::new("history-route").unwrap(), "Captain");
+    account
+        .battle
+        .records
+        .push(blueoath_domain::CopyRecordState {
+            copy_id: blueoath_domain::CopyId::new(2001).unwrap(),
+            hero_ids: vec![HeroId::new(1).unwrap()],
+            pass_time: 37,
+            secret_id: 0,
+            strategy_id: 17,
+            power: 0,
+            record_time: 99,
+            ex_buffs: Vec::new(),
+        });
     let state = ServerState::new("history-route", "Captain", "1.0.0");
-    let request = TMessageCodec::encode_request(&TRequest {
-        method: "copy.GetRecord".to_owned(),
-        args: Some(vec![0x08, 0xD1, 0x0F]),
-        callback_handler: 73,
-        ..TRequest::default()
-    });
-    let (mut client, mut server) = duplex(1_048_576);
-    NetSocketFrameCodec::write(&mut client, 0, &request)
-        .await
-        .unwrap();
-    process_game_login_frame_with_catalog_mut(
-        &mut server,
+    let response = typed_route_test_request(
+        &mut account,
         &state,
-        Some(&mut account),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        "copy.GetRecord",
+        vec![0x08, 0xD1, 0x0F],
     )
     .await
-    .unwrap();
-    let response = TMessageCodec::decode_response(
-        &NetSocketFrameCodec::read(&mut client)
-            .await
-            .unwrap()
-            .unwrap()
-            .payload,
-    )
+    .into_iter()
+    .last()
     .unwrap();
     assert_eq!(response.err, 0);
     assert_eq!(response.method, "copy.GetRecord");
     assert!(CopyRecordListCodec::decode_copy_id(response.ret.as_deref().unwrap()).is_some());
 
-    let delete = TMessageCodec::encode_request(&TRequest {
-        method: "copy.DeleteRecord".to_owned(),
-        args: Some(vec![0x08, 0xD1, 0x0F, 0x10, 0x00]),
-        callback_handler: 74,
-        ..TRequest::default()
-    });
-    let (mut client, mut server) = duplex(1_048_576);
-    NetSocketFrameCodec::write(&mut client, 0, &delete)
-        .await
-        .unwrap();
-    process_game_login_frame_with_catalog_mut(
-        &mut server,
+    let response = typed_route_test_request(
+        &mut account,
         &state,
-        Some(&mut account),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        "copy.DeleteRecord",
+        vec![0x08, 0xD1, 0x0F, 0x10, 0x00],
     )
     .await
-    .unwrap();
-    let response = TMessageCodec::decode_response(
-        &NetSocketFrameCodec::read(&mut client)
-            .await
-            .unwrap()
-            .unwrap()
-            .payload,
-    )
+    .into_iter()
+    .last()
     .unwrap();
     assert_eq!(response.err, 0);
-    assert!(account["copyRecords"].as_array().unwrap().is_empty());
+    assert!(account.battle.records.is_empty());
 }
 
 #[test]

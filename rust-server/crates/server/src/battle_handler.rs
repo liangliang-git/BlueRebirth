@@ -155,18 +155,9 @@ pub(super) fn handle_typed_with_catalog(
             };
             let fleet_id = *fleet_id;
             let fleet_members = fleet.members.clone();
-            let hero_ids = request
-                .hero_groups
-                .first()
-                .cloned()
-                .filter(|ids| !ids.is_empty())
-                .unwrap_or_else(|| {
-                    fleet_members
-                        .iter()
-                        .filter_map(|id| i32::try_from(id.get()).ok())
-                        .collect()
-                });
-            let hero_ids = hero_ids
+            let requested_hero_ids: Vec<i32> =
+                request.hero_groups.iter().flatten().copied().collect();
+            let mut hero_ids = requested_hero_ids
                 .into_iter()
                 .filter_map(|id| u64::try_from(id).ok())
                 .filter_map(|id| {
@@ -179,6 +170,9 @@ pub(super) fn handle_typed_with_catalog(
                 })
                 .take(6)
                 .collect::<Vec<_>>();
+            if hero_ids.is_empty() {
+                hero_ids = fleet_members.into_iter().take(6).collect();
+            }
             if hero_ids.is_empty() {
                 return HandlerResult::Error(GameError::InvalidState("fleet has no heroes"));
             }
@@ -253,13 +247,36 @@ pub(super) fn handle_typed_with_catalog(
             let result = battle_pass_result_from_request(&request);
             save_typed_battle_hero_hp(account, &result.heroes, &hero_ids);
             let grade = if result.grade > 0 { result.grade } else { 3 };
-            let passed_fleet_ids = result.passed_fleet_ids.clone();
             let remaining_fleet_ids = account
                 .battle
                 .active
                 .as_ref()
                 .map(|session| session.remaining_fleet_ids.clone())
                 .unwrap_or_default();
+            let passed_fleet_ids = if result.passed_fleet_ids.is_empty() {
+                remaining_fleet_ids
+                    .first()
+                    .map(|fleet_id| vec![u64::from(*fleet_id)])
+                    .unwrap_or_default()
+            } else {
+                result
+                    .passed_fleet_ids
+                    .iter()
+                    .map(|fleet_id| {
+                        battle_catalog
+                            .and_then(|catalog| {
+                                battle_fleet_aliases(
+                                    i32::try_from(copy_id.get()).unwrap_or_default(),
+                                    Some(catalog),
+                                )
+                                .into_iter()
+                                .find(|(wire_id, _)| i64::from(*wire_id) == *fleet_id as i64)
+                                .map(|(_, real_id)| real_id as u64)
+                            })
+                            .unwrap_or(*fleet_id)
+                    })
+                    .collect()
+            };
             if !passed_fleet_ids.is_empty() && !remaining_fleet_ids.is_empty() {
                 if passed_fleet_ids.iter().any(|fleet_id| {
                     !remaining_fleet_ids.contains(&u32::try_from(*fleet_id).unwrap_or(0))
@@ -298,21 +315,23 @@ pub(super) fn handle_typed_with_catalog(
             .map_err(|_| GameError::InvalidState("battle settlement is invalid"));
             match first_pass {
                 Ok(first_pass) => {
-                    account
-                        .battle
-                        .records
-                        .push(blueoath_domain::CopyRecordState {
-                            copy_id,
-                            hero_ids,
-                            pass_time: u64::try_from(result.battle_time).unwrap_or_else(|_| {
-                                u64::from(current_unix_seconds()).saturating_sub(started_at)
-                            }),
-                            secret_id: 0,
-                            strategy_id: 0,
-                            power: 0,
-                            record_time: u64::from(current_unix_seconds()),
-                            ex_buffs: Vec::new(),
-                        });
+                    if grade < 9 {
+                        account
+                            .battle
+                            .records
+                            .push(blueoath_domain::CopyRecordState {
+                                copy_id,
+                                hero_ids,
+                                pass_time: u64::try_from(result.battle_time).unwrap_or_else(|_| {
+                                    u64::from(current_unix_seconds()).saturating_sub(started_at)
+                                }),
+                                secret_id: 0,
+                                strategy_id: 0,
+                                power: 0,
+                                record_time: u64::from(current_unix_seconds()),
+                                ex_buffs: Vec::new(),
+                            });
+                    }
                     HandlerResult::Reply(Response::raw(
                         method,
                         battle_pass_payload_with_rewards(
