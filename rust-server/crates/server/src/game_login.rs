@@ -326,13 +326,72 @@ pub(crate) fn copy_info_payload(
     };
     blueoath_protocol::CopyInfoPayload {
         copy_type,
+        chapter_star_infos: copy_chapter_star_infos(catalog, &copy_ids, account),
         copy_ids,
         max_copy_id,
         passed_copy_ids: response_passed,
         passed_copy_counts: Vec::new(),
         copy_star_levels,
-        difficulty: 1,
+        difficulty: if copy_type == 2 {
+            account.sea.difficulty.max(1) as i32
+        } else {
+            1
+        },
     }
+}
+
+fn copy_chapter_star_infos(
+    catalog: &ChapterCatalog,
+    copy_ids: &[i32],
+    account: &AccountState,
+) -> Vec<blueoath_protocol::CopyChapterStarInfo> {
+    catalog
+        .star_rewards_by_chapter
+        .iter()
+        .filter(|(_, chapter)| chapter.level_ids.iter().any(|id| copy_ids.contains(id)))
+        .map(|(chapter_id, chapter)| {
+            let passed_ids = chapter.level_ids.iter().filter_map(|copy_id| {
+                let copy_id = u64::try_from(*copy_id)
+                    .ok()
+                    .and_then(|id| blueoath_domain::CopyId::new(id).ok())?;
+                account
+                    .battle
+                    .passed_copies
+                    .contains(&copy_id)
+                    .then_some(copy_id)
+            });
+            let passed_ids = passed_ids.collect::<Vec<_>>();
+            let star_num = passed_ids
+                .iter()
+                .map(|copy_id| {
+                    account
+                        .battle
+                        .copy_stars
+                        .get(copy_id)
+                        .copied()
+                        .unwrap_or(7)
+                        .min(7)
+                        .count_ones() as i32
+                })
+                .sum();
+            let claimed_reward_indexes = account
+                .battle
+                .claimed_star_rewards
+                .iter()
+                .filter_map(|(claimed_chapter, index)| {
+                    (*claimed_chapter == *chapter_id as u32)
+                        .then(|| i32::try_from(*index).ok())
+                        .flatten()
+                })
+                .collect();
+            blueoath_protocol::CopyChapterStarInfo {
+                chapter_id: *chapter_id,
+                star_num,
+                claimed_reward_indexes,
+                pass_num: i32::try_from(passed_ids.len()).unwrap_or(i32::MAX),
+            }
+        })
+        .collect()
 }
 
 fn handler_payload(result: HandlerResult, method: &str) -> Option<Response> {
@@ -1826,38 +1885,11 @@ where
                             &fallback_catalog
                         }
                     };
-                    let passed = account
-                        .battle
-                        .passed_copies
-                        .iter()
-                        .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
-                        .collect::<Vec<_>>();
-                    let copy_star_levels = account
-                        .battle
-                        .copy_stars
-                        .iter()
-                        .filter_map(|(copy_id, stars)| {
-                            Some((
-                                i32::try_from(copy_id.get()).ok()?,
-                                i32::try_from(*stars).ok()?,
-                            ))
-                        })
-                        .collect::<Vec<_>>();
+                    let payload = copy_info_payload(catalog, 2, account);
                     append_method_push(
                         &mut post_pushes,
                         "copy.GetCopy",
-                        CopyInfoCodec::encode_with_progress_and_difficulty_and_counts_and_stars(
-                            &catalog.sea,
-                            copy_progress_max_or_initial(
-                                &catalog.sea,
-                                &passed,
-                                catalog.sea_initial,
-                            ),
-                            &passed,
-                            &[],
-                            &copy_star_levels,
-                            account.sea.difficulty as i32,
-                        ),
+                        CopyInfoCodec::encode_payload(&payload),
                     );
                     response_payload(request.method.as_str(), Vec::new())
                 }
@@ -2223,23 +2255,6 @@ fn append_typed_user_login_bootstrap(
         }
     };
     let now = current_unix_seconds();
-    let passed = account
-        .battle
-        .passed_copies
-        .iter()
-        .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
-        .collect::<Vec<_>>();
-    let copy_star_levels = account
-        .battle
-        .copy_stars
-        .iter()
-        .filter_map(|(copy_id, stars)| {
-            Some((
-                i32::try_from(copy_id.get()).ok()?,
-                i32::try_from(*stars).ok()?,
-            ))
-        })
-        .collect::<Vec<_>>();
     effects.push_pre(super::common::response::Response::raw(
         "user.UpdateUserInfo",
         UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
@@ -2276,45 +2291,34 @@ fn append_typed_user_login_bootstrap(
             _ => 1,
         })
         .unwrap_or(1);
-    let mut copy_pushes = vec![
-        (
-            1,
-            CopyInfoCodec::encode_with_progress_and_stars(
-                1,
-                &catalog.plot,
-                copy_progress_max_or_first(&catalog.plot, &passed),
-                &passed,
-                &copy_star_levels,
-            ),
-        ),
-        (
-            2,
-            CopyInfoCodec::encode_with_progress_and_difficulty_and_counts_and_stars(
-                &catalog.sea,
-                copy_progress_max_or_initial(&catalog.sea, &passed, catalog.sea_initial),
-                &passed,
-                &[],
-                &copy_star_levels,
-                account.sea.difficulty.max(1) as i32,
-            ),
-        ),
-        (
-            33,
-            CopyInfoCodec::encode(
-                33,
-                &catalog.mubar,
-                catalog.mubar.iter().copied().max().unwrap_or_default(),
-            ),
-        ),
-        (
-            9,
-            CopyInfoCodec::encode(
-                9,
-                &catalog.daily,
-                catalog.daily.iter().copied().max().unwrap_or_default(),
-            ),
-        ),
-    ];
+    let copy_bottom_index = match preferred_type {
+        2 => 2,
+        33 => 3,
+        9 => 4,
+        _ => 1,
+    };
+    let prefs = account
+        .guide
+        .settings
+        .get(misc_handler::CLIENT_PREFS_SETTING_KEY)
+        .cloned()
+        .unwrap_or_else(|| format!(r#"{{"NewCopyButtomIndex":{copy_bottom_index}}}"#));
+    let mut prefs_payload = Vec::new();
+    append_message_field(&mut prefs_payload, 1, prefs.as_bytes());
+    append_varint_field(&mut prefs_payload, 2, u64::from(now));
+    effects.push_pre(super::common::response::Response::raw(
+        "prefs.UpdatePrefsInfo",
+        prefs_payload,
+    ));
+    let mut copy_pushes = [1, 2, 33, 9]
+        .into_iter()
+        .map(|copy_type| {
+            (
+                copy_type,
+                CopyInfoCodec::encode_payload(&copy_info_payload(catalog, copy_type, account)),
+            )
+        })
+        .collect::<Vec<_>>();
     copy_pushes.sort_by_key(|(copy_type, _)| *copy_type != preferred_type);
     for (_, payload) in copy_pushes {
         effects.push_pre(super::common::response::Response::raw(
@@ -2458,5 +2462,85 @@ mod route_guard_tests {
         let fields =
             blueoath_protocol::decode_varint_fields(&first_copy.payload.into_bytes()).unwrap();
         assert_eq!(fields.get(&3), Some(&vec![2]));
+    }
+
+    #[test]
+    fn login_bootstrap_includes_saved_preferences() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("saved-prefs").unwrap(), "Captain");
+        account.guide.settings.insert(
+            "__client_prefs".to_owned(),
+            r#"{"NewCopyButtomIndex":2}"#.to_owned(),
+        );
+        let mut effects = ResponseEffects::default();
+
+        append_typed_user_login_bootstrap(
+            &mut effects,
+            &ServerState::new("saved-prefs", "Captain", "test"),
+            &account,
+            None,
+            None,
+        );
+
+        let (pre, _, _) = effects.into_parts();
+        let prefs = pre
+            .into_iter()
+            .find(|response| response.method == "prefs.UpdatePrefsInfo")
+            .expect("saved preferences bootstrap push");
+        assert_eq!(
+            decode_string_field(&prefs.payload.into_bytes(), 1).as_deref(),
+            Some(r#"{"NewCopyButtomIndex":2}"#)
+        );
+    }
+
+    #[test]
+    fn sea_copy_bootstrap_includes_accumulated_chapter_stars() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("sea-stars").unwrap(), "Captain");
+        for copy_id in [1_600_100, 1_600_200, 1_600_300] {
+            let copy_id = CopyId::new(copy_id).unwrap();
+            account.battle.passed_copies.insert(copy_id);
+            account.battle.copy_stars.insert(copy_id, 7);
+        }
+        account.battle.claimed_star_rewards.insert((1001, 1));
+        let catalog = ChapterCatalog {
+            sea: vec![1_600_100, 1_600_200, 1_600_300],
+            star_rewards_by_chapter: [(
+                1001,
+                ChapterStarRewards {
+                    level_ids: vec![1_600_100, 1_600_200, 1_600_300],
+                    star_conditions: vec![10, 20, 30],
+                    reward_ids: vec![1, 2, 3],
+                },
+            )]
+            .into_iter()
+            .collect(),
+            ..ChapterCatalog::default()
+        };
+        let mut effects = ResponseEffects::default();
+
+        append_typed_user_login_bootstrap(
+            &mut effects,
+            &ServerState::new("sea-stars", "Captain", "test"),
+            &account,
+            Some(&catalog),
+            None,
+        );
+
+        let (pre, _, _) = effects.into_parts();
+        let sea = pre
+            .into_iter()
+            .filter(|response| response.method == "copy.GetCopy")
+            .find(|response| decode_varint_field(&response.payload.clone().into_bytes(), 3) == 2)
+            .expect("sea copy bootstrap push");
+        let chapter = decode_repeated_message_field(&sea.payload.into_bytes(), 4)
+            .into_iter()
+            .next()
+            .expect("chapter star info");
+        assert_eq!(decode_varint_field(&chapter, 1), 1001);
+        assert_eq!(decode_varint_field(&chapter, 2), 9);
+        let claimed = decode_repeated_message_field(&chapter, 3);
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(decode_varint_field(&claimed[0], 1), 1);
     }
 }

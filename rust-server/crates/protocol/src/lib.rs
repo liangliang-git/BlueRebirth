@@ -3846,7 +3846,16 @@ pub struct CopyInfoPayload {
     pub passed_copy_ids: Vec<i32>,
     pub passed_copy_counts: Vec<(i32, i32)>,
     pub copy_star_levels: Vec<(i32, i32)>,
+    pub chapter_star_infos: Vec<CopyChapterStarInfo>,
     pub difficulty: i32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CopyChapterStarInfo {
+    pub chapter_id: i32,
+    pub star_num: i32,
+    pub claimed_reward_indexes: Vec<i32>,
+    pub pass_num: i32,
 }
 
 impl CopyInfoCodec {
@@ -3858,6 +3867,7 @@ impl CopyInfoCodec {
             &value.passed_copy_ids,
             &value.passed_copy_counts,
             &value.copy_star_levels,
+            &value.chapter_star_infos,
             value.difficulty,
         )
     }
@@ -3883,6 +3893,7 @@ impl CopyInfoCodec {
             max_copy_id,
             passed_copy_ids,
             &passed_copy_counts,
+            &[],
             &[],
             1,
         )
@@ -3924,6 +3935,7 @@ impl CopyInfoCodec {
             passed_copy_ids,
             passed_copy_counts,
             &[],
+            &[],
             difficulty,
         )
     }
@@ -3947,6 +3959,7 @@ impl CopyInfoCodec {
             passed_copy_ids,
             &passed_copy_counts,
             copy_star_levels,
+            &[],
             1,
         )
     }
@@ -3966,6 +3979,7 @@ impl CopyInfoCodec {
             passed_copy_ids,
             passed_copy_counts,
             copy_star_levels,
+            &[],
             difficulty,
         )
     }
@@ -3977,6 +3991,7 @@ impl CopyInfoCodec {
         passed_copy_ids: &[i32],
         passed_copy_counts: &[(i32, i32)],
         copy_star_levels: &[(i32, i32)],
+        chapter_star_infos: &[CopyChapterStarInfo],
         difficulty: i32,
     ) -> Vec<u8> {
         let mut output = Vec::new();
@@ -4011,6 +4026,19 @@ impl CopyInfoCodec {
                 .unwrap_or(1);
             write_varint_field(&mut count, 2, pass_count.max(1) as u64);
             write_bytes(&mut output, 5, &count);
+        }
+        for chapter in chapter_star_infos {
+            let mut info = Vec::new();
+            write_varint_field(&mut info, 1, chapter.chapter_id.max(0) as u64);
+            write_varint_field(&mut info, 2, chapter.star_num.max(0) as u64);
+            for index in &chapter.claimed_reward_indexes {
+                let mut reward = Vec::new();
+                write_varint_field(&mut reward, 1, (*index).max(0) as u64);
+                write_varint_field(&mut reward, 2, 0);
+                write_bytes(&mut info, 3, &reward);
+            }
+            write_varint_field(&mut info, 4, chapter.pass_num.max(0) as u64);
+            write_bytes(&mut output, 4, &info);
         }
         write_varint_field(&mut output, 2, max_copy_id as u32 as u64);
         write_varint_field(&mut output, 3, copy_type as u32 as u64);

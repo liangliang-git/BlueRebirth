@@ -2,6 +2,8 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
+pub(crate) const CLIENT_PREFS_SETTING_KEY: &str = "__client_prefs";
+
 pub(crate) fn handles_typed(method: &str) -> bool {
     matches!(
         method,
@@ -88,9 +90,19 @@ pub(crate) fn handle_typed(
             );
             HandlerResult::PushOnly
         }
-        "prefs.SavePrefs" | "statcount.GetStatCount" | "miniGame.StartMiniGame" => {
+        "prefs.SavePrefs" => {
+            let Some(prefs) = decode_string_field(request_args, 1)
+                .filter(|prefs| !prefs.is_empty() && prefs.len() <= 64 * 1024)
+            else {
+                return invalid("client preferences are invalid");
+            };
+            account
+                .guide
+                .settings
+                .insert(CLIENT_PREFS_SETTING_KEY.to_owned(), prefs);
             HandlerResult::PushOnly
         }
+        "statcount.GetStatCount" | "miniGame.StartMiniGame" => HandlerResult::PushOnly,
         _ => HandlerResult::Empty,
     }
 }
@@ -149,6 +161,26 @@ mod tests {
         assert_eq!(
             account.activities.progress.get("archiveCopy:copyId"),
             Some(&91)
+        );
+    }
+
+    #[test]
+    fn typed_save_prefs_persists_client_preferences() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("prefs-typed").unwrap(),
+            "Captain",
+        );
+        let prefs = r#"{"NewCopyButtomIndex":2}"#;
+        let mut args = Vec::new();
+        append_message_field(&mut args, 1, prefs.as_bytes());
+
+        assert!(matches!(
+            handle_typed(&mut account, "prefs.SavePrefs", &args),
+            HandlerResult::PushOnly
+        ));
+        assert_eq!(
+            account.guide.settings.get("__client_prefs"),
+            Some(&prefs.to_owned())
         );
     }
 }

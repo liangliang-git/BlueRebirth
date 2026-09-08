@@ -90,7 +90,7 @@ pub(crate) fn handle_typed_copy_star_reward(
                     .unwrap_or(7),
             )
         })
-        .map(|stars| i32::try_from(stars).unwrap_or(i32::MAX))
+        .map(|stars| i32::try_from(stars.min(7).count_ones()).unwrap_or(i32::MAX))
         .sum::<i32>();
     let mut pending = Vec::new();
     let mut pending_indexes = std::collections::BTreeSet::new();
@@ -1585,7 +1585,7 @@ mod tests {
             1,
             ChapterStarRewards {
                 level_ids: vec![9],
-                star_conditions: vec![7],
+                star_conditions: vec![3],
                 reward_ids: vec![9001],
             },
         );
@@ -1662,7 +1662,7 @@ mod tests {
             HandlerResult::Error(GameError::InvalidState(_))
         ));
         account.battle.passed_copies.insert(second);
-        account.battle.copy_stars.insert(second, 2);
+        account.battle.copy_stars.insert(second, 3);
         assert!(matches!(
             handle_typed_copy_star_reward(
                 &mut account,
@@ -1673,6 +1673,44 @@ mod tests {
                 &mut effects,
             ),
             HandlerResult::Reply(_)
+        ));
+    }
+
+    #[test]
+    fn typed_copy_star_reward_counts_bits_in_star_masks() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("star-reward-mask").unwrap(), "Battle");
+        for copy_id in [9, 10, 11] {
+            let copy_id = CopyId::new(copy_id).unwrap();
+            account.battle.passed_copies.insert(copy_id);
+            account.battle.copy_stars.insert(copy_id, 7);
+        }
+        let mut chapter_catalog = ChapterCatalog::default();
+        chapter_catalog.star_rewards_by_chapter.insert(
+            1,
+            ChapterStarRewards {
+                level_ids: vec![9, 10, 11],
+                star_conditions: vec![10],
+                reward_ids: vec![9001],
+            },
+        );
+        let mut task_catalog = TaskCatalog::default();
+        task_catalog.rewards_by_id.insert(9001, vec![(1, 5001, 1)]);
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, 1);
+        append_varint_field(&mut request, 2, 1);
+        let mut effects = ResponseEffects::default();
+
+        assert!(matches!(
+            handle_typed_copy_star_reward(
+                &mut account,
+                "copy.StarReward",
+                &request,
+                Some(&chapter_catalog),
+                Some(&task_catalog),
+                &mut effects,
+            ),
+            HandlerResult::Error(GameError::InvalidState(_))
         ));
     }
 
