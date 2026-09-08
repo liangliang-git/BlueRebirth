@@ -27,17 +27,23 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
+#[path = "features/user/state.rs"]
 mod account_defaults;
 mod account_state;
+#[path = "features/battle/state.rs"]
 mod battle_state;
 mod bootstrap;
+#[path = "features/building/state.rs"]
 mod building_state;
+#[path = "features/building/buildship_state.rs"]
 mod buildship_state;
 mod catalog;
 mod catalog_loader;
 pub mod common;
 mod config;
+#[path = "features/building/construction.rs"]
 mod construction_state;
+#[path = "features/equip/state.rs"]
 mod equip_state;
 mod frame_service;
 mod game_login;
@@ -46,16 +52,22 @@ pub(crate) use game_login::equip_handler::{
     equip_activity_payload, equip_new_test_copy_payload, equip_test_copy_payload,
     mark_equip_activity_reward, mark_new_test_reward, resolve_new_test_reward,
 };
+#[path = "features/social/state.rs"]
 mod guild_state;
+#[path = "features/hero/state.rs"]
 mod hero_state;
 mod local_protocol;
+#[path = "features/copy/mopup_state.rs"]
 mod mopup_state;
 mod projection;
 mod protocol_payload;
 pub mod router;
 mod runtime;
+#[path = "features/shop/state.rs"]
 mod shop_state;
+#[path = "features/progression/study_state.rs"]
 mod study_state;
+#[path = "features/task/state.rs"]
 mod task_state;
 mod wire;
 

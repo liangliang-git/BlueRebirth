@@ -14,69 +14,69 @@ use super::router::{GameMethod, KnownMethod, MethodFamily};
 use super::wire::*;
 use super::*;
 
-#[path = "activity_extra_handler.rs"]
+#[path = "features/activity/extra_service.rs"]
 mod activity_extra_handler;
-#[path = "activity_handler.rs"]
+#[path = "features/activity/service.rs"]
 mod activity_handler;
-#[path = "adventure_handler.rs"]
+#[path = "features/activity/adventure_service.rs"]
 mod adventure_handler;
-#[path = "base_handler.rs"]
+#[path = "features/user/service.rs"]
 mod base_handler;
-#[path = "battle_handler.rs"]
+#[path = "features/battle/service.rs"]
 mod battle_handler;
-#[path = "boss_handler.rs"]
+#[path = "features/social/boss_service.rs"]
 mod boss_handler;
-#[path = "building_handler.rs"]
+#[path = "features/building/service.rs"]
 pub(super) mod building_handler;
-#[path = "buildship_handler.rs"]
+#[path = "features/building/buildship_service.rs"]
 mod buildship_handler;
-#[path = "chat_handler.rs"]
+#[path = "features/social/chat_service.rs"]
 mod chat_handler;
-#[path = "commerce_handler.rs"]
+#[path = "features/shop/service.rs"]
 mod commerce_handler;
-#[path = "compat_feature.rs"]
+#[path = "features/hero/compat_service.rs"]
 mod compat_feature;
-#[path = "coop_handler.rs"]
+#[path = "features/cooperation/service.rs"]
 pub(super) mod coop_handler;
-#[path = "daily_copy_handler.rs"]
+#[path = "features/copy/service.rs"]
 mod daily_copy_handler;
-#[path = "equip_handler.rs"]
+#[path = "features/equip/service.rs"]
 pub(crate) mod equip_handler;
-#[path = "extended_handler.rs"]
+#[path = "features/activity/extended_service.rs"]
 mod extended_handler;
-#[path = "friend_handler.rs"]
+#[path = "features/social/friend_service.rs"]
 mod friend_handler;
-#[path = "guild_extension_handler.rs"]
+#[path = "features/social/guild_extension_service.rs"]
 mod guild_extension_handler;
-#[path = "guild_handler.rs"]
+#[path = "features/social/guild_service.rs"]
 mod guild_handler;
-#[path = "guildbox_handler.rs"]
+#[path = "features/social/guild_box_service.rs"]
 mod guildbox_handler;
-#[path = "guildtask_handler.rs"]
+#[path = "features/social/guild_task_service.rs"]
 mod guildtask_handler;
-#[path = "hero_handler.rs"]
+#[path = "features/hero/service.rs"]
 mod hero_handler;
-#[path = "invitescore_handler.rs"]
+#[path = "features/activity/invite_score_service.rs"]
 mod invitescore_handler;
-#[path = "misc_extended_handler.rs"]
+#[path = "features/activity/misc_service.rs"]
 mod misc_extended_handler;
-#[path = "misc_handler.rs"]
+#[path = "features/user/misc_service.rs"]
 mod misc_handler;
-#[path = "outpost_handler.rs"]
+#[path = "features/building/outpost_service.rs"]
 mod outpost_handler;
-#[path = "progression_handler.rs"]
+#[path = "features/progression/service.rs"]
 mod progression_handler;
-#[path = "shiptask_handler.rs"]
+#[path = "features/activity/ship_task_service.rs"]
 mod shiptask_handler;
-#[path = "sportsmeet_handler.rs"]
+#[path = "features/activity/sports_meet_service.rs"]
 mod sportsmeet_handler;
-#[path = "talent_handler.rs"]
+#[path = "features/activity/talent_service.rs"]
 mod talent_handler;
-#[path = "task_handler.rs"]
+#[path = "features/task/service.rs"]
 mod task_handler;
-#[path = "teaching_handler.rs"]
+#[path = "features/user/teaching_service.rs"]
 mod teaching_handler;
-#[path = "tower_handler.rs"]
+#[path = "features/tower/service.rs"]
 pub(super) mod tower_handler;
 
 #[cfg(not(test))]
