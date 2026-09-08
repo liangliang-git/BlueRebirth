@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using System.Text.Json;
 using Xunit;
 
 namespace BlueOath.DbEditor.Tests;
@@ -18,8 +19,10 @@ public sealed class DbArchiveTests
 
         var rebuilt = Path.Combine(rebuiltRoot, "config_test.db");
         var document = DbFileEditor.Load(rebuilt);
+        using var json = JsonDocument.Parse(document.Records[0].JsonText);
         Assert.Contains("蒼き鋼", archiveJson, StringComparison.Ordinal);
-        Assert.Equal("{\"name\":\"蒼き鋼\",\"value\":42}", document.Records[0].JsonText);
+        Assert.Equal("蒼き鋼", json.RootElement.GetProperty("name").GetString());
+        Assert.Equal(42, json.RootElement.GetProperty("value").GetInt32());
         Assert.Equal("\0", document.Records[1].JsonText);
     }
 
@@ -67,7 +70,7 @@ public sealed class DbArchiveTests
             using var command = connection.CreateCommand();
             command.CommandText = "CREATE TABLE DBObject(id varchar primary key not null, indexid varchar, jsonbytes blob);" +
                                   "INSERT INTO DBObject(id,indexid,jsonbytes) VALUES($id,$indexid,$json);" +
-                                  "INSERT INTO DBObject(id,indexid,jsonbytes) VALUES('nill','',X'00');";
+                                  "INSERT INTO DBObject(id,indexid,jsonbytes) VALUES('nill','',X'55');";
             command.Parameters.AddWithValue("$id", "100");
             command.Parameters.AddWithValue("$indexid", "");
             command.Parameters.AddWithValue("$json", DbFileEditor.EncodeJson("{\"name\":\"蒼き鋼\",\"value\":42}"));

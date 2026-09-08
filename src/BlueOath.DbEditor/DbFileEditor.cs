@@ -17,6 +17,8 @@ public sealed record DbDocument(string Path, IReadOnlyList<DbRecord> Records)
     public int EditableCount => Records.Count(record => record.IsEditable);
 }
 
+internal sealed record RawDbRecord(string Id, string? IndexId, byte[] EncodedBytes);
+
 public static class DbFileEditor
 {
     public const byte XorKey = 0x55;
@@ -143,6 +145,23 @@ public static class DbFileEditor
     public static string DecodeJson(byte[] encodedBytes) =>
         Utf8.GetString(Xor(encodedBytes));
 
+    internal static IReadOnlyList<RawDbRecord> ReadRawRows(string dbPath)
+    {
+        var fullPath = RequireDatabase(dbPath);
+        var records = new List<RawDbRecord>();
+        using var connection = Open(fullPath, SqliteOpenMode.ReadOnly);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, indexid, jsonbytes FROM DBObject ORDER BY rowid";
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var id = reader.IsDBNull(0) ? string.Empty : Convert.ToString(reader.GetValue(0)) ?? string.Empty;
+            var indexId = reader.IsDBNull(1) ? null : Convert.ToString(reader.GetValue(1));
+            records.Add(new RawDbRecord(id, indexId, ReadBytes(reader, 2)));
+        }
+        return records;
+    }
+
     private static void ValidateEditableId(string id)
     {
         if (string.IsNullOrWhiteSpace(id) || string.Equals(id, "nill", StringComparison.OrdinalIgnoreCase))
@@ -156,7 +175,7 @@ public static class DbFileEditor
         using var _ = JsonDocument.Parse(jsonText);
     }
 
-    private static string RequireDatabase(string dbPath)
+    internal static string RequireDatabase(string dbPath)
     {
         var fullPath = Path.GetFullPath(dbPath);
         if (!File.Exists(fullPath))
@@ -166,7 +185,7 @@ public static class DbFileEditor
         return fullPath;
     }
 
-    private static string CreateBackup(string dbPath)
+    internal static string CreateBackup(string dbPath)
     {
         var backup = $"{dbPath}.{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}-{Guid.NewGuid():N}.bak";
         File.Copy(dbPath, backup, overwrite: false);

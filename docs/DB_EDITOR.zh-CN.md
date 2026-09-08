@@ -24,7 +24,11 @@ dotnet run --project src\BlueOath.DbEditor.App\BlueOath.DbEditor.App.csproj -c R
 - 按表名、ID、IndexID、JSON 内容搜索。
 - XOR `0x55` 解码 `DBObject.jsonbytes`，编辑后重新编码保存。
 - JSON 格式化、已有行保存、新增行、删除行。
+- 左侧支持 Ctrl/Shift 多选 DB；`解压选中/批量` 将 DB 解码为可编辑的 `config_*.json` 归档。
+- `重新编译` 扫描归档目录，将 JSON 重新编译为 DB；目标目录已有文件时自动备份。
 - 每次写入前自动创建带时间戳的 `.bak` 文件。
 - `nill` 元数据行和非法 JSON 行只读，避免误损坏客户端配置。
+
+解压后的归档格式为单个 `config_xxx.json` 文件，`rows[*].data` 是可编辑 JSON；元数据或非法行使用 `encodedBase64` 保留原始编码字节。
 
 关闭客户端后再编辑配置。保存前建议复制整个 `config` 目录；游戏更新可能覆盖修改。

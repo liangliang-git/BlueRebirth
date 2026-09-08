@@ -52,10 +52,12 @@ internal sealed class MainForm : Form
         rootPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         Controls.Add(rootPanel);
 
-        var pathPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3 };
+        var pathPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 5 };
         pathPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72));
         pathPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         pathPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 88));
+        pathPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
+        pathPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
         pathPanel.Controls.Add(new Label { Text = "配置目录", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
         _rootText.ReadOnly = true;
         _rootText.Dock = DockStyle.Fill;
@@ -63,6 +65,12 @@ internal sealed class MainForm : Form
         var browseButton = new Button { Text = "选择目录", Dock = DockStyle.Fill };
         browseButton.Click += (_, _) => ChooseConfigRoot();
         pathPanel.Controls.Add(browseButton, 2, 0);
+        var unpackButton = new Button { Text = "解压选中/批量", Dock = DockStyle.Fill };
+        unpackButton.Click += (_, _) => UnpackSelectedDatabases();
+        pathPanel.Controls.Add(unpackButton, 3, 0);
+        var repackButton = new Button { Text = "重新编译", Dock = DockStyle.Fill };
+        repackButton.Click += (_, _) => RepackArchives();
+        pathPanel.Controls.Add(repackButton, 4, 0);
         rootPanel.Controls.Add(pathPanel, 0, 0);
 
         var searchPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
@@ -86,6 +94,8 @@ internal sealed class MainForm : Form
 
         _databaseList.Dock = DockStyle.Fill;
         _databaseList.Font = new Font(Font.FontFamily, 10);
+        _databaseList.SelectionMode = SelectionMode.MultiExtended;
+        _databaseList.HorizontalScrollbar = true;
         _databaseList.SelectedIndexChanged += (_, _) => LoadSelectedDatabase();
         split.Panel1.Controls.Add(_databaseList);
 
@@ -177,6 +187,64 @@ internal sealed class MainForm : Form
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         _configRoot = dialog.SelectedPath;
         LoadDatabaseList();
+    }
+
+    private void UnpackSelectedDatabases()
+    {
+        var selectedPaths = _databaseList.SelectedIndices.Cast<int>()
+            .Where(index => index >= 0 && index < _databasePaths.Count)
+            .Select(index => _databasePaths[index])
+            .ToArray();
+        if (selectedPaths.Length == 0)
+        {
+            MessageBox.Show(this, "先在左侧选择一个或多个 DB 文件。", "没有选择", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = $"选择解压输出目录（{selectedPaths.Length} 个 DB）",
+            UseDescriptionForTitle = true
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            var files = DbArchive.Unpack(selectedPaths, dialog.SelectedPath);
+            SetStatus($"已解压 {files.Count} 个 DB 到 {dialog.SelectedPath}");
+        }
+        catch (Exception exception)
+        {
+            ShowError(exception);
+        }
+    }
+
+    private void RepackArchives()
+    {
+        using var sourceDialog = new FolderBrowserDialog
+        {
+            Description = "选择包含 config_*.json 的解压目录",
+            UseDescriptionForTitle = true
+        };
+        if (sourceDialog.ShowDialog(this) != DialogResult.OK) return;
+
+        using var targetDialog = new FolderBrowserDialog
+        {
+            Description = "选择重新编译后的 DB 输出目录",
+            SelectedPath = Directory.Exists(_configRoot) ? _configRoot : string.Empty,
+            UseDescriptionForTitle = true
+        };
+        if (targetDialog.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            var result = DbArchive.Repack(sourceDialog.SelectedPath, targetDialog.SelectedPath);
+            SetStatus($"已重新编译 {result.Files.Count} 个 DB，备份 {result.Backups.Count} 个");
+            if (string.Equals(Path.GetFullPath(targetDialog.SelectedPath), Path.GetFullPath(_configRoot), StringComparison.OrdinalIgnoreCase))
+                LoadDatabaseList();
+        }
+        catch (Exception exception)
+        {
+            ShowError(exception);
+        }
     }
 
     private void LoadDatabaseList()
