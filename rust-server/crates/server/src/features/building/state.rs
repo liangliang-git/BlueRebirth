@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use super::*;
 
 #[cfg(test)]
-pub(super) fn build_project_payload(project: &Value) -> Vec<u8> {
+pub(crate) fn build_project_payload(project: &Value) -> Vec<u8> {
     let mut output = Vec::new();
     if let Some(items) = project.get("items").and_then(Value::as_array) {
         for item in items {
@@ -33,7 +33,7 @@ pub(super) fn build_project_payload(project: &Value) -> Vec<u8> {
 }
 
 #[cfg(test)]
-pub(super) fn build_formula_payload(value: &Value, include_hero_id: bool) -> Vec<u8> {
+pub(crate) fn build_formula_payload(value: &Value, include_hero_id: bool) -> Vec<u8> {
     let mut output = Vec::new();
     append_varint_field(
         &mut output,
@@ -57,7 +57,7 @@ pub(super) fn build_formula_payload(value: &Value, include_hero_id: bool) -> Vec
 }
 
 #[cfg(test)]
-pub(super) fn construction_info_payload(account: &Value, now: u32) -> Vec<u8> {
+pub(crate) fn construction_info_payload(account: &Value, now: u32) -> Vec<u8> {
     let Some(construction) = account.get("construction") else {
         return Vec::new();
     };
@@ -120,7 +120,7 @@ pub(super) fn construction_info_payload(account: &Value, now: u32) -> Vec<u8> {
 }
 
 #[cfg(test)]
-pub(super) fn promote_construction_waiting(jobs: &mut [Value], transition_time: i64) {
+pub(crate) fn promote_construction_waiting(jobs: &mut [Value], transition_time: i64) {
     let active = jobs
         .iter()
         .filter(|job| {
@@ -146,7 +146,7 @@ pub(super) fn promote_construction_waiting(jobs: &mut [Value], transition_time: 
     }
 }
 
-pub(super) fn bathroom_end_payload(hero_id: u64, bath_time: i64) -> Vec<u8> {
+pub(crate) fn bathroom_end_payload(hero_id: u64, bath_time: i64) -> Vec<u8> {
     let mut output = Vec::new();
     append_varint_field(&mut output, 1, 0);
     append_varint_field(&mut output, 2, bath_time.max(0) as u64);
@@ -154,7 +154,7 @@ pub(super) fn bathroom_end_payload(hero_id: u64, bath_time: i64) -> Vec<u8> {
     output
 }
 
-pub(super) fn decode_building_assignments(
+pub(crate) fn decode_building_assignments(
     request: &BuildingSetHeroListRequest,
 ) -> Vec<(i32, Vec<i32>)> {
     let building_ids = &request.building_ids;
@@ -181,7 +181,7 @@ pub(super) fn decode_building_assignments(
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn update_building_assignments(
+pub(crate) fn update_building_assignments(
     account: &mut Value,
     assignments: &[(i32, Vec<i32>)],
     now: u32,
@@ -275,7 +275,7 @@ pub(super) fn update_building_assignments(
     true
 }
 
-pub(super) fn building_capacity(
+pub(crate) fn building_capacity(
     template_id: i32,
     level: i32,
     catalog: Option<&BuildingCatalog>,
@@ -298,7 +298,7 @@ pub(super) fn building_capacity(
 /// Persisted account remains source of truth; projection supplies protocol defaults.
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn add_building_state(
+pub(crate) fn add_building_state(
     account: &mut Value,
     template_id: i32,
     land_index: i32,
@@ -358,7 +358,7 @@ pub(super) fn add_building_state(
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn change_building_level(account: &mut Value, building_id: i32, delta: i32) -> bool {
+pub(crate) fn change_building_level(account: &mut Value, building_id: i32, delta: i32) -> bool {
     if building_id <= 0 || delta == 0 {
         return false;
     }
@@ -387,7 +387,7 @@ pub(super) fn change_building_level(account: &mut Value, building_id: i32, delta
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn finish_building_state(account: &mut Value, building_id: i32, now: u32) -> bool {
+pub(crate) fn finish_building_state(account: &mut Value, building_id: i32, now: u32) -> bool {
     let Some(building) = account
         .get_mut("building")
         .and_then(|value| value.get_mut("buildings"))
@@ -408,7 +408,7 @@ pub(super) fn finish_building_state(account: &mut Value, building_id: i32, now: 
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn set_building_production(
+pub(crate) fn set_building_production(
     account: &mut Value,
     building_id: i32,
     recipe_id: i32,
@@ -447,7 +447,7 @@ pub(super) fn set_building_production(
 /// this operation server-authoritative and idempotent.
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn collect_building_rewards(
+pub(crate) fn collect_building_rewards(
     account: &mut Value,
     catalog: Option<&BuildingCatalog>,
     building_id: Option<i32>,
@@ -754,7 +754,7 @@ fn apply_building_collection_state(
     }
 }
 
-pub(super) fn bathroom_service_payload(hero_id: u64, pos: i64, _bath_time: i64) -> Vec<u8> {
+pub(crate) fn bathroom_service_payload(hero_id: u64, pos: i64, _bath_time: i64) -> Vec<u8> {
     let mut output = Vec::new();
     if pos > 0 {
         append_varint_field(&mut output, 1, pos as u64);
@@ -766,7 +766,7 @@ pub(super) fn bathroom_service_payload(hero_id: u64, pos: i64, _bath_time: i64) 
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn bathroom_start_all_payload(account: &Value, args: &[u8]) -> Vec<u8> {
+pub(crate) fn bathroom_start_all_payload(account: &Value, args: &[u8]) -> Vec<u8> {
     let heroes = account
         .get("bath")
         .and_then(|bath| bath.get("heroList"))
@@ -789,7 +789,7 @@ pub(super) fn bathroom_start_all_payload(account: &Value, args: &[u8]) -> Vec<u8
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn update_bathroom_state(account: &mut Value, method: &str, args: &[u8], now: u32) {
+pub(crate) fn update_bathroom_state(account: &mut Value, method: &str, args: &[u8], now: u32) {
     let owned_hero_ids = account
         .get("dock")
         .and_then(|dock| dock.get("heroes"))
@@ -886,7 +886,7 @@ pub(super) fn update_bathroom_state(account: &mut Value, method: &str, args: &[u
 }
 
 #[cfg(test)]
-pub(super) fn bathroom_info_payload(account: &Value) -> Vec<u8> {
+pub(crate) fn bathroom_info_payload(account: &Value) -> Vec<u8> {
     let mut output = Vec::new();
     let Some(bath) = account.get("bath") else {
         output.extend_from_slice(&[0x0A, 0x00]);

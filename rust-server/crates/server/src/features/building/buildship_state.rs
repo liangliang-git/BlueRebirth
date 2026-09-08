@@ -4,7 +4,7 @@ use serde_json::Value;
 use super::*;
 
 #[cfg(test)]
-pub(super) fn buildship_info_payload(account: Option<&Value>, now: u32) -> Vec<u8> {
+pub(crate) fn buildship_info_payload(account: Option<&Value>, now: u32) -> Vec<u8> {
     const ENABLED_POOLS: &[u32] = &[106, 109, 124, 150, 151, 152, 154];
     let mut output = Vec::new();
     let close_time = u64::from(now).saturating_add(365 * 24 * 60 * 60);
@@ -38,7 +38,7 @@ pub(super) fn buildship_info_payload(account: Option<&Value>, now: u32) -> Vec<u
     output
 }
 
-pub(super) fn buildship_info_payload_from_typed(
+pub(crate) fn buildship_info_payload_from_typed(
     account: &blueoath_domain::AccountState,
     now: u32,
 ) -> Vec<u8> {
@@ -91,7 +91,7 @@ pub(super) fn buildship_info_payload_from_typed(
     output
 }
 
-pub(super) fn expand_build_drop(catalog: &BuildShipCatalog, drop_id: i32) -> Vec<BuildDropEntry> {
+pub(crate) fn expand_build_drop(catalog: &BuildShipCatalog, drop_id: i32) -> Vec<BuildDropEntry> {
     fn visit(catalog: &BuildShipCatalog, id: i32, depth: u8, out: &mut Vec<BuildDropEntry>) {
         if depth > 8 {
             return;
@@ -110,7 +110,7 @@ pub(super) fn expand_build_drop(catalog: &BuildShipCatalog, drop_id: i32) -> Vec
 }
 
 #[cfg(test)]
-pub(super) fn append_buildship_count_map(
+pub(crate) fn append_buildship_count_map(
     output: &mut Vec<u8>,
     account: Option<&Value>,
     key: &str,
@@ -135,7 +135,7 @@ pub(super) fn append_buildship_count_map(
 }
 
 #[cfg(test)]
-pub(super) fn append_buildship_reward_map(
+pub(crate) fn append_buildship_reward_map(
     output: &mut Vec<u8>,
     account: Option<&Value>,
     key: &str,
@@ -168,7 +168,7 @@ pub(super) fn append_buildship_reward_map(
 }
 
 #[cfg(test)]
-pub(super) fn snake_case_key(key: &str) -> String {
+pub(crate) fn snake_case_key(key: &str) -> String {
     let mut output = String::new();
     for (index, ch) in key.chars().enumerate() {
         if ch.is_uppercase() {

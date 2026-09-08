@@ -32,16 +32,10 @@ mod account_defaults;
 #[cfg(test)]
 mod account_state;
 mod bootstrap;
-#[path = "features/building/state.rs"]
-mod building_state;
-#[path = "features/building/buildship_state.rs"]
-mod buildship_state;
 mod catalog;
 mod catalog_loader;
 pub mod common;
 mod config;
-#[path = "features/building/construction.rs"]
-mod construction_state;
 #[path = "features/equip/state.rs"]
 mod equip_state;
 pub(crate) mod features;
@@ -89,8 +83,6 @@ use bootstrap::{
     handle_bootstrap_http, looks_like_http, looks_like_netsocket, read_connection_prefix,
     PrefixedTcpStream,
 };
-use building_state::*;
-use buildship_state::*;
 use catalog::*;
 use catalog_loader::*;
 use common::clock::{Clock, SystemClock};
@@ -99,11 +91,11 @@ use config::{normalize_multiplier, normalize_profile_id, scale_reward, DEFAULT_P
 pub use config::{
     BattleOutcome, Formation, ServerConfig, ServerConfigError, ServerState, Ship, Stage,
 };
-use construction_state::*;
 use equip_state::*;
 use features::battle::state::*;
 #[cfg(test)]
 pub(crate) use features::building::service::handle_typed as handle_typed_building;
+use features::building::{buildship_state::*, construction_state::*, state::*};
 pub use frame_service::process_frame;
 use frame_service::{prepare_local_request, storage_failure_response};
 #[cfg(test)]

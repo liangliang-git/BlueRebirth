@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use super::*;
 
 #[cfg(test)]
-pub(super) fn decode_construction_projects(payload: &[u8]) -> Vec<Value> {
+pub(crate) fn decode_construction_projects(payload: &[u8]) -> Vec<Value> {
     let mut projects = Vec::new();
     let mut index = 0;
     while index < payload.len() {
@@ -76,7 +76,7 @@ pub(super) fn decode_construction_projects(payload: &[u8]) -> Vec<Value> {
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn start_construction(
+pub(crate) fn start_construction(
     account: &mut Value,
     projects: &[Value],
     now: u32,
@@ -180,7 +180,7 @@ pub(super) fn start_construction(
     Ok(())
 }
 
-pub(super) fn select_construction_template(gold: i64, steel: i64, aluminium: i64) -> i32 {
+pub(crate) fn select_construction_template(gold: i64, steel: i64, aluminium: i64) -> i32 {
     if let Some(catalog) = BUILD_FORMULA_CATALOG.get() {
         for (r1, r2, r3, ships) in &catalog.0 {
             let in_range = |value: i64, range: &[i64]| {
@@ -200,7 +200,7 @@ pub(super) fn select_construction_template(gold: i64, steel: i64, aluminium: i64
     }
 }
 
-pub(super) fn construction_duration_seconds(template_id: i32) -> i32 {
+pub(crate) fn construction_duration_seconds(template_id: i32) -> i32 {
     let configured = BUILD_SHIP_CATALOG
         .get()
         .and_then(|catalog| catalog.ship_build_time.get(&template_id))
@@ -209,7 +209,7 @@ pub(super) fn construction_duration_seconds(template_id: i32) -> i32 {
     configured.clamp(60, 7 * 24 * 60 * 60)
 }
 
-pub(super) fn build_notes_payload(now: u32) -> Vec<u8> {
+pub(crate) fn build_notes_payload(now: u32) -> Vec<u8> {
     let mut out = Vec::new();
     let Some(catalog) = BUILD_FORMULA_CATALOG.get() else {
         return out;
@@ -244,7 +244,7 @@ pub(super) fn build_notes_payload(now: u32) -> Vec<u8> {
     out
 }
 
-pub(super) fn discuss_payload(htid: i32) -> Vec<u8> {
+pub(crate) fn discuss_payload(htid: i32) -> Vec<u8> {
     let mut out = Vec::new();
     append_varint_field(&mut out, 1, 0);
     append_varint_field(&mut out, 2, 0);
@@ -275,7 +275,7 @@ pub(super) fn discuss_payload(htid: i32) -> Vec<u8> {
     out
 }
 
-pub(super) fn encode_discuss_empty() -> Vec<u8> {
+pub(crate) fn encode_discuss_empty() -> Vec<u8> {
     let mut out = Vec::new();
     append_varint_field(&mut out, 1, 0);
     append_varint_field(&mut out, 2, 0);
@@ -286,7 +286,7 @@ pub(super) fn encode_discuss_empty() -> Vec<u8> {
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn finish_construction(account: &mut Value, indexes: &[i32], now: u32) -> bool {
+pub(crate) fn finish_construction(account: &mut Value, indexes: &[i32], now: u32) -> bool {
     if indexes.is_empty() {
         return false;
     }
@@ -339,7 +339,7 @@ pub(super) fn finish_construction(account: &mut Value, indexes: &[i32], now: u32
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn receive_construction(
+pub(crate) fn receive_construction(
     account: &mut Value,
     indexes: &[i32],
     now: u32,
@@ -420,7 +420,7 @@ pub(super) fn receive_construction(
     (encode_rewards_list(&rewards), rewards.len())
 }
 
-pub(super) fn encode_rewards_list(rewards: &[ShopReward]) -> Vec<u8> {
+pub(crate) fn encode_rewards_list(rewards: &[ShopReward]) -> Vec<u8> {
     let mut out = Vec::new();
     for reward in rewards {
         let mut item = Vec::new();
@@ -433,7 +433,7 @@ pub(super) fn encode_rewards_list(rewards: &[ShopReward]) -> Vec<u8> {
     out
 }
 
-pub(super) fn encode_buildship_ret(rewards: &[ShopReward]) -> Vec<u8> {
+pub(crate) fn encode_buildship_ret(rewards: &[ShopReward]) -> Vec<u8> {
     let mut out = Vec::new();
     for reward in rewards {
         let mut item = Vec::new();
