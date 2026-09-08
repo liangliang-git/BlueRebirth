@@ -6,6 +6,7 @@ pub(crate) struct HeroTypedCatalogs<'a> {
     pub(crate) hero_level: Option<&'a HeroLevelCatalog>,
     pub(crate) tasks: Option<&'a TaskCatalog>,
     pub(crate) breakdown: Option<&'a HeroBreakdownCatalog>,
+    pub(crate) fashion: Option<&'a FashionList>,
     pub(crate) ship_exp_multiplier: f64,
     pub(crate) hero_skill_upgrade: Option<&'a HeroSkillUpgradeCatalog>,
     pub(crate) ship_intensify: Option<&'a ShipIntensifyCatalog>,
@@ -22,6 +23,7 @@ impl HeroTypedCatalogs<'static> {
             hero_level: None,
             tasks: None,
             breakdown: None,
+            fashion: None,
             ship_exp_multiplier: 1.0,
             hero_skill_upgrade: None,
             ship_intensify: None,
@@ -256,6 +258,68 @@ fn push_hero_delta_changes(
             UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
         ));
     }
+}
+
+fn handle_fashion_equip(
+    account: &mut blueoath_domain::AccountState,
+    request_args: &[u8],
+    catalog: Option<&FashionList>,
+    state: Option<&ServerState>,
+    effects: &mut ResponseEffects,
+) -> HandlerResult {
+    let Ok(request) = FashionEquipRequest::decode(request_args) else {
+        return HandlerResult::Error(GameError::InvalidRequest(
+            "fashion equip request is invalid",
+        ));
+    };
+    let Ok(hero_id) = blueoath_domain::HeroId::new(request.hero_id) else {
+        return HandlerResult::Error(GameError::InvalidRequest("hero id is invalid"));
+    };
+    let Some(hero) = account.dock.heroes.get(&hero_id) else {
+        return HandlerResult::Error(GameError::NotFound("hero"));
+    };
+    let sf_id = hero.template_id.get().saturating_sub(1) / 10;
+    let selected = if request.fashion_tid > 0 {
+        u64::try_from(request.fashion_tid).unwrap_or_default()
+    } else if request.equip_status == 0 {
+        sf_id
+    } else {
+        return HandlerResult::Error(GameError::InvalidRequest("fashion is invalid"));
+    };
+    let Some(selected) = blueoath_domain::TemplateId::new(selected).ok() else {
+        return HandlerResult::Error(GameError::InvalidRequest("fashion is invalid"));
+    };
+    if let Some(catalog) = catalog {
+        let Ok(sf_id) = i32::try_from(sf_id) else {
+            return HandlerResult::Error(GameError::InvalidState("fashion ship id is invalid"));
+        };
+        let belongs = catalog
+            .items
+            .iter()
+            .find(|item| item.sf_id == sf_id)
+            .is_some_and(|item| {
+                item.fashion_tids.contains(&(selected.get() as i32))
+                    || selected.get() == sf_id as u64
+            });
+        if !belongs {
+            return HandlerResult::Error(GameError::InvalidState("fashion is not for this hero"));
+        }
+        let owned = selected.get() == sf_id as u64
+            || account
+                .fashion
+                .entries
+                .get(&(sf_id as u64))
+                .is_some_and(|items| items.contains(&selected));
+        if !owned {
+            return HandlerResult::Error(GameError::InvalidState("fashion is not owned by hero"));
+        }
+    }
+    let Some(hero) = account.dock.heroes.get_mut(&hero_id) else {
+        return HandlerResult::Error(GameError::NotFound("hero"));
+    };
+    hero.fashioning = u32::try_from(selected.get()).unwrap_or_default();
+    push_hero_changes(account, state, effects, false);
+    HandlerResult::PushOnly
 }
 
 fn handle_skill_upgrade(
@@ -941,6 +1005,7 @@ pub(crate) fn handle_typed(
         hero_level: hero_level_catalog,
         tasks: task_catalog,
         breakdown: hero_breakdown_catalog,
+        fashion: fashion_catalog,
         ship_exp_multiplier,
         hero_skill_upgrade: hero_skill_upgrade_catalog,
         ship_intensify: ship_intensify_catalog,
@@ -950,6 +1015,9 @@ pub(crate) fn handle_typed(
         state,
     } = catalogs;
     match method {
+        "fashion.Equip" => {
+            handle_fashion_equip(account, request_args, fashion_catalog, state, effects)
+        }
         "hero.GetHeroInfo" | "hero.GetHeroInfoByHeroIdArray" => {
             HandlerResult::Reply(Response::raw(
                 method,
@@ -1529,6 +1597,7 @@ mod tests {
                 hero_level: Some(&catalog),
                 tasks: None,
                 breakdown: None,
+                fashion: None,
                 ship_exp_multiplier: 1.0,
                 hero_skill_upgrade: None,
                 ship_intensify: None,
@@ -1581,6 +1650,7 @@ mod tests {
                 hero_level: None,
                 tasks: None,
                 breakdown: Some(&catalog),
+                fashion: None,
                 ship_exp_multiplier: 1.0,
                 hero_skill_upgrade: None,
                 ship_intensify: None,
@@ -1634,6 +1704,7 @@ mod tests {
                 hero_level: None,
                 tasks: None,
                 breakdown: None,
+                fashion: None,
                 ship_exp_multiplier: 1.0,
                 hero_skill_upgrade: Some(&catalog),
                 ship_intensify: None,
@@ -1646,6 +1717,53 @@ mod tests {
         assert!(matches!(result, HandlerResult::PushOnly));
         assert_eq!(account.dock.heroes[&hero_id].pskills.get(&41), Some(&2));
         assert_eq!(account.inventory.items.get(&item_id), None);
+    }
+
+    #[test]
+    fn typed_fashion_equip_updates_owned_hero_fashion() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("fashion-equip-typed").unwrap(),
+            "Captain",
+        );
+        let hero_id = blueoath_domain::HeroId::new(1).unwrap();
+        let sf_id = account.dock.heroes[&hero_id]
+            .template_id
+            .get()
+            .saturating_sub(1)
+            / 10;
+        let fashion_tid = sf_id + 1;
+        account
+            .fashion
+            .entries
+            .entry(sf_id)
+            .or_default()
+            .insert(blueoath_domain::TemplateId::new(fashion_tid).unwrap());
+        let catalog = FashionList {
+            items: vec![FashionInfo {
+                sf_id: i32::try_from(sf_id).unwrap(),
+                fashion_tids: vec![i32::try_from(fashion_tid).unwrap()],
+            }],
+        };
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, fashion_tid);
+        append_varint_field(&mut args, 2, 1);
+        append_varint_field(&mut args, 3, hero_id.get());
+        let mut effects = ResponseEffects::default();
+
+        let result = handle_typed(
+            &mut account,
+            "fashion.Equip",
+            &args,
+            &mut effects,
+            HeroTypedCatalogs {
+                fashion: Some(&catalog),
+                ..HeroTypedCatalogs::empty()
+            },
+        );
+
+        assert!(matches!(result, HandlerResult::PushOnly));
+        assert_eq!(account.dock.heroes[&hero_id].fashioning, fashion_tid as u32);
+        assert_eq!(effects.into_parts().0.len(), 2);
     }
 
     #[test]
@@ -1681,6 +1799,7 @@ mod tests {
                 hero_level: None,
                 tasks: None,
                 breakdown: None,
+                fashion: None,
                 ship_exp_multiplier: 1.0,
                 hero_skill_upgrade: None,
                 ship_intensify: Some(&catalog),
@@ -1735,6 +1854,7 @@ mod tests {
                 hero_level: None,
                 tasks: None,
                 breakdown: None,
+                fashion: None,
                 ship_exp_multiplier: 1.0,
                 hero_skill_upgrade: None,
                 ship_intensify: None,
@@ -1791,6 +1911,7 @@ mod tests {
                 hero_level: None,
                 tasks: None,
                 breakdown: None,
+                fashion: None,
                 ship_exp_multiplier: 1.0,
                 hero_skill_upgrade: None,
                 ship_intensify: None,

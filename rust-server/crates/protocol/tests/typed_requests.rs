@@ -11,19 +11,20 @@ use blueoath_protocol::{
     CoopRoomHeroesRequest, CoopRoomIdRequest, CopyAttackRequest, CopyIdRequest,
     CopyPassBaseRequest, CopyPassRequest, CopyRecordRequest, CopyRewardCountRequest,
     CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode, DiscussRequest,
-    ExchangeRequest, FashionPurchaseRequest, FleetInfo, FleetTactic, FoodComposeRequest,
-    FriendSearchRequest, FriendTargetRequest, GetBarrageByIdRequest, GuideSettingEntry,
-    GuideSettingRequest, GuildActivityPresentRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest,
-    GuildCreateRequest, GuildIdRequest, GuildListRequest, GuildModifyRequest, GuildOfferRequest,
-    GuildSearchRequest, GuildTaskDonateRequest, GuildTaskIdRequest, GuildTaskMemberRequest,
-    GuildWarBaseRequest, GuildWarScoreRequest, HeroAwakenFinishRequest, HeroAwakenRewardRequest,
-    HeroChangeEquipRequest, InviteRecordVersionRequest, InviteStateTypeRequest,
-    OutpostBuildingRequest, OutpostSetHeroRequest, PaperCutRequest, ProtocolError,
-    SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest,
-    SetHeadRequest, SetMessageRequest, SetSecretaryRequest, ShipTaskCurrentShipRequest,
-    ShipTaskRewardRequest, SignDayRequest, SportsMeetPointsRequest, StudyProgressRequest,
-    StudySpeedupItem, StudySpeedupRequest, StudyStartRequest, TaskAllRewardRequest,
-    TaskRewardRequest, TeachingUserRequest, ValentineRewardRequest, WorldEventStageRequest,
+    ExchangeRequest, FashionEquipRequest, FashionPurchaseRequest, FleetInfo, FleetTactic,
+    FoodComposeRequest, FriendSearchRequest, FriendTargetRequest, GetBarrageByIdRequest,
+    GuideSettingEntry, GuideSettingRequest, GuildActivityPresentRequest, GuildBoxAnonymousRequest,
+    GuildBoxIdRequest, GuildCreateRequest, GuildIdRequest, GuildListRequest, GuildModifyRequest,
+    GuildOfferRequest, GuildSearchRequest, GuildTaskDonateRequest, GuildTaskIdRequest,
+    GuildTaskMemberRequest, GuildWarBaseRequest, GuildWarScoreRequest, HeroAwakenFinishRequest,
+    HeroAwakenRewardRequest, HeroChangeEquipRequest, InviteRecordVersionRequest,
+    InviteStateTypeRequest, OutpostBuildingRequest, OutpostSetHeroRequest, PaperCutRequest,
+    ProtocolError, SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest,
+    SetHeadFrameRequest, SetHeadRequest, SetMessageRequest, SetSecretaryRequest,
+    ShipTaskCurrentShipRequest, ShipTaskRewardRequest, SignDayRequest, SportsMeetPointsRequest,
+    StudyProgressRequest, StudySpeedupItem, StudySpeedupRequest, StudyStartRequest,
+    TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest, ValentineRewardRequest,
+    WorldEventStageRequest,
 };
 
 #[test]
@@ -408,6 +409,14 @@ fn decodes_typed_activity_requests() {
         FashionPurchaseRequest {
             requested: 2,
             group_id: 3,
+        }
+    );
+    assert_eq!(
+        FashionEquipRequest::decode(&[0x08, 0xe9, 0x07, 0x10, 1, 0x18, 10]).unwrap(),
+        FashionEquipRequest {
+            fashion_tid: 1001,
+            equip_status: 1,
+            hero_id: 10,
         }
     );
     assert_eq!(

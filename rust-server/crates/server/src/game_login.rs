@@ -526,7 +526,7 @@ where
             }
             handler_payload(result, request.method.as_str())
         }
-        _ if method.is_family(MethodFamily::Hero) => {
+        _ if method.is_family(MethodFamily::Hero) || request.method == "fashion.Equip" => {
             let mut hero_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 hero_handler::handle_typed(
@@ -538,6 +538,7 @@ where
                         hero_level: hero_level_catalog,
                         tasks: task_catalog,
                         breakdown: hero_breakdown_catalog,
+                        fashion: fashion_catalog,
                         ship_exp_multiplier: state.ship_exp_multiplier,
                         hero_skill_upgrade: catalogs.hero_skill_upgrade,
                         ship_intensify: catalogs.ship_intensify,
@@ -1287,8 +1288,7 @@ where
             || known_method == Some(KnownMethod::BagGetInfo)
             || request.method == "bag.CompositeItem"
             || request.method == "bag.SaleBagItem"
-            || request.method == "fashion.updateData"
-            || request.method == "fashion.Equip" =>
+            || request.method == "fashion.updateData" =>
         {
             let mut commerce_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {

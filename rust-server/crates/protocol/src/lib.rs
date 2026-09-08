@@ -1496,6 +1496,24 @@ impl Decode for HeroStudySkillRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FashionEquipRequest {
+    pub fashion_tid: i32,
+    pub equip_status: i32,
+    pub hero_id: u64,
+}
+
+impl Decode for FashionEquipRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            fashion_tid: optional_i32(&fields, 1, "fashion equip has duplicate fashion id")?,
+            equip_status: optional_i32(&fields, 2, "fashion equip has duplicate status")?,
+            hero_id: required_u64(&fields, 3, "fashion equip is missing hero id")?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeroIntensifyRequest {
     pub hero_id: u64,
