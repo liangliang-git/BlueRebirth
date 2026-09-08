@@ -56,8 +56,6 @@ mod projection;
 mod protocol_payload;
 pub mod router;
 mod runtime;
-#[path = "features/shop/state.rs"]
-mod shop_state;
 #[path = "features/progression/study_state.rs"]
 mod study_state;
 #[path = "features/task/state.rs"]
@@ -95,6 +93,7 @@ pub(crate) use features::building::service::handle_typed as handle_typed_buildin
 use features::building::{buildship_state::*, construction_state::*, state::*};
 #[cfg(test)]
 use features::equip::state::*;
+use features::shop::state::*;
 pub use frame_service::process_frame;
 use frame_service::{prepare_local_request, storage_failure_response};
 #[cfg(test)]
@@ -106,7 +105,6 @@ pub use local_protocol::dispatch;
 use mopup_state::*;
 use projection::*;
 use protocol_payload::*;
-use shop_state::*;
 #[cfg(test)]
 use study_state::*;
 use task_state::*;

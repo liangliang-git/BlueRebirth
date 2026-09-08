@@ -6,7 +6,7 @@ use crate::common::response::Response;
 use super::*;
 
 #[cfg(test)]
-pub(super) fn apply_mail_reward(account: &mut Value, mail: &MailTemplate) {
+pub(crate) fn apply_mail_reward(account: &mut Value, mail: &MailTemplate) {
     if mail.goods_type == 5 {
         if let Some(key) = currency_character_key(mail.config_id) {
             add_character_i64(account, key, mail.num);
@@ -16,7 +16,7 @@ pub(super) fn apply_mail_reward(account: &mut Value, mail: &MailTemplate) {
     }
 }
 
-pub(super) fn apply_typed_mail_reward(
+pub(crate) fn apply_typed_mail_reward(
     account: &mut blueoath_domain::AccountState,
     mail: &MailTemplate,
 ) -> Option<ShopReward> {
@@ -38,7 +38,7 @@ pub(super) fn apply_typed_mail_reward(
     Some(reward)
 }
 
-pub(super) fn encode_mail_list_response(
+pub(crate) fn encode_mail_list_response(
     mails: &[MailTemplate],
     now: u32,
     rewards: &[ShopReward],
@@ -75,7 +75,7 @@ pub(super) fn encode_mail_list_response(
     output
 }
 
-pub(super) fn return_shop_buy_response(
+pub(crate) fn return_shop_buy_response(
     good_id: i32,
     buy_num: i32,
     reward: Option<ShopReward>,
@@ -96,7 +96,7 @@ pub(super) fn return_shop_buy_response(
     output
 }
 
-pub(super) fn encode_quality_buy_goods_response(
+pub(crate) fn encode_quality_buy_goods_response(
     rewards: &[ShopReward],
     good_ids: &[i32],
 ) -> Vec<u8> {
@@ -117,7 +117,7 @@ pub(super) fn encode_quality_buy_goods_response(
     output
 }
 
-pub(super) trait ResponsePushBuffer {
+pub(crate) trait ResponsePushBuffer {
     fn push_response(&mut self, response: Response);
 }
 
@@ -133,7 +133,7 @@ impl ResponsePushBuffer for Vec<Vec<u8>> {
     }
 }
 
-pub(super) fn append_method_push<P: ResponsePushBuffer>(
+pub(crate) fn append_method_push<P: ResponsePushBuffer>(
     pushes: &mut P,
     method: &str,
     ret: Vec<u8>,
@@ -143,7 +143,7 @@ pub(super) fn append_method_push<P: ResponsePushBuffer>(
 
 #[allow(dead_code)]
 #[cfg(test)]
-pub(super) fn apply_shop_good(
+pub(crate) fn apply_shop_good(
     account: &mut Value,
     good: &ShopGood,
     buy_num: i32,
@@ -209,7 +209,7 @@ pub(super) fn apply_shop_good(
 
 #[allow(dead_code)]
 #[cfg(test)]
-pub(super) fn deduct_shop_costs(account: &mut Value, costs: &[ShopCost], buy_num: i32) -> bool {
+pub(crate) fn deduct_shop_costs(account: &mut Value, costs: &[ShopCost], buy_num: i32) -> bool {
     let buy_num = i64::from(buy_num.max(1));
     let mut totals = std::collections::BTreeMap::<(i32, i32), i64>::new();
     for cost in costs {
@@ -250,7 +250,7 @@ pub(super) fn deduct_shop_costs(account: &mut Value, costs: &[ShopCost], buy_num
     true
 }
 
-pub(super) fn shop_info_payload(catalog: Option<&ShopCatalog>) -> Vec<u8> {
+pub(crate) fn shop_info_payload(catalog: Option<&ShopCatalog>) -> Vec<u8> {
     // RetShopsInfo.ShopInfo: all configured shop ids must exist. The client indexes this
     // table from homepage red-dot logic before it sends shop.GetShopsInfo.
     const SHOP_IDS: &[u32] = &[
@@ -303,7 +303,7 @@ pub(super) fn shop_info_payload(catalog: Option<&ShopCatalog>) -> Vec<u8> {
     payload
 }
 
-pub(super) fn shop_refresh_payload(
+pub(crate) fn shop_refresh_payload(
     catalog: Option<&ShopCatalog>,
     shop_id: i32,
 ) -> Result<Vec<u8>, &'static str> {
