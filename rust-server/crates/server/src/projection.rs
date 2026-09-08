@@ -169,9 +169,33 @@ pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountStat
             .iter()
             .map(|(skill_id, level)| PSkillEntry {
                 pskill_id: u32::try_from(*skill_id).unwrap_or(u32::MAX),
-                pskill_exp: 0,
+                pskill_exp: u32::try_from(
+                    account
+                        .activities
+                        .progress
+                        .get(&format!(
+                            "compat:hero:{}:pskill:{}:exp",
+                            hero.id.get(),
+                            skill_id
+                        ))
+                        .copied()
+                        .unwrap_or_default(),
+                )
+                .unwrap_or(u32::MAX),
                 level: i32::try_from(*level).unwrap_or(i32::MAX),
-                replace: 0,
+                replace: i32::try_from(
+                    account
+                        .activities
+                        .progress
+                        .get(&format!(
+                            "compat:hero:{}:pskill:{}:replace",
+                            hero.id.get(),
+                            skill_id
+                        ))
+                        .copied()
+                        .unwrap_or_default(),
+                )
+                .unwrap_or(i32::MAX),
             })
             .collect::<Vec<_>>();
         if !stored.is_empty() {
@@ -189,6 +213,44 @@ pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountStat
                 replace: 0,
             })
             .collect()
+    };
+    let hero_intensify = |hero: &blueoath_domain::HeroState| {
+        let prefix = format!("compat:hero:{}:intensify:", hero.id.get());
+        let mut attrs = std::collections::BTreeSet::new();
+        for key in account.activities.progress.keys() {
+            if let Some(value) = key.strip_prefix(&prefix) {
+                if let Some(attr) = value
+                    .strip_suffix(":level")
+                    .and_then(|id| id.parse::<i32>().ok())
+                {
+                    attrs.insert(attr);
+                }
+            }
+        }
+        attrs
+            .into_iter()
+            .map(|attr_type| AttrIntensify {
+                attr_type,
+                intensify_level: i32::try_from(
+                    account
+                        .activities
+                        .progress
+                        .get(&format!("{prefix}{attr_type}:level"))
+                        .copied()
+                        .unwrap_or_default(),
+                )
+                .unwrap_or(i32::MAX),
+                cur_exp: i32::try_from(
+                    account
+                        .activities
+                        .progress
+                        .get(&format!("{prefix}{attr_type}:exp"))
+                        .copied()
+                        .unwrap_or_default(),
+                )
+                .unwrap_or(i32::MAX),
+            })
+            .collect::<Vec<_>>()
     };
     let heroes = account
         .dock
@@ -239,6 +301,44 @@ pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountStat
                 })
                 .collect(),
             pskills: hero_pskills(hero),
+            advance: i32::try_from(
+                account
+                    .activities
+                    .progress
+                    .get(&format!("compat:hero:{}:advance", hero.id.get()))
+                    .copied()
+                    .unwrap_or_default(),
+            )
+            .unwrap_or(i32::MAX),
+            adv_lv: i32::try_from(
+                account
+                    .activities
+                    .progress
+                    .get(&format!("compat:hero:{}:advLv", hero.id.get()))
+                    .copied()
+                    .unwrap_or_default(),
+            )
+            .unwrap_or(i32::MAX),
+            remould_effects: account
+                .activities
+                .progress
+                .iter()
+                .filter_map(|(key, value)| {
+                    key.strip_prefix(&format!("compat:hero:{}:remould:effect:", hero.id.get()))
+                        .and_then(|id| id.parse::<i32>().ok())
+                        .filter(|_| *value > 0)
+                })
+                .collect(),
+            remould_level: i32::try_from(
+                account
+                    .activities
+                    .progress
+                    .get(&format!("compat:hero:{}:remould:level", hero.id.get()))
+                    .copied()
+                    .unwrap_or_default(),
+            )
+            .unwrap_or(i32::MAX),
+            intensify: hero_intensify(hero),
             combination_info: HeroCombinationInfo {
                 com_lv: i32::try_from(
                     account

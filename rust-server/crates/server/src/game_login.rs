@@ -539,6 +539,12 @@ where
                         tasks: task_catalog,
                         breakdown: hero_breakdown_catalog,
                         ship_exp_multiplier: state.ship_exp_multiplier,
+                        hero_skill_upgrade: catalogs.hero_skill_upgrade,
+                        ship_intensify: catalogs.ship_intensify,
+                        ship_break: catalogs.ship_break,
+                        ship_advance: catalogs.ship_advance,
+                        ship_remould: catalogs.ship_remould,
+                        state: Some(state),
                     },
                 )
             } else {

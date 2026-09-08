@@ -1480,6 +1480,131 @@ pub struct HeroAddExpRequest {
     pub items: Vec<HeroExpItemRequest>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroStudySkillRequest {
+    pub hero_id: u64,
+    pub skill_id: u64,
+}
+
+impl Decode for HeroStudySkillRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            hero_id: required_u64(&fields, 1, "study skill request is missing hero id")?,
+            skill_id: required_u64(&fields, 2, "study skill request is missing skill id")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroIntensifyRequest {
+    pub hero_id: u64,
+    pub consumed_hero_ids: Vec<u64>,
+    pub super_intensify: bool,
+}
+
+impl Decode for HeroIntensifyRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let hero_id = required_u64(&fields, 1, "intensify request is missing hero id")?;
+        let consumed_hero_ids = fields.get(&2).cloned().unwrap_or_default();
+        let super_intensify =
+            optional_i32(&fields, 3, "intensify request has duplicate super flag")? != 0;
+        Ok(Self {
+            hero_id,
+            consumed_hero_ids,
+            super_intensify,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroAdvanceRequest {
+    pub hero_id: u64,
+    pub consumed_hero_ids: Vec<u64>,
+    pub consume_item_ids: Vec<i32>,
+}
+
+impl Decode for HeroAdvanceRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let hero_id = required_u64(&fields, 1, "advance request is missing hero id")?;
+        let consumed_hero_ids = fields.get(&2).cloned().unwrap_or_default();
+        let consume_item_ids = fields
+            .get(&3)
+            .into_iter()
+            .flatten()
+            .map(|value| to_i32(*value, "advance item id is out of range"))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self {
+            hero_id,
+            consumed_hero_ids,
+            consume_item_ids,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeroAdvanceMaxLevelRequest {
+    pub hero_id: u64,
+}
+
+impl Decode for HeroAdvanceMaxLevelRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            hero_id: required_u64(&fields, 1, "max-level advance is missing hero id")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroAdvanceMubRequest {
+    pub hero_id: u64,
+    pub item_ids: Vec<i32>,
+    pub item_counts: Vec<i32>,
+}
+
+impl Decode for HeroAdvanceMubRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let hero_id = required_u64(&fields, 1, "mub advance is missing hero id")?;
+        let item_ids = fields
+            .get(&2)
+            .into_iter()
+            .flatten()
+            .map(|value| to_i32(*value, "mub advance item id is out of range"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let item_counts = fields
+            .get(&3)
+            .into_iter()
+            .flatten()
+            .map(|value| to_i32(*value, "mub advance item count is out of range"))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self {
+            hero_id,
+            item_ids,
+            item_counts,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeroRemouldRequest {
+    pub hero_id: u64,
+    pub effect_id: i32,
+}
+
+impl Decode for HeroRemouldRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            hero_id: required_u64(&fields, 1, "remould request is missing hero id")?,
+            effect_id: required_field(&fields, 2, "remould request is missing effect id")?,
+        })
+    }
+}
+
 impl Decode for HeroAddExpRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let mut reader = PbReader::new(payload);

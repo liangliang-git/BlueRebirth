@@ -406,6 +406,11 @@ pub(super) struct GameLoginCatalogs<'a> {
     pub(super) equip_new_test: Option<&'a EquipNewTestCatalog>,
     pub(super) affection: Option<&'a AffectionCatalog>,
     pub(super) combination: Option<&'a CombinationCatalog>,
+    pub(super) hero_skill_upgrade: Option<&'a HeroSkillUpgradeCatalog>,
+    pub(super) ship_intensify: Option<&'a ShipIntensifyCatalog>,
+    pub(super) ship_break: Option<&'a ShipBreakCatalog>,
+    pub(super) ship_advance: Option<&'a ShipAdvanceCatalog>,
+    pub(super) ship_remould: Option<&'a ShipRemouldCatalog>,
 }
 
 impl<'a> GameLoginCatalogs<'a> {
@@ -426,6 +431,11 @@ impl<'a> GameLoginCatalogs<'a> {
             equip_new_test: None,
             affection: None,
             combination: None,
+            hero_skill_upgrade: None,
+            ship_intensify: None,
+            ship_break: None,
+            ship_advance: None,
+            ship_remould: None,
         }
     }
 }
@@ -548,6 +558,11 @@ impl GameCatalogs {
             equip_new_test: Some(&self.equip_new_test),
             affection: Some(&self.affection),
             combination: Some(&self.combination),
+            hero_skill_upgrade: HERO_SKILL_UPGRADE_CATALOG.get(),
+            ship_intensify: SHIP_INTENSIFY_CATALOG.get(),
+            ship_break: SHIP_BREAK_CATALOG.get(),
+            ship_advance: SHIP_ADVANCE_CATALOG.get(),
+            ship_remould: SHIP_REMOULD_CATALOG.get(),
         }
     }
 }
