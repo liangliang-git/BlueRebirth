@@ -350,14 +350,6 @@ pub(super) fn decode_repeated_message_field(payload: &[u8], wanted_field: u8) ->
     values
 }
 
-pub(super) fn json_i64(value: &Value, key: &str) -> Option<i64> {
-    value.get(key).and_then(Value::as_i64)
-}
-
-pub(super) fn json_bool(value: &Value, key: &str) -> bool {
-    value.get(key).and_then(Value::as_bool).unwrap_or(false)
-}
-
 #[cfg(test)]
 pub(super) fn decode_start_hero_groups(payload: &[u8]) -> Vec<Vec<i32>> {
     let mut groups = Vec::new();

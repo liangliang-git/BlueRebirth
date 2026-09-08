@@ -8,6 +8,14 @@ use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 use crate::features::user::requests::UserRequest;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SupportSettlement {
+    reward_type: i32,
+    hero_ids: Vec<u64>,
+    base_rewards: Vec<(i32, i32, i32)>,
+    random_rewards: Vec<(i32, i32, i32)>,
+}
+
 pub(crate) fn apply_user_request(
     account: &mut blueoath_domain::AccountState,
     request: UserRequest,

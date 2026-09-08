@@ -11,11 +11,6 @@ const ZERO_TRACKED_BAG_ITEMS: &[i32] = &[
     10029, 10030, 10031, // construction resources
 ];
 
-#[cfg(test)]
-pub(super) fn json_i64_any(value: &Value) -> i64 {
-    value.as_i64().unwrap_or_default()
-}
-
 pub(super) fn hero_array<'a>(value: &'a Value, key: &str) -> Option<&'a Vec<Value>> {
     value.get(key).and_then(Value::as_array)
 }
@@ -1443,20 +1438,6 @@ pub(super) fn set_preset_fleet_on_typed_account(
     account.fleet.preset_name_num = value.name_num as u32;
     account.fleet.preset_red_dot = value.red_dot as u32;
     true
-}
-
-pub(super) fn json_i32_array(value: &Value, key: &str) -> Vec<i32> {
-    value
-        .get(key)
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_i64)
-                .filter_map(|item| i32::try_from(item).ok())
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

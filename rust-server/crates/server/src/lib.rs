@@ -29,6 +29,7 @@ use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
 #[path = "features/user/state.rs"]
 mod account_defaults;
+#[cfg(test)]
 mod account_state;
 #[path = "features/battle/state.rs"]
 mod battle_state;
@@ -79,6 +80,7 @@ pub(crate) use account_defaults::default_account_snapshot;
 #[cfg(test)]
 use account_defaults::user_info_from_account;
 use account_defaults::user_info_from_typed_account;
+#[cfg(test)]
 use account_state::*;
 use battle_state::*;
 pub use blueoath_game::{
@@ -95,6 +97,7 @@ use buildship_state::*;
 use catalog::*;
 use catalog_loader::*;
 use common::clock::{Clock, SystemClock};
+use common::json::*;
 use config::{normalize_multiplier, normalize_profile_id, scale_reward, DEFAULT_PROFILE_ID};
 pub use config::{
     BattleOutcome, Formation, ServerConfig, ServerConfigError, ServerState, Ship, Stage,

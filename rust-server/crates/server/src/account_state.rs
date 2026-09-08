@@ -2,6 +2,7 @@
 
 #[cfg(test)]
 use serde_json::json;
+#[cfg(test)]
 use serde_json::Value;
 
 #[cfg(test)]
@@ -680,21 +681,6 @@ pub(super) fn apply_ship_defaults(
             slots[index] = json!(equip_id);
         }
     }
-}
-
-pub(super) fn json_i32(value: &Value, key: &str) -> Option<i32> {
-    value
-        .get(key)
-        .and_then(Value::as_i64)
-        .and_then(|value| i32::try_from(value).ok())
-}
-
-pub(super) fn json_u64(value: &Value, key: &str) -> Option<u64> {
-    value.get(key).and_then(Value::as_u64)
-}
-
-pub(super) fn json_string(value: &Value, key: &str) -> Option<String> {
-    value.get(key).and_then(Value::as_str).map(str::to_owned)
 }
 
 #[cfg(test)]

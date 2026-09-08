@@ -1,8 +1,7 @@
 //! Central game-login method classification.
 //!
-//! Handlers still receive the original wire name because it is part of the
-//! client protocol. Prefix matching belongs here, at the routing boundary,
-//! instead of being repeated throughout the dispatcher.
+//! Handlers still receive original wire name because it is part of client
+//! protocol. Namespace classification belongs here, at routing boundary.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MethodFamily {
@@ -177,94 +176,90 @@ impl<'a> GameMethod<'a> {
 }
 
 fn family_for(name: &str) -> MethodFamily {
-    const PREFIXES: &[(&str, MethodFamily)] = &[
-        ("activitybattlepass.", MethodFamily::ActivityBattlePass),
-        ("activitybirthday.", MethodFamily::Activity),
-        ("activitychristmasshop.", MethodFamily::Activity),
-        ("activitycodeexchange.", MethodFamily::Activity),
-        ("activityextractur.", MethodFamily::Activity),
-        ("activityextract.", MethodFamily::Activity),
-        ("activityfashion.", MethodFamily::Activity),
-        ("activitypapercut.", MethodFamily::Activity),
-        ("activitysecretcopy.", MethodFamily::Activity),
-        ("activitySSRrolls.", MethodFamily::Activity),
-        ("activitySSR.", MethodFamily::Activity),
-        ("activityvalentineloveletter.", MethodFamily::Activity),
-        ("activityVideo.", MethodFamily::Activity),
-        ("activityTower.", MethodFamily::ActivityTower),
-        ("activity.", MethodFamily::Activity),
-        ("adventure.", MethodFamily::Adventure),
-        ("bathroom.", MethodFamily::Bathroom),
-        ("bag.", MethodFamily::Bag),
-        ("battlepass.", MethodFamily::BattlePass),
-        ("battle.", MethodFamily::Battle),
-        ("bigactivity.", MethodFamily::BigActivity),
-        ("boss.", MethodFamily::Boss),
-        ("building.", MethodFamily::Building),
-        ("buildnotes.", MethodFamily::BuildNotes),
-        ("buildship.", MethodFamily::BuildShip),
-        ("build.", MethodFamily::Build),
-        ("chat.", MethodFamily::Chat),
-        ("copy.", MethodFamily::Copy),
-        ("copyinfo.", MethodFamily::CopyInfo),
-        ("dailycopy.", MethodFamily::DailyCopy),
-        ("discuss.", MethodFamily::Discuss),
-        ("equipactivity.", MethodFamily::EquipActivity),
-        ("equipnewtestcopy.", MethodFamily::EquipNewTestCopy),
-        ("equiptestcopy.", MethodFamily::EquipTestCopy),
-        ("equip.", MethodFamily::Equip),
-        ("exchange.", MethodFamily::Exchange),
-        ("foodCompose.", MethodFamily::FoodCompose),
-        ("friend.", MethodFamily::Friend),
-        ("fashion.", MethodFamily::Fashion),
-        ("guide.", MethodFamily::Guide),
-        ("guildbigactivityrank.", MethodFamily::GuildBigActivity),
-        ("guildbigactivity.", MethodFamily::GuildBigActivity),
-        ("guildofferrank.", MethodFamily::GuildOfferRank),
-        ("guildOfferUser.", MethodFamily::GuildOffer),
-        ("guildOffer.", MethodFamily::GuildOffer),
-        ("guildtask.", MethodFamily::GuildTask),
-        ("guildwar.", MethodFamily::GuildWar),
-        ("guildbox.", MethodFamily::GuildBox),
-        ("guild.", MethodFamily::Guild),
-        ("heroawaken.", MethodFamily::HeroAwaken),
-        ("hero.", MethodFamily::Hero),
-        ("interactionitem.", MethodFamily::InteractionItem),
-        ("invitescore.", MethodFamily::InviteScore),
-        ("illustrate.", MethodFamily::Illustrate),
-        ("jopen.", MethodFamily::Jopen),
-        ("magazine.", MethodFamily::Magazine),
-        ("mail.", MethodFamily::Mail),
-        ("matchsvr_", MethodFamily::MatchServer),
-        ("matchsvr.", MethodFamily::MatchServer),
-        ("milestone.", MethodFamily::Milestone),
-        ("mopUp.", MethodFamily::MopUp),
-        ("outpost.", MethodFamily::Outpost),
-        ("presetfleet.", MethodFamily::PresetFleet),
-        ("recharge.", MethodFamily::Recharge),
-        ("room.", MethodFamily::Room),
-        ("shiptask.", MethodFamily::ShipTask),
-        ("shop.", MethodFamily::Shop),
-        ("sportsmeetrank.", MethodFamily::SportsMeetRank),
-        ("sportsmeet.", MethodFamily::SportsMeet),
-        ("strategy.", MethodFamily::Strategy),
-        ("study.", MethodFamily::Study),
-        ("supply.", MethodFamily::Supply),
-        ("supportfleet.", MethodFamily::SupportFleet),
-        ("talentTree.", MethodFamily::TalentTree),
-        ("task.", MethodFamily::Task),
-        ("teachingsvr.", MethodFamily::TeachingServer),
-        ("tower.", MethodFamily::Tower),
-        ("user.", MethodFamily::User),
-        ("usersvr.", MethodFamily::UserServer),
-        ("worldeventrank.", MethodFamily::WorldEvent),
-        ("worldevent.", MethodFamily::WorldEvent),
-    ];
-
-    PREFIXES
-        .iter()
-        .find_map(|(prefix, family)| name.starts_with(prefix).then_some(*family))
-        .unwrap_or(MethodFamily::Unknown)
+    let Some((namespace, _method)) = name.split_once('.') else {
+        return MethodFamily::Unknown;
+    };
+    match namespace {
+        "activitybattlepass" => MethodFamily::ActivityBattlePass,
+        "activityTower" => MethodFamily::ActivityTower,
+        "activity"
+        | "activitybirthday"
+        | "activitychristmasshop"
+        | "activitycodeexchange"
+        | "activityextractur"
+        | "activityextract"
+        | "activityfashion"
+        | "activitypapercut"
+        | "activitysecretcopy"
+        | "activitySSRrolls"
+        | "activitySSR"
+        | "activityvalentineloveletter"
+        | "activityVideo" => MethodFamily::Activity,
+        "adventure" => MethodFamily::Adventure,
+        "bathroom" => MethodFamily::Bathroom,
+        "bag" => MethodFamily::Bag,
+        "battlepass" => MethodFamily::BattlePass,
+        "battle" => MethodFamily::Battle,
+        "bigactivity" => MethodFamily::BigActivity,
+        "boss" => MethodFamily::Boss,
+        "building" => MethodFamily::Building,
+        "buildnotes" => MethodFamily::BuildNotes,
+        "buildship" => MethodFamily::BuildShip,
+        "build" => MethodFamily::Build,
+        "chat" => MethodFamily::Chat,
+        "copy" => MethodFamily::Copy,
+        "copyinfo" => MethodFamily::CopyInfo,
+        "dailycopy" => MethodFamily::DailyCopy,
+        "discuss" => MethodFamily::Discuss,
+        "equipactivity" => MethodFamily::EquipActivity,
+        "equipnewtestcopy" => MethodFamily::EquipNewTestCopy,
+        "equiptestcopy" => MethodFamily::EquipTestCopy,
+        "equip" => MethodFamily::Equip,
+        "exchange" => MethodFamily::Exchange,
+        "foodCompose" => MethodFamily::FoodCompose,
+        "friend" => MethodFamily::Friend,
+        "fashion" => MethodFamily::Fashion,
+        "guide" => MethodFamily::Guide,
+        "guildbigactivityrank" | "guildbigactivity" => MethodFamily::GuildBigActivity,
+        "guildofferrank" => MethodFamily::GuildOfferRank,
+        "guildOfferUser" | "guildOffer" => MethodFamily::GuildOffer,
+        "guildtask" => MethodFamily::GuildTask,
+        "guildwar" => MethodFamily::GuildWar,
+        "guildbox" => MethodFamily::GuildBox,
+        "guild" => MethodFamily::Guild,
+        "heroawaken" => MethodFamily::HeroAwaken,
+        "hero" => MethodFamily::Hero,
+        "interactionitem" => MethodFamily::InteractionItem,
+        "invitescore" => MethodFamily::InviteScore,
+        "illustrate" => MethodFamily::Illustrate,
+        "jopen" => MethodFamily::Jopen,
+        "magazine" => MethodFamily::Magazine,
+        "mail" => MethodFamily::Mail,
+        "matchsvr" => MethodFamily::MatchServer,
+        "milestone" => MethodFamily::Milestone,
+        "mopUp" => MethodFamily::MopUp,
+        "outpost" => MethodFamily::Outpost,
+        "presetfleet" => MethodFamily::PresetFleet,
+        "recharge" => MethodFamily::Recharge,
+        "room" => MethodFamily::Room,
+        "shiptask" => MethodFamily::ShipTask,
+        "shop" => MethodFamily::Shop,
+        "sportsmeetrank" => MethodFamily::SportsMeetRank,
+        "sportsmeet" => MethodFamily::SportsMeet,
+        "strategy" => MethodFamily::Strategy,
+        "study" => MethodFamily::Study,
+        "supply" => MethodFamily::Supply,
+        "supportfleet" => MethodFamily::SupportFleet,
+        "talentTree" => MethodFamily::TalentTree,
+        "task" => MethodFamily::Task,
+        "teachingsvr" => MethodFamily::TeachingServer,
+        "tower" => MethodFamily::Tower,
+        "user" => MethodFamily::User,
+        "usersvr" => MethodFamily::UserServer,
+        "worldeventrank" | "worldevent" => MethodFamily::WorldEvent,
+        _ if namespace.strip_prefix("matchsvr_").is_some() => MethodFamily::MatchServer,
+        _ => MethodFamily::Unknown,
+    }
 }
 
 #[cfg(test)]
@@ -302,6 +297,13 @@ mod tests {
             assert_eq!(method.family(), family);
             assert!(method.is_known());
         }
+    }
+
+    #[test]
+    fn only_complete_namespace_is_classified() {
+        assert_eq!(family_for("user.GetInfoExtra"), MethodFamily::User);
+        assert_eq!(family_for("userland.GetInfo"), MethodFamily::Unknown);
+        assert_eq!(family_for("user"), MethodFamily::Unknown);
     }
 
     #[test]
