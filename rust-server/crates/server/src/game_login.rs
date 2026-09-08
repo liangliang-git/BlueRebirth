@@ -67,18 +67,18 @@ mod misc_extended_handler;
 mod misc_handler;
 #[path = "outpost_handler.rs"]
 mod outpost_handler;
+#[path = "progression_handler.rs"]
+mod progression_handler;
 #[path = "shiptask_handler.rs"]
 mod shiptask_handler;
 #[path = "sportsmeet_handler.rs"]
 mod sportsmeet_handler;
+#[path = "talent_handler.rs"]
+mod talent_handler;
 #[path = "task_handler.rs"]
 mod task_handler;
 #[path = "teaching_handler.rs"]
 mod teaching_handler;
-#[path = "progression_handler.rs"]
-mod progression_handler;
-#[path = "talent_handler.rs"]
-mod talent_handler;
 #[path = "tower_handler.rs"]
 pub(super) mod tower_handler;
 
