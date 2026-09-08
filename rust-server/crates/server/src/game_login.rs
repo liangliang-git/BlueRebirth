@@ -1666,7 +1666,6 @@ where
                     request_args,
                     battle_handler::TypedBattleContext::new(
                         battle_catalog,
-                        chapter_catalog,
                         fashion_catalog,
                         state.drop_multiplier,
                         state.ship_stat_multiplier,

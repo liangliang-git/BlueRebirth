@@ -18,7 +18,6 @@ pub(crate) fn handle_typed(
         request_args,
         TypedBattleContext {
             battle_catalog: None,
-            chapter_catalog: None,
             fashion_catalog: None,
             drop_multiplier: 1.0,
             ship_stat_multiplier: 1.0,
@@ -266,7 +265,6 @@ fn draw_typed_battle_drop_rewards(
 
 pub(crate) struct TypedBattleContext<'a> {
     battle_catalog: Option<&'a BattleCatalog>,
-    chapter_catalog: Option<&'a ChapterCatalog>,
     fashion_catalog: Option<&'a FashionList>,
     drop_multiplier: f64,
     ship_stat_multiplier: f64,
@@ -276,7 +274,6 @@ pub(crate) struct TypedBattleContext<'a> {
 impl<'a> TypedBattleContext<'a> {
     pub(crate) fn new(
         battle_catalog: Option<&'a BattleCatalog>,
-        chapter_catalog: Option<&'a ChapterCatalog>,
         fashion_catalog: Option<&'a FashionList>,
         drop_multiplier: f64,
         ship_stat_multiplier: f64,
@@ -284,7 +281,6 @@ impl<'a> TypedBattleContext<'a> {
     ) -> Self {
         Self {
             battle_catalog,
-            chapter_catalog,
             fashion_catalog,
             drop_multiplier,
             ship_stat_multiplier,
@@ -301,7 +297,6 @@ pub(crate) fn handle_typed_with_catalog(
 ) -> HandlerResult {
     let TypedBattleContext {
         battle_catalog,
-        chapter_catalog,
         fashion_catalog,
         drop_multiplier,
         ship_stat_multiplier,
@@ -593,24 +588,6 @@ pub(crate) fn handle_typed_with_catalog(
                             )),
                         ));
                     }
-                    if let (Some(chapter_catalog), Some(copy_type)) = (
-                        chapter_catalog,
-                        battle_catalog.and_then(|catalog| {
-                            catalog
-                                .copies
-                                .get(&(copy_id.get() as i32))
-                                .map(|copy| copy.copy_type)
-                        }),
-                    ) {
-                        effects.push_post(Response::raw(
-                            "copy.GetCopy",
-                            CopyInfoCodec::encode_payload(&crate::game_login::copy_info_payload(
-                                chapter_catalog,
-                                copy_type,
-                                account,
-                            )),
-                        ));
-                    }
                     if grade < 9 {
                         account
                             .battle
@@ -855,15 +832,19 @@ pub(crate) fn handle_typed_with_catalog(
             if hero_ids.is_empty() {
                 hero_ids = account.dock.heroes.keys().copied().take(6).collect();
             }
+            let hero_ids_raw = hero_ids.iter().map(|id| id.get()).collect::<Vec<_>>();
+            let supply_cost = battle_catalog.and_then(|catalog| {
+                battle_supply_cost_typed(account, Some(catalog), request.copy_id, &hero_ids_raw, 1)
+            });
             if hero_ids.is_empty()
-                || (battle_catalog.is_some()
-                    && !consume_battle_supply_typed(
-                        account,
-                        battle_catalog,
-                        request.copy_id,
-                        &hero_ids.iter().map(|id| id.get()).collect::<Vec<_>>(),
-                        1,
-                    ))
+                || (battle_catalog.is_some() && supply_cost.is_none())
+                || supply_cost.is_some_and(|cost| {
+                    account
+                        .resources
+                        .amount(blueoath_domain::CurrencyKind::Supply)
+                        .get()
+                        < cost
+                })
             {
                 return HandlerResult::Error(GameError::InvalidState(
                     "insufficient supply or missing daily tactic",
@@ -1051,14 +1032,22 @@ pub(crate) fn handle_typed_mop_up(
                 .get(&fleet_id_typed)
                 .map(|fleet| fleet.members.iter().map(|id| id.get()).collect::<Vec<_>>())
                 .unwrap_or_default();
+            let supply_cost = battle_supply_cost_typed(
+                account,
+                Some(catalog),
+                copy_id as i32,
+                &hero_ids,
+                sweep_count as i32,
+            );
             if hero_ids.is_empty()
-                || !consume_battle_supply_typed(
-                    account,
-                    Some(catalog),
-                    copy_id as i32,
-                    &hero_ids,
-                    sweep_count as i32,
-                )
+                || supply_cost.is_none()
+                || supply_cost.is_some_and(|cost| {
+                    account
+                        .resources
+                        .amount(blueoath_domain::CurrencyKind::Supply)
+                        .get()
+                        < cost
+                })
             {
                 return HandlerResult::Error(GameError::InvalidState(
                     "insufficient supply or missing supply configuration",
@@ -1070,6 +1059,7 @@ pub(crate) fn handle_typed_mop_up(
                     "sweep reward is unsupported",
                 ));
             }
+            let account_before_settlement = account.clone();
             for reward in &rewards {
                 let _ = grant_typed_task_reward(account, reward);
             }
@@ -1098,6 +1088,19 @@ pub(crate) fn handle_typed_mop_up(
                     chapter_id: 0,
                 });
             account.sweep.entries.retain(|entry| entry.end_time > now);
+            if account
+                .resources
+                .debit(
+                    blueoath_domain::CurrencyKind::Supply,
+                    supply_cost.expect("validated sweep supply cost"),
+                )
+                .is_err()
+            {
+                *account = account_before_settlement;
+                return HandlerResult::Error(GameError::InvalidState(
+                    "sweep supply settlement failed",
+                ));
+            }
             let pass_rets = mop_up_pass_rets(copy_id as i32, &rewards);
             let payload = typed_mop_up_payload(account, &pass_rets);
             effects.push_pre(Response::raw(
@@ -1350,7 +1353,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_battle_defers_supply_debit_until_settlement() {
+    fn typed_challenge_battle_defers_supply_debit_without_navigation_push() {
         let mut account =
             NewAccountFactory::create(ProfileId::new("battle-supply-order").unwrap(), "Battle");
         let fleet_id = FleetId::new(1).unwrap();
@@ -1367,13 +1370,11 @@ mod tests {
             9,
             BattleCopy {
                 config_id: 9,
-                copy_type: 1,
+                copy_type: 32,
                 fleet_ids: vec![1],
             },
         );
         catalog.supply_cost_by_copy.insert(9, (10, 0));
-        let mut chapter_catalog = ChapterCatalog::default();
-        chapter_catalog.plot = vec![9];
         let before = account
             .resources
             .amount(blueoath_domain::CurrencyKind::Supply)
@@ -1386,14 +1387,7 @@ mod tests {
                 &mut account,
                 "copy.StartBase",
                 &start,
-                TypedBattleContext::new(
-                    Some(&catalog),
-                    Some(&chapter_catalog),
-                    None,
-                    1.0,
-                    1.0,
-                    &mut effects,
-                ),
+                TypedBattleContext::new(Some(&catalog), None, 1.0, 1.0, &mut effects,),
             ),
             HandlerResult::Reply(_)
         ));
@@ -1409,14 +1403,7 @@ mod tests {
                 &mut account,
                 "copy.PassBase",
                 &[],
-                TypedBattleContext::new(
-                    Some(&catalog),
-                    Some(&chapter_catalog),
-                    None,
-                    1.0,
-                    1.0,
-                    &mut effects,
-                ),
+                TypedBattleContext::new(Some(&catalog), None, 1.0, 1.0, &mut effects,),
             ),
             HandlerResult::Reply(_)
         ));
@@ -1428,7 +1415,7 @@ mod tests {
             before - 10
         );
         let (_, posts, _) = effects.into_parts();
-        assert!(posts
+        assert!(!posts
             .iter()
             .any(|response| response.method == "copy.GetCopy"));
     }
@@ -1636,6 +1623,73 @@ mod tests {
     }
 
     #[test]
+    fn typed_daily_copy_debits_supply_once_after_settlement() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("daily-supply-order").unwrap(), "Battle");
+        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
+        account.fleet.fleets.insert(
+            FleetId::new(1).unwrap(),
+            blueoath_domain::FleetRecord {
+                members: vec![hero_id],
+                ..blueoath_domain::FleetRecord::default()
+            },
+        );
+        let mut catalog = BattleCatalog::default();
+        catalog.copies.insert(
+            1,
+            BattleCopy {
+                config_id: 1,
+                copy_type: 9,
+                fleet_ids: vec![1],
+            },
+        );
+        catalog.daily_group_by_copy.insert(1, 1);
+        catalog.supply_cost_by_copy.insert(1, (10, 0));
+        let before = account
+            .resources
+            .amount(blueoath_domain::CurrencyKind::Supply)
+            .get();
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, 1);
+        append_varint_field(&mut request, 2, 1);
+        append_varint_field(&mut request, 3, 1);
+        let mut effects = ResponseEffects::default();
+
+        assert!(matches!(
+            handle_typed_with_catalog(
+                &mut account,
+                "dailycopy.CopyEnter",
+                &request,
+                TypedBattleContext::new(Some(&catalog), None, 1.0, 1.0, &mut effects,),
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Supply)
+                .get(),
+            before
+        );
+        assert!(matches!(
+            handle_typed_with_catalog(
+                &mut account,
+                "copy.PassBase",
+                &[],
+                TypedBattleContext::new(Some(&catalog), None, 1.0, 1.0, &mut effects,),
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Supply)
+                .get(),
+            before - 10
+        );
+    }
+
+    #[test]
     fn typed_quit_clears_active_battle_session() {
         let mut account =
             NewAccountFactory::create(ProfileId::new("battle-quit").unwrap(), "Battle");
@@ -1682,5 +1736,53 @@ mod tests {
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert_eq!(account.sweep.entries[0].copy_id, 9);
+    }
+
+    #[test]
+    fn typed_sweep_does_not_debit_supply_when_reward_settlement_fails() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("sweep-atomicity").unwrap(), "Battle");
+        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
+        account.fleet.fleets.insert(
+            FleetId::new(1).unwrap(),
+            blueoath_domain::FleetRecord {
+                members: vec![hero_id],
+                ..blueoath_domain::FleetRecord::default()
+            },
+        );
+        account.battle.passed_copies.insert(CopyId::new(9).unwrap());
+        let mut catalog = BattleCatalog::default();
+        catalog.supply_cost_by_copy.insert(9, (10, 0));
+        catalog
+            .copy_must_drop_rewards
+            .insert(9, (1, vec![(1, 0, 1)]));
+        let before = account
+            .resources
+            .amount(blueoath_domain::CurrencyKind::Supply)
+            .get();
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, 1);
+        append_varint_field(&mut request, 2, 9);
+        append_varint_field(&mut request, 3, 1);
+        let mut effects = ResponseEffects::default();
+
+        assert!(matches!(
+            handle_typed_mop_up(
+                &ServerState::new("mop-up", "Battle", "test"),
+                &mut account,
+                "mopUp.StartSweep",
+                &request,
+                Some(&catalog),
+                &mut effects,
+            ),
+            HandlerResult::Error(_)
+        ));
+        assert_eq!(
+            account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Supply)
+                .get(),
+            before
+        );
     }
 }
