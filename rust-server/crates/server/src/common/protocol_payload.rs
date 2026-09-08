@@ -47,6 +47,7 @@ pub(super) fn encode_hero_add_exp_response(hero_id: u64, items: &[(i32, i32)]) -
     output
 }
 
+#[cfg(test)]
 pub(super) fn decode_varint_field(payload: &[u8], wanted_field: u8) -> i32 {
     let mut index = 0;
     while index < payload.len() {
@@ -83,6 +84,7 @@ pub(super) fn decode_varint_field(payload: &[u8], wanted_field: u8) -> i32 {
     0
 }
 
+#[cfg(test)]
 pub(super) fn decode_varint_u64_field(payload: &[u8], wanted_field: u8) -> u64 {
     let mut index = 0;
     while index < payload.len() {
