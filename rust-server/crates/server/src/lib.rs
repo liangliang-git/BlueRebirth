@@ -60,6 +60,7 @@ mod local_protocol;
 #[path = "features/copy/mopup_state.rs"]
 mod mopup_state;
 mod projection;
+#[path = "common/protocol_payload.rs"]
 mod protocol_payload;
 pub mod router;
 mod runtime;
@@ -69,6 +70,7 @@ mod shop_state;
 mod study_state;
 #[path = "features/task/state.rs"]
 mod task_state;
+#[path = "common/wire.rs"]
 mod wire;
 
 #[cfg(test)]
