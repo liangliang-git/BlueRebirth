@@ -11,17 +11,45 @@ fn load_or_create_typed_account(
     store: &ProfileStore,
     profile_id: &str,
     name: &str,
+    fashion_catalog: &FashionList,
 ) -> Result<AccountState, blueoath_storage::StorageError> {
     let profile_id = ProfileId::new(profile_id.to_owned())
         .map_err(|_| blueoath_storage::StorageError::InvalidProfileId)?;
-    if let Some(account) = store.load_typed_account(&profile_id)? {
+    if let Some(mut account) = store.load_typed_account(&profile_id)? {
+        if grant_all_catalog_fashions(&mut account, fashion_catalog) {
+            store.save_typed_account(&mut account)?;
+        }
         return Ok(account);
     }
-    let account = NewAccountFactory::create(profile_id.clone(), name.to_owned());
+    let mut account = NewAccountFactory::create(profile_id.clone(), name.to_owned());
+    grant_all_catalog_fashions(&mut account, fashion_catalog);
     AccountRepository::create(store, &account).map_err(storage_error_from_repository)?;
     store.load_typed_account(&profile_id)?.ok_or_else(|| {
         StorageError::InvalidTypedAccount("created account is unavailable".to_owned())
     })
+}
+
+fn grant_all_catalog_fashions(account: &mut AccountState, catalog: &FashionList) -> bool {
+    let mut changed = false;
+    for item in &catalog.items {
+        let Ok(sf_id) = u64::try_from(item.sf_id) else {
+            continue;
+        };
+        if sf_id == 0 {
+            continue;
+        }
+        let owned = account.fashion.entries.entry(sf_id).or_default();
+        for fashion_tid in &item.fashion_tids {
+            let Ok(fashion_tid) = u64::try_from(*fashion_tid) else {
+                continue;
+            };
+            let Ok(fashion_tid) = blueoath_domain::TemplateId::new(fashion_tid) else {
+                continue;
+            };
+            changed |= owned.insert(fashion_tid);
+        }
+    }
+    changed
 }
 
 fn storage_error_from_repository(error: RepositoryError) -> StorageError {
@@ -163,7 +191,8 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
     let profile_id = config.profile_id.clone();
     let profile_name = config.profile_name.clone();
     let version = config.version.clone();
-    let typed_account = load_or_create_typed_account(&store, &profile_id, &profile_name)?;
+    let typed_account =
+        load_or_create_typed_account(&store, &profile_id, &profile_name, &catalogs.fashion)?;
     let initial_name = typed_account
         .profile
         .as_ref()
@@ -439,8 +468,14 @@ where
     let mut typed_account = {
         let account_profile_id = context.profile_id.to_owned();
         let account_store = context.store.clone();
+        let fashion_catalog = Arc::clone(&context.catalogs.fashion);
         tokio::task::spawn_blocking(move || {
-            load_or_create_typed_account(&account_store, &account_profile_id, &account_profile_id)
+            load_or_create_typed_account(
+                &account_store,
+                &account_profile_id,
+                &account_profile_id,
+                &fashion_catalog,
+            )
         })
         .await
         .map_err(|error| ServerError::StorageTask(error.to_string()))??
@@ -692,9 +727,15 @@ async fn build_kcp_wire_responses(
         peer.profile_id = normalize_profile_id(&login.pid);
         let profile_id = peer.profile_id.clone();
         let account_store = store.clone();
+        let fashion_catalog = Arc::clone(&catalogs.fashion);
         let _guard = persist_lock.lock().await;
         tokio::task::spawn_blocking(move || {
-            let _ = load_or_create_typed_account(&account_store, &profile_id, &profile_id)?;
+            let _ = load_or_create_typed_account(
+                &account_store,
+                &profile_id,
+                &profile_id,
+                &fashion_catalog,
+            )?;
             Ok::<_, blueoath_storage::StorageError>(())
         })
         .await
@@ -715,8 +756,9 @@ async fn build_kcp_wire_responses(
     let _persist_guard = persist_lock.lock().await;
     let profile_id = peer.profile_id.clone();
     let account_store = store.clone();
+    let fashion_catalog = Arc::clone(&catalogs.fashion);
     let mut typed_account = tokio::task::spawn_blocking(move || {
-        load_or_create_typed_account(&account_store, &profile_id, &profile_id)
+        load_or_create_typed_account(&account_store, &profile_id, &profile_id, &fashion_catalog)
     })
     .await
     .map_err(|error| ServerError::StorageTask(error.to_string()))??;
@@ -878,8 +920,81 @@ async fn handle_connection(
 
 #[cfg(test)]
 mod tests {
-    use super::{persist_typed_account, ProfileStore, StorageError};
+    use super::{load_or_create_typed_account, persist_typed_account, ProfileStore, StorageError};
     use blueoath_domain::{CurrencyKind, NewAccountFactory, ProfileId};
+    use blueoath_protocol::{FashionInfo, FashionList};
+
+    fn test_fashion_catalog() -> FashionList {
+        FashionList {
+            items: vec![
+                FashionInfo {
+                    sf_id: 1_021_051,
+                    fashion_tids: vec![1_021_051, 1_021_054],
+                },
+                FashionInfo {
+                    sf_id: 1_032_031,
+                    fashion_tids: vec![1_032_031, 1_032_032],
+                },
+            ],
+        }
+    }
+
+    fn test_root(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "blueoath-runtime-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock is after epoch")
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn new_account_starts_with_every_catalog_fashion() {
+        let root = test_root("new-fashions");
+        let store = ProfileStore::open(&root).unwrap();
+        let account = load_or_create_typed_account(
+            &store,
+            "new-fashions",
+            "Captain",
+            &test_fashion_catalog(),
+        )
+        .unwrap();
+
+        assert_eq!(account.fashion.entries.len(), 2);
+        assert_eq!(account.fashion.entries[&1_021_051].len(), 2);
+        assert!(account.fashion.entries[&1_021_051]
+            .iter()
+            .any(|fashion| fashion.get() == 1_021_054));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn existing_account_missing_fashions_is_repaired_and_persisted() {
+        let root = test_root("repair-fashions");
+        let store = ProfileStore::open(&root).unwrap();
+        let profile_id = ProfileId::new("repair-fashions").unwrap();
+        let mut account = NewAccountFactory::create(profile_id.clone(), "Captain");
+        store.save_typed_account(&mut account).unwrap();
+
+        let repaired = load_or_create_typed_account(
+            &store,
+            "repair-fashions",
+            "Captain",
+            &test_fashion_catalog(),
+        )
+        .unwrap();
+        assert_eq!(repaired.fashion.entries[&1_032_031].len(), 2);
+
+        let persisted = store
+            .load_typed_account(&profile_id)
+            .unwrap()
+            .expect("account should remain available");
+        assert_eq!(persisted.fashion.entries[&1_021_051].len(), 2);
+        assert_eq!(persisted.fashion.entries[&1_032_031].len(), 2);
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn typed_persistence_rejects_stale_snapshot() {
