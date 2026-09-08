@@ -199,6 +199,77 @@ fn typed_currency_kind(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
     }
 }
 
+fn typed_compat_currency(item_id: i32) -> bool {
+    matches!(
+        item_id,
+        8..=15 | 18 | 22..=29 | 31..=33
+    )
+}
+
+fn typed_currency_amount(account: &blueoath_domain::AccountState, item_id: i32) -> Option<u64> {
+    if let Some(kind) = typed_currency_kind(item_id) {
+        return Some(account.resources.amount(kind).get());
+    }
+    typed_compat_currency(item_id).then(|| {
+        account
+            .activities
+            .progress
+            .get(&format!("compat:currency:{item_id}"))
+            .copied()
+            .unwrap_or_default()
+    })
+}
+
+fn credit_typed_currency(
+    account: &mut blueoath_domain::AccountState,
+    item_id: i32,
+    amount: u64,
+) -> bool {
+    if let Some(kind) = typed_currency_kind(item_id) {
+        return account.resources.credit(kind, amount).is_ok();
+    }
+    if !typed_compat_currency(item_id) {
+        return false;
+    }
+    let key = format!("compat:currency:{item_id}");
+    let current = account
+        .activities
+        .progress
+        .get(&key)
+        .copied()
+        .unwrap_or_default();
+    let Some(next) = current.checked_add(amount) else {
+        return false;
+    };
+    account.activities.progress.insert(key, next);
+    true
+}
+
+fn debit_typed_currency(
+    account: &mut blueoath_domain::AccountState,
+    item_id: i32,
+    amount: u64,
+) -> bool {
+    if let Some(kind) = typed_currency_kind(item_id) {
+        return account.resources.debit(kind, amount).is_ok();
+    }
+    if !typed_compat_currency(item_id) {
+        return false;
+    }
+    let key = format!("compat:currency:{item_id}");
+    let current = account
+        .activities
+        .progress
+        .get(&key)
+        .copied()
+        .unwrap_or_default();
+    let Some(next) = current.checked_sub(amount) else {
+        return false;
+    };
+    account.activities.progress.insert(key, next);
+    true
+}
+
 fn apply_typed_shop_good(
     account: &mut blueoath_domain::AccountState,
     good: &ShopGood,
@@ -305,11 +376,9 @@ fn apply_typed_shop_good(
             })
         }
         5 => {
-            let kind = typed_currency_kind(good.item_id)?;
-            account
-                .resources
-                .credit(kind, u64::try_from(total).ok()?)
-                .ok()?;
+            if !credit_typed_currency(account, good.item_id, u64::try_from(total).ok()?) {
+                return None;
+            }
             Some(ShopReward {
                 goods_type: good.goods_type,
                 item_id: good.item_id,
@@ -366,10 +435,10 @@ fn deduct_typed_shop_costs(
     }
     for (&(goods_type, item_id), &amount) in &totals {
         if goods_type == 5 {
-            let Some(kind) = typed_currency_kind(item_id) else {
+            let Some(balance) = typed_currency_amount(account, item_id) else {
                 return false;
             };
-            if account.resources.amount(kind).get() < amount {
+            if balance < amount {
                 return false;
             }
         } else if typed_inventory_count(account, u64::try_from(item_id).unwrap_or_default())
@@ -380,10 +449,7 @@ fn deduct_typed_shop_costs(
     }
     for (&(goods_type, item_id), &amount) in &totals {
         if goods_type == 5 {
-            let Some(kind) = typed_currency_kind(item_id) else {
-                return false;
-            };
-            if account.resources.debit(kind, amount).is_err() {
+            if !debit_typed_currency(account, item_id, amount) {
                 return false;
             }
         } else if !consume_typed_inventory(
@@ -665,6 +731,65 @@ mod tests {
             99_999_999 + 100 - 10
         );
         assert_eq!(effects.into_parts().0.len(), 3);
+    }
+
+    #[test]
+    fn typed_shop_buy_uses_compat_currency_and_grants_lucky_bag() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("typed-shop-lucky-bag").unwrap(),
+            "Captain",
+        );
+        account
+            .activities
+            .progress
+            .insert("compat:currency:25".to_owned(), 1_000);
+        let good = ShopGood {
+            shop_id: 9,
+            goods_type: 1,
+            item_id: 10_156,
+            num: 1,
+            costs: vec![ShopCost {
+                goods_type: 5,
+                item_id: 25,
+                amount: 150,
+            }],
+        };
+
+        let reward = apply_typed_shop_good(&mut account, &good, 1, None)
+            .expect("lucky bag purchase should be granted");
+
+        assert_eq!(reward.item_id, 10_156);
+        assert_eq!(
+            account.inventory.items[&blueoath_domain::TemplateId::new(10_156).unwrap()],
+            1
+        );
+        assert_eq!(
+            account.activities.progress.get("compat:currency:25"),
+            Some(&850)
+        );
+    }
+
+    #[test]
+    fn typed_shop_buy_grants_compat_currency_reward() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("typed-shop-compat-reward").unwrap(),
+            "Captain",
+        );
+        let good = ShopGood {
+            shop_id: 9,
+            goods_type: 5,
+            item_id: 23,
+            num: 12,
+            costs: vec![],
+        };
+
+        apply_typed_shop_good(&mut account, &good, 1, None)
+            .expect("compat currency reward should be granted");
+
+        assert_eq!(
+            account.activities.progress.get("compat:currency:23"),
+            Some(&12)
+        );
     }
 
     #[test]

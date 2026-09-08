@@ -3834,6 +3834,69 @@ fn server_shop_page_files_load_inline_goods_and_costs() {
 }
 
 #[test]
+fn server_catalog_loads_red_modification_shop_page() {
+    let data_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../catalog/data");
+    let mut catalog = load_shop_catalog(Some(
+        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../catalog/config"),
+    ));
+    load_server_shop_goods(&mut catalog, &data_root);
+
+    let goods = catalog
+        .goods_by_shop
+        .get(&29)
+        .expect("red modification shop should be configured");
+    assert_eq!(goods.len(), 19);
+    assert_eq!(
+        catalog.goods_by_id.get(&101701).map(|good| good.goods_type),
+        Some(18)
+    );
+    assert_eq!(
+        catalog.goods_by_id.get(&101701).map(|good| good.item_id),
+        Some(4_044_015)
+    );
+    assert_eq!(
+        catalog
+            .goods_by_id
+            .get(&101701)
+            .and_then(|good| good.costs.first())
+            .map(|cost| (cost.goods_type, cost.item_id, cost.amount)),
+        Some((5, 25, 710))
+    );
+}
+
+#[test]
+fn server_catalog_loads_current_lucky_bag_offers() {
+    let data_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../catalog/data");
+    let mut catalog = load_shop_catalog(Some(
+        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../catalog/config"),
+    ));
+    load_server_shop_goods(&mut catalog, &data_root);
+
+    assert_eq!(
+        catalog
+            .goods_by_id
+            .get(&8034)
+            .map(|good| (good.item_id, good.num)),
+        Some((10_204, 1))
+    );
+    assert_eq!(
+        catalog
+            .goods_by_id
+            .get(&8035)
+            .map(|good| (good.item_id, good.num)),
+        Some((10_205, 1))
+    );
+    assert_eq!(
+        catalog
+            .goods_by_id
+            .get(&8034)
+            .and_then(|good| good.costs.first())
+            .map(|cost| (cost.goods_type, cost.item_id, cost.amount)),
+        Some((5, 2, 1_800))
+    );
+}
+
+#[test]
 fn shop_equipment_quantity_creates_distinct_instances() {
     let mut account = default_account_snapshot("alice", "Alice", 123);
     let before = account["equip"]["items"].as_array().unwrap().len();
