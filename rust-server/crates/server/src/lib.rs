@@ -31,8 +31,6 @@ use tokio::net::{TcpListener, TcpStream, UdpSocket};
 mod account_defaults;
 #[cfg(test)]
 mod account_state;
-#[path = "features/battle/state.rs"]
-mod battle_state;
 mod bootstrap;
 #[path = "features/building/state.rs"]
 mod building_state;
@@ -82,7 +80,6 @@ use account_defaults::user_info_from_account;
 use account_defaults::user_info_from_typed_account;
 #[cfg(test)]
 use account_state::*;
-use battle_state::*;
 pub use blueoath_game::{
     BattleService, BattleStartContext, ProgressService, ResourceService, RewardService,
 };
@@ -104,6 +101,7 @@ pub use config::{
 };
 use construction_state::*;
 use equip_state::*;
+use features::battle::state::*;
 #[cfg(test)]
 pub(crate) use features::building::service::handle_typed as handle_typed_building;
 pub use frame_service::process_frame;

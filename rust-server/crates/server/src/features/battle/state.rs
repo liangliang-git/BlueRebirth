@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use super::*;
 
-pub(super) fn encode_random_factor_payload(
+pub(crate) fn encode_random_factor_payload(
     copy_id: i32,
     battle_catalog: Option<&BattleCatalog>,
 ) -> Vec<u8> {
@@ -30,7 +30,7 @@ pub(super) fn encode_random_factor_payload(
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn battle_start_payload(
+pub(crate) fn battle_start_payload(
     account: &Value,
     copy_id: i32,
     requested_hero_ids: &[i32],
@@ -48,15 +48,15 @@ pub(super) fn battle_start_payload(
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(super) struct BattleStartOptions {
-    pub(super) is_running_fight: bool,
-    pub(super) battle_mode: i32,
-    pub(super) anim_mode: i32,
-    pub(super) match_type: i32,
+pub(crate) struct BattleStartOptions {
+    pub(crate) is_running_fight: bool,
+    pub(crate) battle_mode: i32,
+    pub(crate) anim_mode: i32,
+    pub(crate) match_type: i32,
 }
 
 #[cfg(test)]
-pub(super) fn battle_start_payload_with_fleet_groups_with_stats(
+pub(crate) fn battle_start_payload_with_fleet_groups_with_stats(
     account: &Value,
     copy_id: i32,
     requested_hero_groups: &[Vec<i32>],
@@ -265,7 +265,7 @@ pub(super) fn battle_start_payload_with_fleet_groups_with_stats(
     output
 }
 
-pub(super) fn battle_start_payload_from_typed_account(
+pub(crate) fn battle_start_payload_from_typed_account(
     account: &blueoath_domain::AccountState,
     copy_id: i32,
     requested_hero_groups: &[Vec<i32>],
@@ -523,7 +523,7 @@ fn encode_battle_player(
 }
 
 #[cfg(test)]
-pub(super) fn battle_enemy_ids(copy_id: i32, battle_catalog: Option<&BattleCatalog>) -> Vec<i32> {
+pub(crate) fn battle_enemy_ids(copy_id: i32, battle_catalog: Option<&BattleCatalog>) -> Vec<i32> {
     let Some(catalog) = battle_catalog else {
         return vec![1];
     };
@@ -542,7 +542,7 @@ pub(super) fn battle_enemy_ids(copy_id: i32, battle_catalog: Option<&BattleCatal
     ids
 }
 
-pub(super) fn battle_fleet_ids(copy_id: i32, battle_catalog: Option<&BattleCatalog>) -> Vec<i32> {
+pub(crate) fn battle_fleet_ids(copy_id: i32, battle_catalog: Option<&BattleCatalog>) -> Vec<i32> {
     let Some(catalog) = battle_catalog else {
         return vec![copy_id.max(1)];
     };
@@ -554,7 +554,7 @@ pub(super) fn battle_fleet_ids(copy_id: i32, battle_catalog: Option<&BattleCatal
         .unwrap_or_else(|| vec![copy_id.max(1)])
 }
 
-pub(super) fn battle_session_fleet_ids(
+pub(crate) fn battle_session_fleet_ids(
     copy_id: i32,
     battle_catalog: Option<&BattleCatalog>,
 ) -> Vec<i32> {
@@ -577,7 +577,7 @@ pub(super) fn battle_session_fleet_ids(
     result
 }
 
-pub(super) fn battle_position_fleet_id(
+pub(crate) fn battle_position_fleet_id(
     copy_id: i32,
     fleet_id: i32,
     fleet_index: usize,
@@ -622,7 +622,7 @@ pub(super) fn battle_position_fleet_id(
     }
 }
 
-pub(super) fn battle_fleet_aliases(
+pub(crate) fn battle_fleet_aliases(
     copy_id: i32,
     battle_catalog: Option<&BattleCatalog>,
 ) -> Vec<(i32, i32)> {
@@ -637,7 +637,7 @@ pub(super) fn battle_fleet_aliases(
 }
 
 #[cfg(test)]
-pub(super) fn battle_enemy_hps(copy_id: i32, battle_catalog: Option<&BattleCatalog>) -> Vec<i64> {
+pub(crate) fn battle_enemy_hps(copy_id: i32, battle_catalog: Option<&BattleCatalog>) -> Vec<i64> {
     battle_enemy_ids(copy_id, battle_catalog)
         .into_iter()
         .map(|enemy_id| {
@@ -650,7 +650,7 @@ pub(super) fn battle_enemy_hps(copy_id: i32, battle_catalog: Option<&BattleCatal
 }
 
 #[cfg(test)]
-pub(super) fn battle_enemy_hp_for_client(copy_id: i32, configured_hp: i32) -> i32 {
+pub(crate) fn battle_enemy_hp_for_client(copy_id: i32, configured_hp: i32) -> i32 {
     let hp = configured_hp.max(1);
     if copy_id == 100 {
         hp.min(1_000)
@@ -661,7 +661,7 @@ pub(super) fn battle_enemy_hp_for_client(copy_id: i32, configured_hp: i32) -> i3
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn battle_attack_payload_with_damage(args: &[u8], damage: u64) -> Vec<u8> {
+pub(crate) fn battle_attack_payload_with_damage(args: &[u8], damage: u64) -> Vec<u8> {
     let mut output = Vec::new();
     for (field, wanted) in [(1, 1), (2, 2), (3, 3), (4, 4)] {
         if field == 3 {
@@ -678,7 +678,7 @@ pub(super) fn battle_attack_payload_with_damage(args: &[u8], damage: u64) -> Vec
     output
 }
 
-pub(super) fn battle_attack_payload_from_request(
+pub(crate) fn battle_attack_payload_from_request(
     request: &blueoath_protocol::CopyAttackRequest,
     damage: u64,
 ) -> Vec<u8> {
@@ -748,14 +748,14 @@ fn normalized_battle_passed_fleet_ids(
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn validate_battle_fleet_pass(session: &Value, payload: &[u8]) -> bool {
+pub(crate) fn validate_battle_fleet_pass(session: &Value, payload: &[u8]) -> bool {
     let passed_fleet_ids = normalized_battle_passed_fleet_ids(session, payload);
     !passed_fleet_ids.is_empty() && passed_fleet_ids.len() == battle_passed_fleet_ids(payload).len()
 }
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn mark_battle_fleet_passed(session: &mut Value, payload: &[u8]) -> bool {
+pub(crate) fn mark_battle_fleet_passed(session: &mut Value, payload: &[u8]) -> bool {
     let passed_fleet_ids = normalized_battle_passed_fleet_ids(session, payload);
     if passed_fleet_ids.is_empty()
         || passed_fleet_ids.len() != battle_passed_fleet_ids(payload).len()
@@ -781,7 +781,7 @@ pub(super) fn mark_battle_fleet_passed(session: &mut Value, payload: &[u8]) -> b
 }
 
 #[cfg(test)]
-pub(super) fn mark_first_battle_fleet_passed(session: &mut Value) -> bool {
+pub(crate) fn mark_first_battle_fleet_passed(session: &mut Value) -> bool {
     let Some(session) = session.as_object_mut() else {
         return true;
     };
@@ -801,7 +801,7 @@ pub(super) fn mark_first_battle_fleet_passed(session: &mut Value) -> bool {
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn save_battle_hero_hp(
+pub(crate) fn save_battle_hero_hp(
     account: &mut Value,
     heroes: &[BattleHeroResult],
     allowed_hero_ids: &[u64],
@@ -837,7 +837,7 @@ pub(super) fn save_battle_hero_hp(
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn validate_battle_attack(
+pub(crate) fn validate_battle_attack(
     session: &serde_json::Map<String, Value>,
     args: &[u8],
 ) -> Option<i64> {
@@ -881,7 +881,7 @@ pub(super) fn validate_battle_attack(
 }
 
 #[cfg(test)]
-pub(super) fn battle_copy_passed(account: &Value, copy_id: i32) -> bool {
+pub(crate) fn battle_copy_passed(account: &Value, copy_id: i32) -> bool {
     let has_record = |value: &Value| {
         value
             .get("records")
@@ -906,7 +906,7 @@ pub(super) fn battle_copy_passed(account: &Value, copy_id: i32) -> bool {
 }
 
 #[cfg(test)]
-pub(super) fn completed_copy_ids(account: &Value, progress_key: &str) -> Vec<i32> {
+pub(crate) fn completed_copy_ids(account: &Value, progress_key: &str) -> Vec<i32> {
     account
         .get(progress_key)
         .and_then(|progress| progress.get("records"))
@@ -926,7 +926,7 @@ pub(super) fn completed_copy_ids(account: &Value, progress_key: &str) -> Vec<i32
 }
 
 #[cfg(test)]
-pub(super) fn completed_copy_counts(account: &Value, progress_key: &str) -> Vec<(i32, i32)> {
+pub(crate) fn completed_copy_counts(account: &Value, progress_key: &str) -> Vec<(i32, i32)> {
     account
         .get(progress_key)
         .and_then(|progress| progress.get("records"))
@@ -952,7 +952,7 @@ pub(super) fn completed_copy_counts(account: &Value, progress_key: &str) -> Vec<
         .collect()
 }
 
-pub(super) fn copy_progress_max_or_first(catalog_ids: &[i32], passed_ids: &[i32]) -> i32 {
+pub(crate) fn copy_progress_max_or_first(catalog_ids: &[i32], passed_ids: &[i32]) -> i32 {
     passed_ids
         .iter()
         .copied()
@@ -961,7 +961,7 @@ pub(super) fn copy_progress_max_or_first(catalog_ids: &[i32], passed_ids: &[i32]
         .unwrap_or_default()
 }
 
-pub(super) fn copy_progress_max_or_initial(
+pub(crate) fn copy_progress_max_or_initial(
     catalog_ids: &[i32],
     passed_ids: &[i32],
     initial_copy_id: i32,
@@ -979,7 +979,7 @@ pub(super) fn copy_progress_max_or_initial(
 }
 
 #[cfg(test)]
-pub(super) fn copy_request_type(payload: &[u8]) -> i32 {
+pub(crate) fn copy_request_type(payload: &[u8]) -> i32 {
     let requested = decode_varint_field(payload, 1);
     matches!(requested, 2 | 9 | 10 | 24 | 33 | 34)
         .then_some(requested)
@@ -987,14 +987,14 @@ pub(super) fn copy_request_type(payload: &[u8]) -> i32 {
 }
 
 #[cfg(test)]
-pub(super) fn commander_level(account: &Value) -> i32 {
+pub(crate) fn commander_level(account: &Value) -> i32 {
     json_i32(account.get("character").unwrap_or(account), "level")
         .unwrap_or_default()
         .max(1)
 }
 
 #[cfg(test)]
-pub(super) fn sea_difficulty_for_account(account: &Value) -> i32 {
+pub(crate) fn sea_difficulty_for_account(account: &Value) -> i32 {
     if commander_level(account) < SEA_DIFFICULTY_UNLOCK_LEVEL {
         return 1;
     }
@@ -1007,14 +1007,14 @@ pub(super) fn sea_difficulty_for_account(account: &Value) -> i32 {
 }
 
 #[cfg(test)]
-pub(super) fn set_sea_difficulty(account: &mut Value, difficulty: i32) {
+pub(crate) fn set_sea_difficulty(account: &mut Value, difficulty: i32) {
     if let Some(character) = account.get_mut("character").and_then(Value::as_object_mut) {
         character.insert("seaDifficulty".to_owned(), json!(difficulty.clamp(1, 7)));
     }
 }
 
 #[cfg(test)]
-pub(super) fn account_has_fleet(account: &Value, fleet_id: u64) -> bool {
+pub(crate) fn account_has_fleet(account: &Value, fleet_id: u64) -> bool {
     if fleet_id == 0 {
         return false;
     }
@@ -1031,7 +1031,7 @@ pub(super) fn account_has_fleet(account: &Value, fleet_id: u64) -> bool {
 }
 
 #[cfg(test)]
-pub(super) fn consume_battle_supply(
+pub(crate) fn consume_battle_supply(
     account: &mut Value,
     catalog: Option<&BattleCatalog>,
     copy_id: i32,
@@ -1090,7 +1090,7 @@ pub(super) fn consume_battle_supply(
     true
 }
 
-pub(super) fn consume_battle_supply_typed(
+pub(crate) fn consume_battle_supply_typed(
     account: &mut blueoath_domain::AccountState,
     catalog: Option<&BattleCatalog>,
     copy_id: i32,
@@ -1146,7 +1146,7 @@ pub(super) fn consume_battle_supply_typed(
 }
 
 #[cfg(test)]
-pub(super) fn add_commander_battle_exp(
+pub(crate) fn add_commander_battle_exp(
     account: &mut Value,
     gained: i32,
     catalog: Option<&CommanderLevelCatalog>,
@@ -1198,7 +1198,7 @@ pub(super) fn add_commander_battle_exp(
 }
 
 #[cfg(test)]
-pub(super) fn add_ship_battle_exp(
+pub(crate) fn add_ship_battle_exp(
     account: &mut Value,
     hero_ids: &[u64],
     gained: i32,
@@ -1270,7 +1270,7 @@ pub(super) fn add_ship_battle_exp(
 }
 
 #[cfg(test)]
-pub(super) fn apply_battle_settlement(
+pub(crate) fn apply_battle_settlement(
     account: &mut Value,
     hero_ids: &[u64],
     mvp_hero_id: Option<u64>,
@@ -1358,7 +1358,7 @@ pub(super) fn apply_battle_settlement(
     changed
 }
 
-pub(super) fn battle_copy_experience(catalog: Option<&BattleCatalog>, copy_id: i32) -> (i32, i32) {
+pub(crate) fn battle_copy_experience(catalog: Option<&BattleCatalog>, copy_id: i32) -> (i32, i32) {
     let Some(catalog) = catalog else {
         return (100, 0);
     };
@@ -1378,7 +1378,7 @@ pub(super) fn battle_copy_experience(catalog: Option<&BattleCatalog>, copy_id: i
     (commander_exp, ship_exp)
 }
 
-pub(super) fn battle_evaluation_multipliers(
+pub(crate) fn battle_evaluation_multipliers(
     catalog: Option<&BattleCatalog>,
     grade: i32,
 ) -> (f64, f64) {
@@ -1391,7 +1391,7 @@ pub(super) fn battle_evaluation_multipliers(
     )
 }
 
-pub(super) fn battle_other_drop_multiplier(catalog: Option<&BattleCatalog>, grade: i32) -> f64 {
+pub(crate) fn battle_other_drop_multiplier(catalog: Option<&BattleCatalog>, grade: i32) -> f64 {
     catalog
         .and_then(|catalog| catalog.evaluation_by_grade.get(&grade))
         .map(|rule| f64::from(rule.other_drop_ratio) / 10_000.0)
@@ -1399,7 +1399,7 @@ pub(super) fn battle_other_drop_multiplier(catalog: Option<&BattleCatalog>, grad
 }
 
 #[cfg(test)]
-pub(super) fn battle_rank_drop_reward(
+pub(crate) fn battle_rank_drop_reward(
     catalog: Option<&BattleCatalog>,
     copy_id: i32,
     grade: i32,
@@ -1419,12 +1419,12 @@ pub(super) fn battle_rank_drop_reward(
 }
 
 #[cfg(test)]
-pub(super) fn battle_task_progress_enabled(catalog: Option<&BattleCatalog>, copy_id: i32) -> bool {
+pub(crate) fn battle_task_progress_enabled(catalog: Option<&BattleCatalog>, copy_id: i32) -> bool {
     !catalog.is_some_and(|catalog| catalog.task_disabled_copies.contains(&copy_id))
 }
 
 #[cfg(test)]
-pub(super) fn draw_battle_drop_rewards(
+pub(crate) fn draw_battle_drop_rewards(
     account: &mut Value,
     catalog: Option<&BattleCatalog>,
     copy_id: i32,
@@ -1444,7 +1444,7 @@ pub(super) fn draw_battle_drop_rewards(
 }
 
 #[cfg(test)]
-pub(super) fn draw_battle_drop_rewards_for_grade(
+pub(crate) fn draw_battle_drop_rewards_for_grade(
     account: &mut Value,
     catalog: Option<&BattleCatalog>,
     copy_id: i32,
@@ -1568,7 +1568,7 @@ pub(super) fn draw_battle_drop_rewards_for_grade(
 }
 
 #[cfg(test)]
-pub(super) fn record_battle_pass(
+pub(crate) fn record_battle_pass(
     account: &mut Value,
     copy_id: i32,
     grade: i32,
@@ -1773,7 +1773,7 @@ fn increment_daily_group_success(daily: &mut serde_json::Map<String, Value>, gro
     }
 }
 
-pub(super) fn battle_pass_payload_with_rewards(
+pub(crate) fn battle_pass_payload_with_rewards(
     copy_id: i32,
     first_pass: bool,
     grade: i32,
@@ -1804,7 +1804,7 @@ pub(super) fn battle_pass_payload_with_rewards(
     output
 }
 
-pub(super) fn battle_pass_payload_with_damage(
+pub(crate) fn battle_pass_payload_with_damage(
     copy_id: i32,
     first_pass: bool,
     grade: i32,
@@ -1824,7 +1824,7 @@ pub(super) fn battle_pass_payload_with_damage(
     output
 }
 
-pub(super) fn battle_pass_payload_with_experience(
+pub(crate) fn battle_pass_payload_with_experience(
     copy_id: i32,
     first_pass: bool,
     grade: i32,
@@ -1838,7 +1838,7 @@ pub(super) fn battle_pass_payload_with_experience(
     output
 }
 
-pub(super) fn battle_pass_payload_with_damage_and_experience(
+pub(crate) fn battle_pass_payload_with_damage_and_experience(
     base: BattlePassDamagePayload,
     exp_rewards: &[(u64, i32)],
 ) -> Vec<u8> {
@@ -1855,14 +1855,14 @@ pub(super) fn battle_pass_payload_with_damage_and_experience(
     output
 }
 
-pub(super) struct BattlePassDamagePayload<'a> {
-    pub(super) copy_id: i32,
-    pub(super) first_pass: bool,
-    pub(super) grade: i32,
-    pub(super) battle_time: i32,
-    pub(super) rewards: &'a [ShopReward],
-    pub(super) current_damage: i32,
-    pub(super) max_damage: i32,
+pub(crate) struct BattlePassDamagePayload<'a> {
+    pub(crate) copy_id: i32,
+    pub(crate) first_pass: bool,
+    pub(crate) grade: i32,
+    pub(crate) battle_time: i32,
+    pub(crate) rewards: &'a [ShopReward],
+    pub(crate) current_damage: i32,
+    pub(crate) max_damage: i32,
 }
 
 fn append_battle_exp_rewards(output: &mut Vec<u8>, exp_rewards: &[(u64, i32)]) {
