@@ -4,6 +4,7 @@ use serde_json::Value;
 use crate::common::response::Response;
 
 use super::*;
+use crate::features::task::state as task_state;
 
 #[cfg(test)]
 pub(crate) fn apply_mail_reward(account: &mut Value, mail: &MailTemplate) {

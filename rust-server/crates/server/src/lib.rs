@@ -58,8 +58,6 @@ pub mod router;
 mod runtime;
 #[path = "features/progression/study_state.rs"]
 mod study_state;
-#[path = "features/task/state.rs"]
-mod task_state;
 #[path = "common/wire.rs"]
 mod wire;
 
@@ -94,6 +92,7 @@ use features::building::{buildship_state::*, construction_state::*, state::*};
 #[cfg(test)]
 use features::equip::state::*;
 use features::shop::state::*;
+use features::task::state::*;
 pub use frame_service::process_frame;
 use frame_service::{prepare_local_request, storage_failure_response};
 #[cfg(test)]
@@ -107,7 +106,6 @@ use projection::*;
 use protocol_payload::*;
 #[cfg(test)]
 use study_state::*;
-use task_state::*;
 #[cfg(test)]
 use wire::skip_wire;
 use wire::{

@@ -17,7 +17,7 @@ fn typed_currency(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
     })
 }
 
-pub(super) fn grant_typed_task_reward(
+pub(crate) fn grant_typed_task_reward(
     account: &mut blueoath_domain::AccountState,
     reward: &ShopReward,
 ) -> bool {
@@ -52,7 +52,7 @@ pub(super) fn grant_typed_task_reward(
     false
 }
 
-pub(super) fn can_grant_typed_task_reward(
+pub(crate) fn can_grant_typed_task_reward(
     account: &blueoath_domain::AccountState,
     reward: &ShopReward,
 ) -> bool {
@@ -88,7 +88,7 @@ pub(super) fn can_grant_typed_task_reward(
     false
 }
 
-pub(super) fn can_grant_typed_task_rewards(
+pub(crate) fn can_grant_typed_task_rewards(
     account: &blueoath_domain::AccountState,
     rewards: &[ShopReward],
 ) -> bool {
@@ -139,11 +139,11 @@ pub(super) fn can_grant_typed_task_rewards(
     true
 }
 
-pub(super) fn typed_task_claimed(account: &blueoath_domain::AccountState, task_id: u64) -> bool {
+pub(crate) fn typed_task_claimed(account: &blueoath_domain::AccountState, task_id: u64) -> bool {
     account.tasks.claimed.contains(&task_id)
 }
 
-pub(super) fn typed_task_completed(
+pub(crate) fn typed_task_completed(
     account: &blueoath_domain::AccountState,
     task_id: u64,
     goal: i32,
@@ -158,7 +158,7 @@ pub(super) fn typed_task_completed(
             >= u64::try_from(goal.max(0)).unwrap_or_default()
 }
 
-pub(super) fn typed_task_visible(
+pub(crate) fn typed_task_visible(
     account: &blueoath_domain::AccountState,
     catalog: &TaskCatalog,
     definition: &TaskDefinition,
@@ -182,13 +182,13 @@ pub(super) fn typed_task_visible(
         })
 }
 
-pub(super) fn complete_typed_task(account: &mut blueoath_domain::AccountState, task_id: u64) {
+pub(crate) fn complete_typed_task(account: &mut blueoath_domain::AccountState, task_id: u64) {
     account.tasks.completed.insert(task_id);
     account.tasks.claimed.insert(task_id);
 }
 
 /// Advance normalized task counters from trusted server-side events.
-pub(super) fn advance_typed_task_event(
+pub(crate) fn advance_typed_task_event(
     account: &mut blueoath_domain::AccountState,
     catalog: Option<&TaskCatalog>,
     event_type: i32,
@@ -233,7 +233,7 @@ pub(super) fn advance_typed_task_event(
 }
 
 #[cfg(test)]
-pub(super) fn complete_task(
+pub(crate) fn complete_task(
     account: &mut Value,
     task_type: i32,
     task_id: i32,
@@ -268,7 +268,7 @@ pub(super) fn complete_task(
 }
 
 #[cfg(test)]
-pub(super) fn task_claimed(account: &Value, task_type: i32, task_id: i32) -> bool {
+pub(crate) fn task_claimed(account: &Value, task_type: i32, task_id: i32) -> bool {
     account
         .get("tasks")
         .and_then(|tasks| tasks.get("records"))
@@ -283,7 +283,7 @@ pub(super) fn task_claimed(account: &Value, task_type: i32, task_id: i32) -> boo
 }
 
 #[cfg(test)]
-pub(super) fn task_completed(account: &Value, task_type: i32, task_id: i32, goal: i32) -> bool {
+pub(crate) fn task_completed(account: &Value, task_type: i32, task_id: i32, goal: i32) -> bool {
     account
         .get("tasks")
         .and_then(|tasks| tasks.get("records"))
@@ -302,7 +302,7 @@ pub(super) fn task_completed(account: &Value, task_type: i32, task_id: i32, goal
 /// Keep legacy UserInfo.AchievePoint consistent with claimed achievement records.
 /// Achievement points are derived from the client catalog, never accepted from TaskTrigger.
 #[cfg(test)]
-pub(super) fn sync_achievement_points(account: &mut Value, catalog: &TaskCatalog) -> bool {
+pub(crate) fn sync_achievement_points(account: &mut Value, catalog: &TaskCatalog) -> bool {
     let points = catalog
         .definitions
         .iter()
@@ -326,7 +326,7 @@ pub(super) fn sync_achievement_points(account: &mut Value, catalog: &TaskCatalog
 }
 
 #[cfg(test)]
-pub(super) fn task_is_visible(
+pub(crate) fn task_is_visible(
     account: &Value,
     catalog: &TaskCatalog,
     definition: &TaskDefinition,
@@ -353,7 +353,7 @@ pub(super) fn task_is_visible(
 
 /// Advance task counters from trusted server-side actions. Client TaskTrigger is rejected.
 #[cfg(test)]
-pub(super) fn advance_task_event(
+pub(crate) fn advance_task_event(
     account: &mut Value,
     catalog: Option<&TaskCatalog>,
     event_type: i32,
@@ -365,7 +365,7 @@ pub(super) fn advance_task_event(
 
 /// Advance trusted event counters, optionally restricted to goal[1].
 #[cfg(test)]
-pub(super) fn advance_task_event_with_param(
+pub(crate) fn advance_task_event_with_param(
     account: &mut Value,
     catalog: Option<&TaskCatalog>,
     event_type: i32,
@@ -454,7 +454,7 @@ fn advance_task_event_impl(
     changed
 }
 
-pub(super) fn task_rewards(
+pub(crate) fn task_rewards(
     catalog: Option<&TaskCatalog>,
     task_type: i32,
     task_id: i32,
@@ -490,7 +490,7 @@ pub(super) fn task_rewards(
 }
 
 #[cfg(test)]
-pub(super) fn grant_reward(
+pub(crate) fn grant_reward(
     account: &mut Value,
     reward: ShopReward,
     now: u32,
@@ -535,7 +535,7 @@ pub(super) fn grant_reward(
     }
 }
 
-pub(super) fn encode_task_reward(task_id: i32, rewards: &[ShopReward]) -> Vec<u8> {
+pub(crate) fn encode_task_reward(task_id: i32, rewards: &[ShopReward]) -> Vec<u8> {
     let mut out = Vec::new();
     append_varint_field(&mut out, 1, task_id.max(0) as u64);
     for reward in rewards {
@@ -548,7 +548,7 @@ pub(super) fn encode_task_reward(task_id: i32, rewards: &[ShopReward]) -> Vec<u8
     out
 }
 
-pub(super) fn encode_task_reward_list(rewards: &[ShopReward]) -> Vec<u8> {
+pub(crate) fn encode_task_reward_list(rewards: &[ShopReward]) -> Vec<u8> {
     let mut out = Vec::new();
     for reward in rewards {
         let mut item = Vec::new();
@@ -561,7 +561,7 @@ pub(super) fn encode_task_reward_list(rewards: &[ShopReward]) -> Vec<u8> {
 }
 
 #[cfg(test)]
-pub(super) fn task_info_payload(account: &Value, catalog: Option<&TaskCatalog>) -> Vec<u8> {
+pub(crate) fn task_info_payload(account: &Value, catalog: Option<&TaskCatalog>) -> Vec<u8> {
     let mut output = Vec::new();
     let records = account
         .get("tasks")
@@ -708,7 +708,7 @@ pub(super) fn task_info_payload(account: &Value, catalog: Option<&TaskCatalog>) 
     output
 }
 
-pub(super) fn task_info_payload_from_typed_account(
+pub(crate) fn task_info_payload_from_typed_account(
     account: &blueoath_domain::AccountState,
     catalog: Option<&TaskCatalog>,
 ) -> Vec<u8> {
@@ -828,9 +828,9 @@ pub(super) fn task_info_payload_from_typed_account(
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct ShopReward {
-    pub(super) goods_type: i32,
-    pub(super) item_id: i32,
-    pub(super) num: i32,
-    pub(super) instance_id: i32,
+pub(crate) struct ShopReward {
+    pub(crate) goods_type: i32,
+    pub(crate) item_id: i32,
+    pub(crate) num: i32,
+    pub(crate) instance_id: i32,
 }
