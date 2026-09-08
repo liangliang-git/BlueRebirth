@@ -8,14 +8,14 @@ use super::*;
 #[cfg(test)]
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn mop_up_payload(account: &Value, now: u32) -> Vec<u8> {
+pub(crate) fn mop_up_payload(account: &Value, now: u32) -> Vec<u8> {
     mop_up_payload_with_pass_rets(account, now, &[])
 }
 
 #[cfg(test)]
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn mop_up_payload_with_pass_rets(
+pub(crate) fn mop_up_payload_with_pass_rets(
     account: &Value,
     now: u32,
     pass_rets: &[Vec<u8>],
@@ -72,7 +72,7 @@ pub(super) fn mop_up_payload_with_pass_rets(
 #[cfg(test)]
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn completed_sweep_copy_id(account: &Value, now: u32) -> i32 {
+pub(crate) fn completed_sweep_copy_id(account: &Value, now: u32) -> i32 {
     account
         .get("sweep")
         .and_then(|sweep| sweep.get("entries"))
@@ -87,7 +87,7 @@ pub(super) fn completed_sweep_copy_id(account: &Value, now: u32) -> i32 {
         .unwrap_or_default()
 }
 
-pub(super) fn mop_up_pass_rets(copy_id: i32, rewards: &[ShopReward]) -> Vec<Vec<u8>> {
+pub(crate) fn mop_up_pass_rets(copy_id: i32, rewards: &[ShopReward]) -> Vec<Vec<u8>> {
     // Emit completion record even when stage has no configured drops. The client opens
     // reward dialog from passRets presence; omitting it leaves getrewardspage with nil data.
     if copy_id <= 0 {
@@ -101,7 +101,7 @@ pub(super) fn mop_up_pass_rets(copy_id: i32, rewards: &[ShopReward]) -> Vec<Vec<
 #[cfg(test)]
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn mop_up_active_count(account: &Value, now: u32) -> usize {
+pub(crate) fn mop_up_active_count(account: &Value, now: u32) -> usize {
     account
         .get("sweep")
         .and_then(|sweep| sweep.get("entries"))
@@ -115,7 +115,7 @@ pub(super) fn mop_up_active_count(account: &Value, now: u32) -> usize {
         .unwrap_or_default()
 }
 
-pub(super) fn draw_draw_count(multiplier: f64, seed: u64) -> usize {
+pub(crate) fn draw_draw_count(multiplier: f64, seed: u64) -> usize {
     let multiplier = normalize_multiplier(multiplier);
     let whole = multiplier.floor() as usize;
     let fraction = multiplier - whole as f64;
@@ -126,14 +126,14 @@ pub(super) fn draw_draw_count(multiplier: f64, seed: u64) -> usize {
     whole.saturating_add(usize::from(roll < fraction))
 }
 
-pub(super) fn next_battle_drop_seed() -> u64 {
+pub(crate) fn next_battle_drop_seed() -> u64 {
     mix_build_draw_roll(
         u64::from(current_unix_millis()).rotate_left(32)
             ^ BATTLE_DRAW_SEQUENCE.fetch_add(1, Ordering::Relaxed),
     )
 }
 
-pub(super) fn draw_copy_drop_with_seed(
+pub(crate) fn draw_copy_drop_with_seed(
     catalog: &BattleCatalog,
     drop_id: i32,
     depth: u8,
@@ -177,7 +177,7 @@ pub(super) fn draw_copy_drop_with_seed(
 #[cfg(test)]
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn fleet_hero_ids(account: &Value, fleet_id: u64) -> Vec<u64> {
+pub(crate) fn fleet_hero_ids(account: &Value, fleet_id: u64) -> Vec<u64> {
     let Some(tactics) = account
         .get("fleet")
         .and_then(|fleet| fleet.get("tactics"))
@@ -206,7 +206,7 @@ pub(super) fn fleet_hero_ids(account: &Value, fleet_id: u64) -> Vec<u64> {
 #[cfg(test)]
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn settle_mop_up(
+pub(crate) fn settle_mop_up(
     account: &mut Value,
     catalog: Option<&BattleCatalog>,
     fashion_catalog: Option<&FashionList>,
@@ -228,7 +228,7 @@ pub(super) fn settle_mop_up(
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn settle_mop_up_with_config(
+pub(crate) fn settle_mop_up_with_config(
     account: &mut Value,
     catalog: Option<&BattleCatalog>,
     fashion_catalog: Option<&FashionList>,
@@ -256,7 +256,7 @@ pub(super) fn settle_mop_up_with_config(
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn settle_mop_up_with_gameplay_config(
+pub(crate) fn settle_mop_up_with_gameplay_config(
     account: &mut Value,
     catalog: Option<&BattleCatalog>,
     fashion_catalog: Option<&FashionList>,
@@ -334,7 +334,7 @@ pub(super) fn settle_mop_up_with_gameplay_config(
 
 #[cfg(test)]
 #[cfg(test)]
-pub(super) fn update_mop_up_state(account: &mut Value, method: &str, args: &[u8], now: u32) {
+pub(crate) fn update_mop_up_state(account: &mut Value, method: &str, args: &[u8], now: u32) {
     let (fleet_id, copy_id, sweep_counts) = decode_mop_up_arg(args);
     let Some(root) = account.as_object_mut() else {
         return;

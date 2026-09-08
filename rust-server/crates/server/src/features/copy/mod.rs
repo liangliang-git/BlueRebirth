@@ -4,7 +4,7 @@ use crate::common;
 use crate::*;
 use blueoath_protocol::*;
 
+#[path = "mopup_state.rs"]
+pub(crate) mod mopup_state;
 #[path = "service.rs"]
 pub(crate) mod service;
-#[allow(unused_imports)]
-pub(crate) use crate::mopup_state;

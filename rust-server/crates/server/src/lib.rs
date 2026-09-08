@@ -49,8 +49,6 @@ mod guild_state;
 #[path = "features/hero/state.rs"]
 mod hero_state;
 mod local_protocol;
-#[path = "features/copy/mopup_state.rs"]
-mod mopup_state;
 mod projection;
 #[path = "common/protocol_payload.rs"]
 mod protocol_payload;
@@ -89,6 +87,9 @@ use features::battle::state::*;
 #[cfg(test)]
 pub(crate) use features::building::service::handle_typed as handle_typed_building;
 use features::building::{buildship_state::*, construction_state::*, state::*};
+use features::copy::mopup_state::mop_up_pass_rets;
+#[cfg(test)]
+use features::copy::mopup_state::*;
 #[cfg(test)]
 use features::equip::state::*;
 use features::shop::state::*;
@@ -101,7 +102,6 @@ use game_login::process_game_login_frame_payload_with_typed_account;
 use guild_state::*;
 use hero_state::*;
 pub use local_protocol::dispatch;
-use mopup_state::*;
 use projection::*;
 use protocol_payload::*;
 #[cfg(test)]

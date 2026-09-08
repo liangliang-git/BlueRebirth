@@ -1,6 +1,7 @@
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
+use crate::features::copy::mopup_state::{draw_copy_drop_with_seed, next_battle_drop_seed};
 
 #[cfg(test)]
 pub(crate) fn handle_typed(
