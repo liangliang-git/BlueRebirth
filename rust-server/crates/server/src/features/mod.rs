@@ -14,8 +14,6 @@ pub(crate) mod activity_extra_handler;
 pub(crate) mod activity_handler;
 #[path = "activity/adventure_service.rs"]
 pub(crate) mod adventure_handler;
-#[path = "battle/service.rs"]
-pub(crate) mod battle_handler;
 #[path = "social/boss_service.rs"]
 pub(crate) mod boss_handler;
 #[path = "building/service.rs"]
