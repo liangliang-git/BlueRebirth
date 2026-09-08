@@ -1,5 +1,10 @@
 //! Task feature service and state boundary.
 
-pub(crate) use super::task_handler as service;
+use crate::common;
+use crate::*;
+use blueoath_protocol::*;
+
+#[path = "service.rs"]
+pub(crate) mod service;
 #[allow(unused_imports)]
 pub(crate) use crate::task_state as state;

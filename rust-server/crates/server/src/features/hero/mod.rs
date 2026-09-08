@@ -1,5 +1,12 @@
 //! Hero feature service, compatibility, and state boundary.
 
-pub(crate) use super::{compat_feature as compat_service, hero_handler as service};
+use crate::common;
+use crate::*;
+use blueoath_protocol::*;
+
+#[path = "compat_service.rs"]
+pub(crate) mod compat_service;
+#[path = "service.rs"]
+pub(crate) mod service;
 #[allow(unused_imports)]
 pub(crate) use crate::hero_state as state;

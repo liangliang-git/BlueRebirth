@@ -1,6 +1,8 @@
 //! Tower feature boundary.
 
-#[allow(unused_imports)]
-pub(crate) use super::tower_handler::{
-    activity_tower_payload_typed, handle_activity_typed, handle_typed, tower_info_payload_typed,
-};
+#[path = "service.rs"]
+pub(crate) mod service;
+
+#[cfg(test)]
+pub(crate) use service::{activity_tower_payload_typed, tower_info_payload_typed};
+pub(crate) use service::{handle_activity_typed, handle_typed};

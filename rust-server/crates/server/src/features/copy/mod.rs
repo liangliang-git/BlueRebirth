@@ -1,5 +1,10 @@
 //! Copy and mop-up boundaries.
 
-pub(crate) use super::daily_copy_handler as service;
+use crate::common;
+use crate::*;
+use blueoath_protocol::*;
+
+#[path = "service.rs"]
+pub(crate) mod service;
 #[allow(unused_imports)]
 pub(crate) use crate::mopup_state;

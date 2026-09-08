@@ -50,7 +50,7 @@ pub(crate) mod features;
 mod frame_service;
 mod game_login;
 #[cfg(test)]
-pub(crate) use features::equip_handler::{
+pub(crate) use features::equip::service::{
     equip_activity_payload, equip_new_test_copy_payload, equip_test_copy_payload,
     mark_equip_activity_reward, mark_new_test_reward, resolve_new_test_reward,
 };
@@ -105,7 +105,7 @@ pub use config::{
 use construction_state::*;
 use equip_state::*;
 #[cfg(test)]
-pub(crate) use features::building_handler::handle_typed as handle_typed_building;
+pub(crate) use features::building::service::handle_typed as handle_typed_building;
 pub use frame_service::process_frame;
 use frame_service::{prepare_local_request, storage_failure_response};
 #[cfg(test)]

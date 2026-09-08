@@ -1,10 +1,10 @@
-use super::super::config::{
-    SharedPush, SharedSocialState, TypedBattleRoom, TypedBattleSession, TypedCoopRoom,
-    TypedCoopUser, TypedMatchQueueEntry,
-};
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
+use crate::config::{
+    SharedPush, SharedSocialState, TypedBattleRoom, TypedBattleSession, TypedCoopRoom,
+    TypedCoopUser, TypedMatchQueueEntry,
+};
 fn battle_room_ret(room_id: u64) -> Vec<u8> {
     let mut output = Vec::new();
     append_varint_field(&mut output, 1, room_id);
