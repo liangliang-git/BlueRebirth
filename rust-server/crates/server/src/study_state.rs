@@ -156,7 +156,6 @@ pub(super) fn start_study_state(
 }
 
 #[cfg(test)]
-#[cfg(test)]
 pub(super) fn finish_study_state(
     account: &mut Value,
     hero_id: u64,
