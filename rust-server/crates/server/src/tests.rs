@@ -2437,8 +2437,8 @@ async fn battle_routes_charge_supply_and_refresh_sweep_exp_with_zero_drops() {
     assert!(responses.iter().any(|r| r.method == "bag.UpdateBagData"));
     assert!(responses.iter().any(|r| r.method == "user.UpdateUserInfo"));
     assert_eq!(account.resources.amount(CurrencyKind::Supply).get(), 20);
-    assert_eq!(account.character.exp, 60);
-    assert_eq!(account.dock.heroes[&HeroId::new(1).unwrap()].exp, 216);
+    assert_eq!(account.character.exp, 80);
+    assert_eq!(account.dock.heroes[&HeroId::new(1).unwrap()].exp, 288);
     let settled = account.clone();
     typed_battle_route_test_request(
         &mut account,

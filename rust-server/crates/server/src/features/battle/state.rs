@@ -1388,6 +1388,98 @@ pub(crate) fn battle_copy_experience(catalog: Option<&BattleCatalog>, copy_id: i
     (commander_exp, ship_exp)
 }
 
+pub(crate) fn add_commander_battle_exp_typed(
+    account: &mut blueoath_domain::AccountState,
+    gained: u64,
+    catalog: Option<&CommanderLevelCatalog>,
+) {
+    let mut remaining = gained;
+    while remaining > 0 && account.character.level < 100 {
+        let Some(need) = catalog
+            .and_then(|catalog| {
+                catalog
+                    .exp_needed
+                    .get(&i32::try_from(account.character.level).unwrap_or(i32::MAX))
+            })
+            .copied()
+            .filter(|need| *need > 0)
+            .map(|need| need as u64)
+        else {
+            account.character.exp = account.character.exp.saturating_add(remaining);
+            return;
+        };
+        let total = account.character.exp.saturating_add(remaining);
+        if total < need {
+            account.character.exp = total;
+            return;
+        }
+        remaining = total.saturating_sub(need);
+        account.character.exp = 0;
+        account.character.level = account.character.level.saturating_add(1);
+    }
+    if account.character.level >= 100 {
+        account.character.level = 100;
+        account.character.exp = 0;
+    }
+}
+
+pub(crate) fn add_ship_battle_exp_typed(
+    account: &mut blueoath_domain::AccountState,
+    hero_ids: &[blueoath_domain::HeroId],
+    gained: u64,
+    catalog: Option<&HeroLevelCatalog>,
+) -> Vec<(u64, i32)> {
+    if gained == 0 {
+        return Vec::new();
+    }
+    let mut rewards = Vec::new();
+    for hero_id in hero_ids {
+        let Some(hero) = account.dock.heroes.get_mut(hero_id) else {
+            continue;
+        };
+        let gained = scale_reward(
+            i64::try_from(gained).unwrap_or(i64::MAX),
+            if i64::from(hero.mood) >= MOOD_AFFECTION_BONUS_THRESHOLD {
+                1.2
+            } else {
+                1.0
+            },
+        )
+        .max(0) as u64;
+        rewards.push((hero_id.get(), i32::try_from(gained).unwrap_or(i32::MAX)));
+        let mut remaining = gained;
+        while remaining > 0 && hero.level < 200 {
+            let Some(need) = catalog
+                .and_then(|catalog| {
+                    catalog
+                        .exp_needed
+                        .get(&i32::try_from(hero.level).unwrap_or(i32::MAX))
+                })
+                .copied()
+                .filter(|need| *need > 0)
+                .map(|need| need as u64)
+            else {
+                hero.exp = hero.exp.saturating_add(remaining);
+                break;
+            };
+            let total = hero.exp.saturating_add(remaining);
+            if total < need {
+                hero.exp = total;
+                remaining = 0;
+            } else {
+                remaining = total.saturating_sub(need);
+                hero.exp = 0;
+                hero.level = hero.level.saturating_add(1);
+            }
+        }
+        if hero.level >= 200 {
+            hero.level = 200;
+            hero.exp = 0;
+        }
+    }
+    rewards
+}
+
 pub(crate) fn battle_evaluation_multipliers(
     catalog: Option<&BattleCatalog>,
     grade: i32,

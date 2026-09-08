@@ -19,8 +19,11 @@ pub(crate) fn handle_typed(
         TypedBattleContext {
             battle_catalog: None,
             fashion_catalog: None,
+            hero_level_catalog: None,
             drop_multiplier: 1.0,
             ship_stat_multiplier: 1.0,
+            commander_exp_multiplier: 1.0,
+            ship_exp_multiplier: 1.0,
             effects: &mut effects,
         },
     )
@@ -266,8 +269,11 @@ fn draw_typed_battle_drop_rewards(
 pub(crate) struct TypedBattleContext<'a> {
     battle_catalog: Option<&'a BattleCatalog>,
     fashion_catalog: Option<&'a FashionList>,
+    hero_level_catalog: Option<&'a HeroLevelCatalog>,
     drop_multiplier: f64,
     ship_stat_multiplier: f64,
+    commander_exp_multiplier: f64,
+    ship_exp_multiplier: f64,
     effects: &'a mut ResponseEffects,
 }
 
@@ -275,15 +281,21 @@ impl<'a> TypedBattleContext<'a> {
     pub(crate) fn new(
         battle_catalog: Option<&'a BattleCatalog>,
         fashion_catalog: Option<&'a FashionList>,
+        hero_level_catalog: Option<&'a HeroLevelCatalog>,
         drop_multiplier: f64,
         ship_stat_multiplier: f64,
+        commander_exp_multiplier: f64,
+        ship_exp_multiplier: f64,
         effects: &'a mut ResponseEffects,
     ) -> Self {
         Self {
             battle_catalog,
             fashion_catalog,
+            hero_level_catalog,
             drop_multiplier,
             ship_stat_multiplier,
+            commander_exp_multiplier,
+            ship_exp_multiplier,
             effects,
         }
     }
@@ -298,8 +310,11 @@ pub(crate) fn handle_typed_with_catalog(
     let TypedBattleContext {
         battle_catalog,
         fashion_catalog,
+        hero_level_catalog,
         drop_multiplier,
         ship_stat_multiplier,
+        commander_exp_multiplier,
+        ship_exp_multiplier,
         effects,
     } = context;
     match method {
@@ -549,6 +564,29 @@ pub(crate) fn handle_typed_with_catalog(
                         let _ =
                             grant_typed_task_reward_with_fashion(account, reward, fashion_catalog);
                     }
+                    let exp_rewards = if grade < 9 {
+                        let (commander_base, ship_base) = battle_copy_experience(
+                            battle_catalog,
+                            i32::try_from(copy_id.get()).unwrap_or_default(),
+                        );
+                        let (exp_ratio, _) = battle_evaluation_multipliers(battle_catalog, grade);
+                        let commander_exp = scale_reward(
+                            i64::from(commander_base),
+                            commander_exp_multiplier * exp_ratio,
+                        )
+                        .max(0) as u64;
+                        let ship_exp =
+                            scale_reward(i64::from(ship_base), ship_exp_multiplier * exp_ratio)
+                                .max(0) as u64;
+                        add_commander_battle_exp_typed(
+                            account,
+                            commander_exp,
+                            COMMANDER_LEVEL_CATALOG.get(),
+                        );
+                        add_ship_battle_exp_typed(account, &hero_ids, ship_exp, hero_level_catalog)
+                    } else {
+                        Vec::new()
+                    };
                     if supply_cost.is_some_and(|_| {
                         !consume_battle_supply_typed(
                             account,
@@ -567,7 +605,7 @@ pub(crate) fn handle_typed_with_catalog(
                         let star_level = account.battle.copy_stars.entry(copy_id).or_default();
                         *star_level = (*star_level).max(7);
                     }
-                    if !rewards.is_empty() {
+                    if !rewards.is_empty() || !exp_rewards.is_empty() {
                         effects.push_post(Response::raw(
                             "bag.UpdateBagData",
                             BagInfoCodec::encode(&bag_info_from_typed_account(account)),
@@ -607,12 +645,13 @@ pub(crate) fn handle_typed_with_catalog(
                     }
                     HandlerResult::Reply(Response::raw(
                         method,
-                        battle_pass_payload_with_rewards(
+                        battle_pass_payload_with_experience(
                             i32::try_from(copy_id.get()).unwrap_or_default(),
                             first_pass,
                             grade,
                             result.battle_time,
                             &rewards,
+                            &exp_rewards,
                         ),
                     ))
                 }
@@ -1387,7 +1426,16 @@ mod tests {
                 &mut account,
                 "copy.StartBase",
                 &start,
-                TypedBattleContext::new(Some(&catalog), None, 1.0, 1.0, &mut effects,),
+                TypedBattleContext::new(
+                    Some(&catalog),
+                    None,
+                    None,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    &mut effects,
+                ),
             ),
             HandlerResult::Reply(_)
         ));
@@ -1403,7 +1451,16 @@ mod tests {
                 &mut account,
                 "copy.PassBase",
                 &[],
-                TypedBattleContext::new(Some(&catalog), None, 1.0, 1.0, &mut effects,),
+                TypedBattleContext::new(
+                    Some(&catalog),
+                    None,
+                    None,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    &mut effects,
+                ),
             ),
             HandlerResult::Reply(_)
         ));
@@ -1418,6 +1475,77 @@ mod tests {
         assert!(!posts
             .iter()
             .any(|response| response.method == "copy.GetCopy"));
+    }
+
+    #[test]
+    fn typed_battle_settlement_applies_configured_experience() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("battle-experience").unwrap(), "Battle");
+        let fleet_id = FleetId::new(1).unwrap();
+        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
+        account.fleet.fleets.insert(
+            fleet_id,
+            blueoath_domain::FleetRecord {
+                members: vec![hero_id],
+                ..blueoath_domain::FleetRecord::default()
+            },
+        );
+        let mut catalog = BattleCatalog::default();
+        catalog.copies.insert(
+            9,
+            BattleCopy {
+                config_id: 9,
+                copy_type: 2,
+                fleet_ids: vec![7],
+            },
+        );
+        catalog.fleet_rewards.insert(
+            7,
+            BattleFleetReward {
+                commander_exp: 10,
+                ship_exp: 20,
+            },
+        );
+        catalog.supply_cost_by_copy.insert(9, (0, 0));
+        let commander_before = account.character.exp;
+        let hero_before = account.dock.heroes[&hero_id].exp;
+        let mut start = Vec::new();
+        append_varint_field(&mut start, 2, 9);
+        let mut effects = ResponseEffects::default();
+        assert!(matches!(
+            handle_typed_with_catalog(
+                &mut account,
+                "copy.StartBase",
+                &start,
+                TypedBattleContext::new(
+                    Some(&catalog),
+                    None,
+                    None,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    &mut effects,
+                ),
+            ),
+            HandlerResult::Reply(_)
+        ));
+
+        let HandlerResult::Reply(response) = handle_typed_with_catalog(
+            &mut account,
+            "copy.PassBase",
+            &[],
+            TypedBattleContext::new(Some(&catalog), None, None, 1.0, 1.0, 1.0, 1.0, &mut effects),
+        ) else {
+            panic!("battle settlement must succeed");
+        };
+        let payload = response.payload.into_bytes();
+        assert_eq!(account.character.exp, commander_before + 10);
+        assert_eq!(account.dock.heroes[&hero_id].exp, hero_before + 24);
+        assert!(
+            payload.contains(&0x5a),
+            "ship experience field 11 is missing"
+        );
     }
 
     #[test]
@@ -1660,7 +1788,16 @@ mod tests {
                 &mut account,
                 "dailycopy.CopyEnter",
                 &request,
-                TypedBattleContext::new(Some(&catalog), None, 1.0, 1.0, &mut effects,),
+                TypedBattleContext::new(
+                    Some(&catalog),
+                    None,
+                    None,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    &mut effects,
+                ),
             ),
             HandlerResult::Reply(_)
         ));
@@ -1676,7 +1813,16 @@ mod tests {
                 &mut account,
                 "copy.PassBase",
                 &[],
-                TypedBattleContext::new(Some(&catalog), None, 1.0, 1.0, &mut effects,),
+                TypedBattleContext::new(
+                    Some(&catalog),
+                    None,
+                    None,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    &mut effects,
+                ),
             ),
             HandlerResult::Reply(_)
         ));

@@ -714,6 +714,7 @@ where
                     state,
                     typed,
                     chapter_catalog,
+                    battle_catalog,
                 );
                 apply_response_effects(
                     login_effects,
@@ -1667,8 +1668,11 @@ where
                     battle_handler::TypedBattleContext::new(
                         battle_catalog,
                         fashion_catalog,
+                        hero_level_catalog,
                         state.drop_multiplier,
                         state.ship_stat_multiplier,
+                        state.commander_exp_multiplier,
+                        state.ship_exp_multiplier,
                         &mut battle_effects,
                     ),
                 );
@@ -2208,6 +2212,7 @@ fn append_typed_user_login_bootstrap(
     state: &ServerState,
     account: &AccountState,
     chapter_catalog: Option<&ChapterCatalog>,
+    battle_catalog: Option<&BattleCatalog>,
 ) {
     let fallback_catalog;
     let catalog = match chapter_catalog {
@@ -2243,43 +2248,80 @@ fn append_typed_user_login_bootstrap(
         "guide.GuideInfo",
         GuideInfoCodec::encode_initial_progress_completed(),
     ));
-    effects.push_pre(super::common::response::Response::raw(
-        "copy.GetCopy",
-        CopyInfoCodec::encode_with_progress_and_stars(
+    let last_copy_id = account
+        .battle
+        .active
+        .as_ref()
+        .map(|active| active.copy_id.get())
+        .or_else(|| {
+            account
+                .battle
+                .records
+                .last()
+                .map(|record| record.copy_id.get())
+        })
+        .and_then(|copy_id| i32::try_from(copy_id).ok());
+    let preferred_type = last_copy_id
+        .and_then(|copy_id| {
+            battle_catalog
+                .and_then(|battle| battle.copies.get(&copy_id).map(|copy| copy.copy_type))
+                .or_else(|| catalog.plot.contains(&copy_id).then_some(1))
+                .or_else(|| catalog.sea.contains(&copy_id).then_some(2))
+                .or_else(|| catalog.mubar.contains(&copy_id).then_some(33))
+                .or_else(|| catalog.daily.contains(&copy_id).then_some(9))
+        })
+        .map(|copy_type| match copy_type {
+            2 | 32 | 69 | 71 => 2,
+            9 | 33 => copy_type,
+            _ => 1,
+        })
+        .unwrap_or(1);
+    let mut copy_pushes = vec![
+        (
             1,
-            &catalog.plot,
-            copy_progress_max_or_first(&catalog.plot, &passed),
-            &passed,
-            &copy_star_levels,
+            CopyInfoCodec::encode_with_progress_and_stars(
+                1,
+                &catalog.plot,
+                copy_progress_max_or_first(&catalog.plot, &passed),
+                &passed,
+                &copy_star_levels,
+            ),
         ),
-    ));
-    effects.push_pre(super::common::response::Response::raw(
-        "copy.GetCopy",
-        CopyInfoCodec::encode_with_progress_and_difficulty_and_counts_and_stars(
-            &catalog.sea,
-            copy_progress_max_or_initial(&catalog.sea, &passed, catalog.sea_initial),
-            &passed,
-            &[],
-            &copy_star_levels,
-            1,
+        (
+            2,
+            CopyInfoCodec::encode_with_progress_and_difficulty_and_counts_and_stars(
+                &catalog.sea,
+                copy_progress_max_or_initial(&catalog.sea, &passed, catalog.sea_initial),
+                &passed,
+                &[],
+                &copy_star_levels,
+                account.sea.difficulty.max(1) as i32,
+            ),
         ),
-    ));
-    effects.push_pre(super::common::response::Response::raw(
-        "copy.GetCopy",
-        CopyInfoCodec::encode(
+        (
             33,
-            &catalog.mubar,
-            catalog.mubar.iter().copied().max().unwrap_or_default(),
+            CopyInfoCodec::encode(
+                33,
+                &catalog.mubar,
+                catalog.mubar.iter().copied().max().unwrap_or_default(),
+            ),
         ),
-    ));
-    effects.push_pre(super::common::response::Response::raw(
-        "copy.GetCopy",
-        CopyInfoCodec::encode(
+        (
             9,
-            &catalog.daily,
-            catalog.daily.iter().copied().max().unwrap_or_default(),
+            CopyInfoCodec::encode(
+                9,
+                &catalog.daily,
+                catalog.daily.iter().copied().max().unwrap_or_default(),
+            ),
         ),
-    ));
+    ];
+    copy_pushes.sort_by_key(|(copy_type, _)| *copy_type != preferred_type);
+    for (_, payload) in copy_pushes {
+        effects.push_pre(super::common::response::Response::raw(
+            "copy.GetCopy",
+            payload,
+        ));
+    }
     effects.push_pre(super::common::response::Response::raw(
         "dailycopy.UpdateDailyCopyData",
         daily_copy_snapshot_payload_from_typed_account(account, chapter_catalog, now),
@@ -2363,7 +2405,8 @@ fn legacy_only_method(method: &str) -> bool {
 
 #[cfg(test)]
 mod route_guard_tests {
-    use super::legacy_only_method;
+    use super::*;
+    use blueoath_domain::{CopyId, CopyRecordState, NewAccountFactory, ProfileId};
 
     #[test]
     fn typed_runtime_rejects_unknown_and_legacy_exact_routes() {
@@ -2376,5 +2419,44 @@ mod route_guard_tests {
         assert!(!legacy_only_method("room.StartMatch"));
         assert!(!legacy_only_method("copy.DotBase"));
         assert!(!legacy_only_method("copyinfo.DotBase"));
+    }
+
+    #[test]
+    fn login_bootstrap_prioritizes_last_battle_copy_type() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("last-sortie").unwrap(), "Captain");
+        account.battle.records.push(CopyRecordState {
+            copy_id: CopyId::new(1_600_400).unwrap(),
+            hero_ids: Vec::new(),
+            pass_time: 60,
+            secret_id: 0,
+            strategy_id: 0,
+            power: 0,
+            record_time: 1,
+            ex_buffs: Vec::new(),
+        });
+        let catalog = ChapterCatalog {
+            plot: vec![1],
+            sea: vec![1_600_400],
+            ..ChapterCatalog::default()
+        };
+        let mut effects = ResponseEffects::default();
+
+        append_typed_user_login_bootstrap(
+            &mut effects,
+            &ServerState::new("last-sortie", "Captain", "test"),
+            &account,
+            Some(&catalog),
+            None,
+        );
+
+        let (pre, _, _) = effects.into_parts();
+        let first_copy = pre
+            .into_iter()
+            .find(|response| response.method == "copy.GetCopy")
+            .expect("copy bootstrap response");
+        let fields =
+            blueoath_protocol::decode_varint_fields(&first_copy.payload.into_bytes()).unwrap();
+        assert_eq!(fields.get(&3), Some(&vec![2]));
     }
 }
