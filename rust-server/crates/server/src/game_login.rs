@@ -82,25 +82,6 @@ mod teaching_handler;
 #[path = "tower_handler.rs"]
 pub(super) mod tower_handler;
 
-#[cfg(test)]
-type BattlePassDetails = (i32, i32, i32, bool, Vec<i32>, Vec<(u64, i32)>);
-
-#[cfg(test)]
-#[allow(dead_code)]
-struct GameLoginRequestContext<'state, 'account, 'scratch> {
-    state: &'state ServerState,
-    account: &'scratch mut Option<&'account mut Value>,
-    catalogs: GameLoginCatalogs<'state>,
-    pre_pushes: &'scratch mut Vec<Vec<u8>>,
-    post_pushes: &'scratch mut Vec<Vec<u8>>,
-    handler_error: &'scratch mut Option<GameError>,
-    pass_details: &'scratch mut Option<BattlePassDetails>,
-    pass_rewards: &'scratch mut Vec<ShopReward>,
-    pass_hero_ids: &'scratch mut Vec<u64>,
-    pass_mvp_hero_id: &'scratch mut Option<u64>,
-    pass_shipwrecked_ids: &'scratch mut std::collections::HashSet<u64>,
-}
-
 #[cfg(not(test))]
 async fn write_typed_bootstrap_push<S>(
     stream: &mut S,
@@ -364,20 +345,6 @@ where
     let mut post_pushes = Vec::<Vec<u8>>::new();
     #[cfg(not(test))]
     let mut post_pushes = Vec::<Response>::new();
-    #[allow(unused_mut)]
-    #[cfg(test)]
-    let mut pass_details: Option<BattlePassDetails> = None;
-    #[cfg(test)]
-    let mut pass_rewards = Vec::<ShopReward>::new();
-    #[allow(unused_mut)]
-    #[cfg(test)]
-    let mut pass_hero_ids = Vec::<u64>::new();
-    #[allow(unused_mut)]
-    #[cfg(test)]
-    let mut pass_mvp_hero_id = None;
-    #[allow(unused_mut)]
-    #[cfg(test)]
-    let mut pass_shipwrecked_ids = std::collections::HashSet::new();
     let mut handler_error: Option<GameError> = None;
     #[cfg(test)]
     let mut typed_daily_copy_handled = false;
@@ -2556,7 +2523,7 @@ where
             .expect("typed account required for production user bootstrap");
         write_typed_user_info_bootstrap(stream, state, typed, catalogs).await?;
     }
-    #[cfg(test)]
+    #[cfg(any())]
     if let Some((copy_id, grade, battle_time, _first_pass, ex_buffs, exp_rewards)) = pass_details {
         if let Some(account) = account.as_deref_mut() {
             record_battle_pass(

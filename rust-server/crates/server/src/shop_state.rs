@@ -141,49 +141,6 @@ pub(super) fn append_method_push<P: ResponsePushBuffer>(
     pushes.push_response(Response::raw(method, ret));
 }
 
-#[cfg(test)]
-pub(super) fn append_shop_update_pushes(
-    pushes: &mut Vec<Vec<u8>>,
-    state: &ServerState,
-    account: &Value,
-    reward: ShopReward,
-    fashion_catalog: Option<&FashionList>,
-    equip_catalog: Option<&EquipCatalog>,
-) {
-    append_method_push(
-        pushes,
-        "user.UpdateUserInfo",
-        UserInfoCodec::encode(&user_info_from_account(state, Some(account))),
-    );
-    append_method_push(
-        pushes,
-        "hero.UpdateHeroBagData",
-        HeroBagCodec::encode(&hero_bag_from_account(account)),
-    );
-    if reward.goods_type == 3 {
-        append_method_push(
-            pushes,
-            "illustrate.IllustrateInfo",
-            illustrate_info_payload(account, None, None),
-        );
-    }
-    append_method_push(
-        pushes,
-        "bag.UpdateBagData",
-        BagInfoCodec::encode(&bag_info_from_account(account)),
-    );
-    append_method_push(
-        pushes,
-        "fashion.updateData",
-        FashionListCodec::encode(&fashion_list_from_account(account, fashion_catalog)),
-    );
-    append_method_push(
-        pushes,
-        "equip.UpdateEquipBagData",
-        EquipListCodec::encode(&equip_list_from_account(account, equip_catalog)),
-    );
-}
-
 #[allow(dead_code)]
 #[cfg(test)]
 pub(super) fn apply_shop_good(
