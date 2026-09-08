@@ -554,16 +554,7 @@ pub(crate) fn handle_typed(
             .and_then(|catalog| catalog.by_template.get(&template_id))
             .map(|stats| stats.fixed_money.max(0) as u64)
             .unwrap_or_default();
-        let missing = (HP_COEFFICIENT as u64).saturating_sub(hero.hp);
-        let cost = fixed_money
-            .checked_mul(missing)
-            .and_then(|value| value.checked_add(HP_COEFFICIENT as u64 - 1))
-            .map(|value| value / HP_COEFFICIENT as u64)
-            .ok_or(GameError::InvalidState("repair cost overflow"));
-        let Ok(cost) = cost else {
-            return HandlerResult::Error(GameError::InvalidState("repair cost overflow"));
-        };
-        total_cost = total_cost.saturating_add(cost);
+        total_cost = total_cost.saturating_add(fixed_money);
     }
     if account
         .resources

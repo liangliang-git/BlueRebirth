@@ -4156,12 +4156,30 @@ async fn hero_marry_route_consumes_oath_ring_and_updates_hero() {
 #[tokio::test]
 async fn repair_route_restores_damaged_heroes() {
     let mut account = NewAccountFactory::create(ProfileId::new("repair-route").unwrap(), "Captain");
+    let hero_template_id = account.dock.heroes[&HeroId::new(1).unwrap()]
+        .template_id
+        .get() as i32;
+    let _ = super::SHIP_STAT_CATALOG.get_or_init(|| {
+        let mut catalog = ShipStatCatalog::default();
+        catalog.by_template.insert(
+            hero_template_id,
+            ShipStat {
+                fixed_money: 100,
+                ..ShipStat::default()
+            },
+        );
+        catalog
+    });
     account
         .dock
         .heroes
         .get_mut(&HeroId::new(1).unwrap())
         .unwrap()
-        .hp = 1;
+        .hp = 9_999_999_999;
+    let gold_before = account
+        .resources
+        .amount(blueoath_domain::CurrencyKind::Gold)
+        .get();
     let mut args = Vec::new();
     append_varint_field(&mut args, 1, 1);
     let state = ServerState::new("repair-route", "Captain", "1.4.0");
@@ -4170,6 +4188,13 @@ async fn repair_route_restores_damaged_heroes() {
     assert_eq!(
         account.dock.heroes[&HeroId::new(1).unwrap()].hp,
         10_000_000_000
+    );
+    assert_eq!(
+        account
+            .resources
+            .amount(blueoath_domain::CurrencyKind::Gold)
+            .get(),
+        gold_before - 100
     );
 }
 

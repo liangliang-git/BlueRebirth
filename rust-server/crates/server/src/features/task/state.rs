@@ -158,7 +158,7 @@ pub(crate) fn grant_typed_task_reward_with_fashion(
                     change_name_time: 0,
                     level: 1,
                     exp: 0,
-                    mood: 100,
+                    mood: blueoath_domain::HERO_MOOD_INITIAL,
                     affection: 500_000,
                     hp: 10_000_000_000,
                     locked: false,
@@ -1011,4 +1011,32 @@ pub(crate) struct ShopReward {
     pub(crate) item_id: i32,
     pub(crate) num: i32,
     pub(crate) instance_id: i32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_ship_reward_starts_with_full_mood() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("ship-reward-mood").unwrap(),
+            "Captain",
+        );
+        let mut reward = ShopReward {
+            goods_type: 3,
+            item_id: 30_610_211,
+            num: 1,
+            instance_id: 0,
+        };
+
+        assert!(grant_typed_task_reward(&mut account, &mut reward));
+        let hero = account
+            .dock
+            .heroes
+            .values()
+            .find(|hero| hero.template_id.get() == 30_610_211)
+            .unwrap();
+        assert_eq!(hero.mood, blueoath_domain::HERO_MOOD_INITIAL);
+    }
 }

@@ -1146,7 +1146,13 @@ pub(crate) fn handle_typed_mop_up(
                     "insufficient supply or missing supply configuration",
                 ));
             }
-            let rewards = typed_sweep_rewards(account, catalog, copy_id as i32, sweep_count);
+            let rewards = typed_sweep_rewards(
+                account,
+                catalog,
+                copy_id as i32,
+                sweep_count,
+                state.drop_multiplier,
+            );
             if !rewards.is_empty() && !can_grant_typed_task_rewards(account, &rewards) {
                 return HandlerResult::Error(GameError::InvalidState(
                     "sweep reward is unsupported",
@@ -1216,6 +1222,7 @@ fn typed_sweep_rewards(
     catalog: &BattleCatalog,
     copy_id: i32,
     sweep_count: u64,
+    drop_multiplier: f64,
 ) -> Vec<ShopReward> {
     let mut rewards = Vec::new();
     if !account
@@ -1233,36 +1240,13 @@ fn typed_sweep_rewards(
             }));
         }
     }
-    let drop_ids = catalog
-        .copy_drop_ids
-        .get(&copy_id)
-        .cloned()
-        .unwrap_or_default();
-    for draw in 0..sweep_count {
-        for drop_id in &drop_ids {
-            if let Some(reward) = draw_copy_drop_with_seed(
-                catalog,
-                *drop_id,
-                0,
-                next_battle_drop_seed().wrapping_add(draw),
-            ) {
-                rewards.push(reward);
-            }
-        }
-    }
-    if let Some((count, guaranteed)) = catalog.copy_must_drop_rewards.get(&copy_id) {
-        for _ in 0..*count {
-            rewards.extend(
-                guaranteed
-                    .iter()
-                    .map(|(goods_type, item_id, num)| ShopReward {
-                        goods_type: *goods_type,
-                        item_id: *item_id,
-                        num: *num,
-                        instance_id: 0,
-                    }),
-            );
-        }
+    for _ in 0..sweep_count {
+        rewards.extend(draw_typed_battle_drop_rewards(
+            catalog,
+            copy_id,
+            drop_multiplier,
+            3,
+        ));
     }
     rewards
 }
@@ -2145,5 +2129,37 @@ mod tests {
                 .get(),
             before
         );
+    }
+
+    #[test]
+    fn typed_sweep_repeats_normal_drop_pipeline_for_each_run() {
+        let account = NewAccountFactory::create(ProfileId::new("sweep-drops").unwrap(), "Battle");
+        let mut catalog = BattleCatalog::default();
+        catalog.copies.insert(
+            9,
+            BattleCopy {
+                config_id: 9,
+                copy_type: 2,
+                fleet_ids: vec![7],
+            },
+        );
+        catalog.fleet_drop_ids.insert(7, vec![77]);
+        catalog.drop_pools.insert(77, vec![(1, 9_001, 2, 2, 1)]);
+        catalog
+            .copy_must_drop_rewards
+            .insert(9, (1, vec![(1, 9_002, 3)]));
+
+        let rewards = typed_sweep_rewards(&account, &catalog, 9, 2, 1.0);
+        let fleet_drops = rewards
+            .iter()
+            .filter(|reward| reward.item_id == 9_001 && reward.num == 2)
+            .count();
+        let guaranteed_drops = rewards
+            .iter()
+            .filter(|reward| reward.item_id == 9_002 && reward.num == 3)
+            .count();
+
+        assert_eq!(fleet_drops, 2);
+        assert_eq!(guaranteed_drops, 2);
     }
 }
