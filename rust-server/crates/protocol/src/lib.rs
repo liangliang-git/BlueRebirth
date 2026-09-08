@@ -4034,8 +4034,9 @@ impl CopyInfoCodec {
             for index in &chapter.claimed_reward_indexes {
                 let mut reward = Vec::new();
                 write_varint_field(&mut reward, 1, (*index).max(0) as u64);
-                write_varint_field(&mut reward, 2, 0);
+                write_varint_field(&mut reward, 2, 1);
                 write_bytes(&mut info, 3, &reward);
+                write_bytes(&mut info, 6, &reward);
             }
             write_varint_field(&mut info, 4, chapter.pass_num.max(0) as u64);
             write_bytes(&mut output, 4, &info);

@@ -1939,7 +1939,7 @@ async fn typed_star_reward_route_test_request(
 ) -> Vec<blueoath_protocol::TResponse> {
     let (mut client, mut server) = duplex(16_384);
     let request = TMessageCodec::encode_request(&TRequest {
-        method: "copy.StarReward".to_owned(),
+        method: "copy.FetchRewardBox".to_owned(),
         args: Some(args),
         callback_handler: 75,
         ..TRequest::default()
@@ -5469,17 +5469,26 @@ async fn copy_star_reward_claims_configured_reward_once() {
         args.clone(),
     )
     .await;
-    assert_eq!(responses.len(), 2);
+    assert_eq!(responses.len(), 3);
     assert_eq!(responses[0].method, "bag.UpdateBagData");
-    assert_eq!(responses[1].method, "copy.StarReward");
-    assert_eq!(responses[1].err, 0);
-    assert_eq!(responses[1].callback_handler, 75);
+    assert_eq!(responses[1].method, "copy.GetCopy");
+    let chapter = decode_repeated_message_field(responses[1].ret.as_deref().unwrap(), 4)
+        .into_iter()
+        .find(|chapter| decode_varint_field(chapter, 1) == 18001)
+        .expect("claimed chapter refresh");
+    let claimed_boxes = decode_repeated_message_field(&chapter, 6);
+    assert_eq!(claimed_boxes.len(), 1);
+    assert_eq!(decode_varint_field(&claimed_boxes[0], 1), 1);
+    assert_eq!(decode_varint_field(&claimed_boxes[0], 2), 1);
+    assert_eq!(responses[2].method, "copy.FetchRewardBox");
+    assert_eq!(responses[2].err, 0);
+    assert_eq!(responses[2].callback_handler, 75);
     assert_eq!(
         account.inventory.items.get(&TemplateId::new(9002).unwrap()),
         Some(&2)
     );
     assert!(account.battle.claimed_star_rewards.contains(&(18001, 1)));
-    let reward = decode_repeated_message_field(responses[1].ret.as_deref().unwrap(), 1)
+    let reward = decode_repeated_message_field(responses[2].ret.as_deref().unwrap(), 1)
         .into_iter()
         .next()
         .unwrap();
@@ -5498,7 +5507,7 @@ async fn copy_star_reward_claims_configured_reward_once() {
     .into_iter()
     .last()
     .unwrap();
-    assert_eq!(duplicate.method, "copy.StarReward");
+    assert_eq!(duplicate.method, "copy.FetchRewardBox");
     assert_eq!(duplicate.err, 1);
     assert_eq!(
         account.inventory.items.get(&TemplateId::new(9002).unwrap()),

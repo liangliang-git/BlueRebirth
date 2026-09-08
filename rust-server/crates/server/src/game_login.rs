@@ -394,6 +394,29 @@ fn copy_chapter_star_infos(
         .collect()
 }
 
+fn copy_type_for_chapter(catalog: &ChapterCatalog, chapter_id: i32) -> i32 {
+    let Some(chapter) = catalog.star_rewards_by_chapter.get(&chapter_id) else {
+        return 1;
+    };
+    [
+        (2, &catalog.sea),
+        (33, &catalog.mubar),
+        (10, &catalog.goods_copy),
+        (24, &catalog.tower),
+        (34, &catalog.equip_new_test),
+        (9, &catalog.daily),
+    ]
+    .into_iter()
+    .find_map(|(copy_type, copy_ids)| {
+        chapter
+            .level_ids
+            .iter()
+            .any(|copy_id| copy_ids.contains(copy_id))
+            .then_some(copy_type)
+    })
+    .unwrap_or(1)
+}
+
 fn handler_payload(result: HandlerResult, method: &str) -> Option<Response> {
     result.into_response(method)
 }
@@ -461,8 +484,9 @@ where
             ) =>
         {
             let mut copy_star_effects = ResponseEffects::default();
+            let account = typed_account.as_deref_mut().expect("typed copy account");
             let result = battle_handler::handle_typed_copy_star_reward(
-                typed_account.as_mut().expect("typed copy account"),
+                account,
                 request.method.as_str(),
                 request_args,
                 chapter_catalog,
@@ -477,6 +501,20 @@ where
             );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
+            }
+            if matches!(&result, HandlerResult::Reply(_)) {
+                if let (Some(catalog), Ok(reward_request)) =
+                    (chapter_catalog, CopyStarRewardRequest::decode(request_args))
+                {
+                    let copy_type = copy_type_for_chapter(catalog, reward_request.chapter_id);
+                    append_method_push(
+                        &mut pre_pushes,
+                        "copy.GetCopy",
+                        CopyInfoCodec::encode_payload(&copy_info_payload(
+                            catalog, copy_type, account,
+                        )),
+                    );
+                }
             }
             handler_payload(result, request.method.as_str())
         }
@@ -2542,5 +2580,10 @@ mod route_guard_tests {
         let claimed = decode_repeated_message_field(&chapter, 3);
         assert_eq!(claimed.len(), 1);
         assert_eq!(decode_varint_field(&claimed[0], 1), 1);
+        assert_eq!(decode_varint_field(&claimed[0], 2), 1);
+        let claimed_boxes = decode_repeated_message_field(&chapter, 6);
+        assert_eq!(claimed_boxes.len(), 1);
+        assert_eq!(decode_varint_field(&claimed_boxes[0], 1), 1);
+        assert_eq!(decode_varint_field(&claimed_boxes[0], 2), 1);
     }
 }
