@@ -5,7 +5,7 @@ use super::error::GameError;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response {
     pub method: String,
-    pub payload: Vec<u8>,
+    pub payload: ResponsePayload,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,13 +21,47 @@ impl ResponsePayload {
             Self::User(payload) | Self::Battle(payload) | Self::Raw(payload) => payload,
         }
     }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::User(payload) | Self::Battle(payload) | Self::Raw(payload) => payload,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.as_bytes().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.as_bytes().is_empty()
+    }
+}
+
+impl AsRef<[u8]> for ResponsePayload {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+impl std::ops::Deref for ResponsePayload {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_bytes()
+    }
+}
+
+impl PartialEq<Vec<u8>> for ResponsePayload {
+    fn eq(&self, other: &Vec<u8>) -> bool {
+        self.as_bytes() == other.as_slice()
+    }
 }
 
 impl Response {
     pub fn new(method: impl Into<String>, payload: Vec<u8>) -> Self {
         Self {
             method: method.into(),
-            payload,
+            payload: ResponsePayload::Raw(payload),
         }
     }
 
@@ -47,7 +81,7 @@ impl Response {
             err: error_code,
             err_msg: error_message,
             method: self.method,
-            ret: Some(self.payload),
+            ret: Some(self.payload.into_bytes()),
             callback_handler,
             token,
             time,
@@ -59,7 +93,7 @@ impl Response {
     pub fn encode_push(self, time: u32) -> Vec<u8> {
         TMessageCodec::encode_response(&TResponse {
             method: self.method,
-            ret: Some(self.payload),
+            ret: Some(self.payload.into_bytes()),
             time,
             ..TResponse::default()
         })
@@ -70,7 +104,18 @@ impl Response {
     }
 
     pub fn from_payload(method: impl Into<String>, payload: ResponsePayload) -> Self {
-        Self::new(method, payload.into_bytes())
+        Self {
+            method: method.into(),
+            payload,
+        }
+    }
+
+    pub fn user(method: impl Into<String>, payload: Vec<u8>) -> Self {
+        Self::from_payload(method, ResponsePayload::User(payload))
+    }
+
+    pub fn battle(method: impl Into<String>, payload: Vec<u8>) -> Self {
+        Self::from_payload(method, ResponsePayload::Battle(payload))
     }
 }
 
@@ -171,7 +216,7 @@ mod tests {
         assert_eq!(
             HandlerResult::Error(super::GameError::AccountUnavailable)
                 .into_response("user.GetUserInfo")
-                .map(|response| response.payload),
+                .map(|response| response.payload.into_bytes()),
             Some(Vec::new())
         );
     }

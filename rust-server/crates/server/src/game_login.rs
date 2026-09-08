@@ -402,14 +402,14 @@ where
             ));
             response_payload(request.method.as_str(), Vec::new())
         }
-        _ if known_method == Some(KnownMethod::PlayerLogin) => response_payload(
+        _ if known_method == Some(KnownMethod::PlayerLogin) => Some(Response::user(
             request.method.as_str(),
             GameLoginCodec::encode_response(&TRetLogin {
                 ret: "ok".to_owned(),
                 feign_role_id: state.profile_id.clone(),
                 err_code: 0,
             }),
-        ),
+        )),
         _ if known_method == Some(KnownMethod::PlayerGetUserList) => {
             let user = match typed_account.as_deref() {
                 Some(account) => user_info_from_typed_account(state, account),
@@ -418,7 +418,10 @@ where
                     UserInfo::default()
                 }
             };
-            response_payload(request.method.as_str(), UserListCodec::encode(&[user]))
+            Some(Response::user(
+                request.method.as_str(),
+                UserListCodec::encode(&[user]),
+            ))
         }
         _ if known_method == Some(KnownMethod::PlayerCreateUser) => {
             let user = match typed_account.as_deref() {
@@ -428,7 +431,10 @@ where
                     UserInfo::default()
                 }
             };
-            response_payload(request.method.as_str(), PlayerUserCodec::encode(&user))
+            Some(Response::user(
+                request.method.as_str(),
+                PlayerUserCodec::encode(&user),
+            ))
         }
         _ if known_method == Some(KnownMethod::CacheData)
             || known_method == Some(KnownMethod::RepairHero)
@@ -600,7 +606,10 @@ where
                     UserInfo::default()
                 }
             };
-            response_payload(request.method.as_str(), UserInfoCodec::encode(&user))
+            Some(Response::user(
+                request.method.as_str(),
+                UserInfoCodec::encode(&user),
+            ))
         }
         _ if known_method == Some(KnownMethod::UserLogin) => {
             if let Some(typed) = typed_account.as_deref_mut() {
@@ -622,10 +631,10 @@ where
                     &mut handler_error,
                 );
             }
-            response_payload(
+            Some(Response::user(
                 request.method.as_str(),
                 UserLoginCodec::encode_response("ok", "", 0),
-            )
+            ))
         }
         "user.SetUserSecretary" => {
             match SetSecretaryRequest::decode(request_args) {
@@ -1558,7 +1567,7 @@ where
             handler_payload(result, request.method.as_str())
         }
         "dailycopy.UpdateDailyCopyData" => typed_account.as_ref().map(|typed| {
-            Response::raw(
+            Response::battle(
                 request.method.as_str(),
                 daily_copy_snapshot_payload_from_typed_account(
                     typed,
@@ -1796,7 +1805,7 @@ where
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            response_payload(
+            Some(Response::battle(
                 request.method.as_str(),
                 match copy_type {
                     2 => {
@@ -1850,7 +1859,7 @@ where
                         &passed,
                     ),
                 },
-            )
+            ))
         }
         "copy.UnLockCopy" => {
             let fallback_catalog;
@@ -1872,7 +1881,7 @@ where
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            response_payload(
+            Some(Response::battle(
                 request.method.as_str(),
                 CopyInfoCodec::encode_with_progress(
                     1,
@@ -1880,7 +1889,7 @@ where
                     copy_progress_max_or_first(&catalog.plot, &passed),
                     &passed,
                 ),
-            )
+            ))
         }
         _ => None,
     };
