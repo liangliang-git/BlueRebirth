@@ -104,6 +104,37 @@ pub enum KnownMethod {
     RepairHero,
 }
 
+const KNOWN_METHODS: &[(&str, KnownMethod)] = &[
+    ("GetSvrTime", KnownMethod::GetServerTime),
+    ("player.Login", KnownMethod::PlayerLogin),
+    ("player.GetUserInfo", KnownMethod::PlayerGetUserInfo),
+    ("player.GetUserList", KnownMethod::PlayerGetUserList),
+    ("player.CreateUser", KnownMethod::PlayerCreateUser),
+    ("user.GetUserInfo", KnownMethod::UserGetUserInfo),
+    ("user.UserLogin", KnownMethod::UserLogin),
+    ("tactic.GetHerosTactic", KnownMethod::TacticGetHeros),
+    ("tactic.SetHerosTactic", KnownMethod::TacticSetHeros),
+    ("bag.GetBagInfo", KnownMethod::BagGetInfo),
+    ("presetfleet.PresetFleetsInfo", KnownMethod::PresetFleetInfo),
+    ("presetfleet.SetPresetFleets", KnownMethod::PresetFleetSet),
+    ("cachedata.CacheData", KnownMethod::CacheData),
+    ("archiveCopy.IsLoad", KnownMethod::ArchiveCopyIsLoad),
+    (
+        "copyextra.AddCopyRewardCount",
+        KnownMethod::CopyExtraAddCopyRewardCount,
+    ),
+    (
+        "copyextra.UpdateCopyExtraInfo",
+        KnownMethod::CopyExtraUpdateCopyExtraInfo,
+    ),
+    ("prefs.SavePrefs", KnownMethod::SavePrefs),
+    ("statcount.GetStatCount", KnownMethod::GetStatCount),
+    ("sign.Sign", KnownMethod::Sign),
+    ("miniGame.StartMiniGame", KnownMethod::StartMiniGame),
+    ("alchemy.StartAlchemy", KnownMethod::StartAlchemy),
+    ("repair.RepairHero", KnownMethod::RepairHero),
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GameMethod<'a> {
     name: &'a str,
@@ -139,31 +170,9 @@ impl<'a> GameMethod<'a> {
     }
 
     pub fn known(self) -> Option<KnownMethod> {
-        Some(match self.name {
-            "GetSvrTime" => KnownMethod::GetServerTime,
-            "player.Login" => KnownMethod::PlayerLogin,
-            "player.GetUserInfo" => KnownMethod::PlayerGetUserInfo,
-            "player.GetUserList" => KnownMethod::PlayerGetUserList,
-            "player.CreateUser" => KnownMethod::PlayerCreateUser,
-            "user.GetUserInfo" => KnownMethod::UserGetUserInfo,
-            "user.UserLogin" => KnownMethod::UserLogin,
-            "tactic.GetHerosTactic" => KnownMethod::TacticGetHeros,
-            "tactic.SetHerosTactic" => KnownMethod::TacticSetHeros,
-            "bag.GetBagInfo" => KnownMethod::BagGetInfo,
-            "presetfleet.PresetFleetsInfo" => KnownMethod::PresetFleetInfo,
-            "presetfleet.SetPresetFleets" => KnownMethod::PresetFleetSet,
-            "cachedata.CacheData" => KnownMethod::CacheData,
-            "archiveCopy.IsLoad" => KnownMethod::ArchiveCopyIsLoad,
-            "copyextra.AddCopyRewardCount" => KnownMethod::CopyExtraAddCopyRewardCount,
-            "copyextra.UpdateCopyExtraInfo" => KnownMethod::CopyExtraUpdateCopyExtraInfo,
-            "prefs.SavePrefs" => KnownMethod::SavePrefs,
-            "statcount.GetStatCount" => KnownMethod::GetStatCount,
-            "sign.Sign" => KnownMethod::Sign,
-            "miniGame.StartMiniGame" => KnownMethod::StartMiniGame,
-            "alchemy.StartAlchemy" => KnownMethod::StartAlchemy,
-            "repair.RepairHero" => KnownMethod::RepairHero,
-            _ => return None,
-        })
+        KNOWN_METHODS
+            .iter()
+            .find_map(|(name, method)| (*name == self.name).then_some(*method))
     }
 }
 
