@@ -16,11 +16,13 @@ pub(crate) fn handle_typed(
         account,
         method,
         request_args,
-        None,
-        None,
-        1.0,
-        1.0,
-        &mut effects,
+        TypedBattleContext {
+            battle_catalog: None,
+            fashion_catalog: None,
+            drop_multiplier: 1.0,
+            ship_stat_multiplier: 1.0,
+            effects: &mut effects,
+        },
     )
 }
 
@@ -251,16 +253,45 @@ fn draw_typed_battle_drop_rewards(
     rewards
 }
 
+pub(crate) struct TypedBattleContext<'a> {
+    battle_catalog: Option<&'a BattleCatalog>,
+    fashion_catalog: Option<&'a FashionList>,
+    drop_multiplier: f64,
+    ship_stat_multiplier: f64,
+    effects: &'a mut ResponseEffects,
+}
+
+impl<'a> TypedBattleContext<'a> {
+    pub(crate) fn new(
+        battle_catalog: Option<&'a BattleCatalog>,
+        fashion_catalog: Option<&'a FashionList>,
+        drop_multiplier: f64,
+        ship_stat_multiplier: f64,
+        effects: &'a mut ResponseEffects,
+    ) -> Self {
+        Self {
+            battle_catalog,
+            fashion_catalog,
+            drop_multiplier,
+            ship_stat_multiplier,
+            effects,
+        }
+    }
+}
+
 pub(crate) fn handle_typed_with_catalog(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
-    battle_catalog: Option<&BattleCatalog>,
-    fashion_catalog: Option<&FashionList>,
-    drop_multiplier: f64,
-    ship_stat_multiplier: f64,
-    effects: &mut ResponseEffects,
+    context: TypedBattleContext<'_>,
 ) -> HandlerResult {
+    let TypedBattleContext {
+        battle_catalog,
+        fashion_catalog,
+        drop_multiplier,
+        ship_stat_multiplier,
+        effects,
+    } = context;
     match method {
         "copy.StartBase" | "copy.PvpStartBase" => {
             let Ok(request) = CopyStartRequest::decode(request_args) else {

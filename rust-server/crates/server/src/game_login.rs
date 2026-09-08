@@ -880,9 +880,18 @@ where
             handler_payload(result, request.method.as_str())
         }
         _ if activity_handler::handles(request.method.as_str()) => {
-            let result = HandlerResult::Error(GameError::InvalidRequest(
-                "activity request requires typed account",
-            ));
+            let result = if let Some(typed) = typed_account.as_mut() {
+                activity_handler::handle_typed(
+                    typed,
+                    request.method.as_str(),
+                    request_args,
+                    fashion_catalog,
+                )
+            } else {
+                HandlerResult::Error(GameError::InvalidRequest(
+                    "activity request requires typed account",
+                ))
+            };
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -1610,11 +1619,13 @@ where
                     typed,
                     request.method.as_str(),
                     request_args,
-                    battle_catalog,
-                    fashion_catalog,
-                    state.drop_multiplier,
-                    state.ship_stat_multiplier,
-                    &mut battle_effects,
+                    battle_handler::TypedBattleContext::new(
+                        battle_catalog,
+                        fashion_catalog,
+                        state.drop_multiplier,
+                        state.ship_stat_multiplier,
+                        &mut battle_effects,
+                    ),
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     typed_handled = true;
