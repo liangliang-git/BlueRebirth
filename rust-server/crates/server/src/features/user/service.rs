@@ -98,6 +98,11 @@ pub(crate) fn handle_typed(
             let Some(fleet) = account.fleet.fleets.get_mut(&fleet_id) else {
                 return HandlerResult::Error(GameError::NotFound("fleet"));
             };
+            if fleet.tactic_type.max(1) != u32::try_from(request.tactic_type).unwrap_or_default() {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "strategy tactic type does not match fleet",
+                ));
+            }
             fleet.tactic_id = request.strategy_id as u32;
             effects.push_pre(Response::raw(
                 "tactic.GetHerosTactic",
@@ -1514,6 +1519,7 @@ mod tests {
                 formation_id: 1,
                 tactic_id: 1,
                 members: Vec::new(),
+                ..blueoath_domain::FleetRecord::default()
             },
         );
         let mut strategy = Vec::new();
@@ -1540,6 +1546,15 @@ mod tests {
         assert!(matches!(
             handle_typed(&mut account, &state, "strategy.Apply", &apply, &mut effects,),
             HandlerResult::PushOnly
+        ));
+        assert_eq!(account.fleet.fleets.values().next().unwrap().tactic_id, 7);
+        let last_apply_byte = apply.len() - 1;
+        apply[last_apply_byte] = 2;
+        assert!(matches!(
+            handle_typed(&mut account, &state, "strategy.Apply", &apply, &mut effects,),
+            HandlerResult::Error(GameError::InvalidRequest(
+                "strategy tactic type does not match fleet"
+            ))
         ));
         assert_eq!(account.fleet.fleets.values().next().unwrap().tactic_id, 7);
 

@@ -236,9 +236,19 @@ pub struct FleetState {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FleetRecord {
+    #[serde(default)]
+    pub tactic_name: String,
     pub formation_id: u32,
     pub tactic_id: u32,
+    #[serde(default = "default_fleet_tactic_type")]
+    pub tactic_type: u32,
     pub members: Vec<HeroId>,
+    #[serde(default)]
+    pub ex_members: Vec<HeroId>,
+}
+
+fn default_fleet_tactic_type() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -953,7 +963,15 @@ impl AccountState {
             ));
         }
         for fleet in self.fleet.fleets.values() {
-            if fleet.members.iter().collect::<BTreeSet<_>>().len() != fleet.members.len() {
+            let all_members = fleet
+                .members
+                .iter()
+                .chain(fleet.ex_members.iter())
+                .collect::<BTreeSet<_>>();
+            if fleet.members.iter().collect::<BTreeSet<_>>().len() != fleet.members.len()
+                || fleet.ex_members.iter().collect::<BTreeSet<_>>().len() != fleet.ex_members.len()
+                || all_members.len() != fleet.members.len() + fleet.ex_members.len()
+            {
                 return Err(DomainError::InvalidState(
                     "fleet member list contains duplicates",
                 ));
@@ -961,6 +979,7 @@ impl AccountState {
             if fleet
                 .members
                 .iter()
+                .chain(fleet.ex_members.iter())
                 .any(|hero_id| !self.dock.heroes.contains_key(hero_id))
             {
                 return Err(DomainError::InvalidState("fleet references missing hero"));
@@ -1225,9 +1244,12 @@ impl NewAccountFactory {
             account.fleet.fleets.insert(
                 FleetId::new(fleet_id).expect("starter fleet id is positive"),
                 FleetRecord {
+                    tactic_name: String::new(),
                     formation_id: 2,
                     tactic_id: 0,
+                    tactic_type: 1,
                     members: Vec::new(),
+                    ex_members: Vec::new(),
                 },
             );
         }

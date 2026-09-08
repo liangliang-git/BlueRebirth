@@ -1388,6 +1388,7 @@ mod tests {
                 formation_id: 2,
                 tactic_id: 3,
                 members: vec![hero_id],
+                ..blueoath_domain::FleetRecord::default()
             },
         );
         let mut request = Vec::new();

@@ -612,7 +612,13 @@ where
                         ));
                         response_payload(request.method.as_str(), Vec::new())
                     } else {
-                        response_payload(request.method.as_str(), FleetInfoCodec::encode(&fleet))
+                        let payload = FleetInfoCodec::encode(&fleet_info_from_typed_account(typed));
+                        append_method_push(
+                            &mut post_pushes,
+                            "tactic.GetHerosTactic",
+                            payload.clone(),
+                        );
+                        response_payload(request.method.as_str(), payload)
                     }
                 } else {
                     handler_error = Some(GameError::AccountUnavailable);

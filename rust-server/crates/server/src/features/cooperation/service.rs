@@ -949,6 +949,7 @@ mod typed_tests {
                 formation_id: 2,
                 tactic_id: 1,
                 members: vec![hero_id],
+                ..FleetRecord::default()
             },
         );
         let mut hero_list = Vec::new();

@@ -296,7 +296,7 @@ fn migration_from_schema_v6_normalizes_local_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 33);
+    assert_eq!(version, 34);
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
@@ -470,6 +470,25 @@ fn typed_repository_transaction_commits_domain_mutation() {
             pskills: [(41, 2)].into_iter().collect(),
         },
     );
+    let ex_hero_id = HeroId::new(11).unwrap();
+    account.dock.heroes.insert(
+        ex_hero_id,
+        HeroState {
+            id: ex_hero_id,
+            template_id: TemplateId::new(101).unwrap(),
+            fashioning: 10,
+            name: String::new(),
+            change_name_time: 0,
+            level: 1,
+            exp: 0,
+            mood: 90,
+            affection: 0,
+            hp: 80,
+            locked: false,
+            equip_slots: Vec::new(),
+            pskills: std::collections::BTreeMap::new(),
+        },
+    );
     account.dock.equipments.insert(
         equip_id,
         EquipmentState {
@@ -484,9 +503,12 @@ fn typed_repository_transaction_commits_domain_mutation() {
     account.fleet.fleets.insert(
         FleetId::new(1).unwrap(),
         FleetRecord {
+            tactic_name: "Stored fleet".to_owned(),
             formation_id: 2,
             tactic_id: 3,
+            tactic_type: 2,
             members: vec![hero_id],
+            ex_members: vec![ex_hero_id],
         },
     );
     account.fleet.preset_name_num = 4;
@@ -741,6 +763,18 @@ fn typed_repository_transaction_commits_domain_mutation() {
     assert_eq!(
         loaded.fleet.fleets[&FleetId::new(1).unwrap()].members,
         vec![hero_id]
+    );
+    assert_eq!(
+        loaded.fleet.fleets[&FleetId::new(1).unwrap()].tactic_name,
+        "Stored fleet"
+    );
+    assert_eq!(
+        loaded.fleet.fleets[&FleetId::new(1).unwrap()].tactic_type,
+        2
+    );
+    assert_eq!(
+        loaded.fleet.fleets[&FleetId::new(1).unwrap()].ex_members,
+        vec![ex_hero_id]
     );
     assert_eq!(loaded.fleet.preset_name_num, 4);
     assert_eq!(loaded.fleet.preset_red_dot, 1);

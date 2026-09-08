@@ -1009,7 +1009,7 @@ pub(super) fn fleet_info_from_typed_account(account: &blueoath_domain::AccountSt
         .iter()
         .filter_map(|(fleet_id, fleet)| {
             Some(FleetTactic {
-                tactic_name: String::new(),
+                tactic_name: fleet.tactic_name.clone(),
                 hero_ids: fleet
                     .members
                     .iter()
@@ -1018,8 +1018,12 @@ pub(super) fn fleet_info_from_typed_account(account: &blueoath_domain::AccountSt
                 mode_id: i32::try_from(fleet_id.get()).ok()?,
                 strategy_id: i32::try_from(fleet.tactic_id).ok()?,
                 formation_id: i32::try_from(fleet.formation_id).ok()?,
-                tactic_type: 1,
-                ex_hero_ids: Vec::new(),
+                tactic_type: i32::try_from(fleet.tactic_type.max(1)).ok()?,
+                ex_hero_ids: fleet
+                    .ex_members
+                    .iter()
+                    .filter_map(|hero_id| i32::try_from(hero_id.get()).ok())
+                    .collect(),
             })
         })
         .collect::<Vec<_>>();
@@ -1063,13 +1067,32 @@ pub(super) fn set_fleet_on_typed_account(
             }
             members.push(hero_id);
         }
+        let mut ex_members = Vec::new();
+        for hero_id in &tactic.ex_hero_ids {
+            let Ok(hero_id) = u64::try_from(*hero_id) else {
+                return false;
+            };
+            let Ok(hero_id) = blueoath_domain::HeroId::new(hero_id) else {
+                return false;
+            };
+            if !account.dock.heroes.contains_key(&hero_id)
+                || members.contains(&hero_id)
+                || ex_members.contains(&hero_id)
+            {
+                return false;
+            }
+            ex_members.push(hero_id);
+        }
         if fleets
             .insert(
                 fleet_id,
                 blueoath_domain::FleetRecord {
+                    tactic_name: tactic.tactic_name.clone(),
                     formation_id,
                     tactic_id,
+                    tactic_type: u32::try_from(tactic.tactic_type).unwrap_or_default().max(1),
                     members,
+                    ex_members,
                 },
             )
             .is_some()

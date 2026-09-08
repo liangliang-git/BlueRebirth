@@ -139,9 +139,12 @@ fn typed_fleet_projection_reads_normalized_fleet_rows() {
     account.fleet.fleets.insert(
         FleetId::new(3).unwrap(),
         FleetRecord {
+            tactic_name: "Typed fleet".to_owned(),
             formation_id: 7,
             tactic_id: 11,
+            tactic_type: 2,
             members: vec![HeroId::new(101).unwrap(), HeroId::new(102).unwrap()],
+            ex_members: vec![HeroId::new(103).unwrap()],
         },
     );
 
@@ -151,6 +154,9 @@ fn typed_fleet_projection_reads_normalized_fleet_rows() {
     assert_eq!(fleet.tactics[0].hero_ids, vec![101, 102]);
     assert_eq!(fleet.tactics[0].strategy_id, 11);
     assert_eq!(fleet.tactics[0].formation_id, 7);
+    assert_eq!(fleet.tactics[0].tactic_name, "Typed fleet");
+    assert_eq!(fleet.tactics[0].tactic_type, 2);
+    assert_eq!(fleet.tactics[0].ex_hero_ids, vec![103]);
 }
 
 #[test]
@@ -178,11 +184,13 @@ fn typed_fleet_mutation_validates_hero_ownership() {
     );
     let value = blueoath_protocol::FleetInfo {
         tactics: vec![blueoath_protocol::FleetTactic {
+            tactic_name: "First fleet".to_owned(),
             mode_id: 2,
             strategy_id: 3,
             formation_id: 4,
+            tactic_type: 2,
             hero_ids: vec![101],
-            ..Default::default()
+            ex_hero_ids: vec![1],
         }],
         ..Default::default()
     };
@@ -193,6 +201,10 @@ fn typed_fleet_mutation_validates_hero_ownership() {
         account.fleet.fleets[&FleetId::new(2).unwrap()].members,
         vec![hero_id]
     );
+    let saved = &account.fleet.fleets[&FleetId::new(2).unwrap()];
+    assert_eq!(saved.tactic_name, "First fleet");
+    assert_eq!(saved.tactic_type, 2);
+    assert_eq!(saved.ex_members, vec![HeroId::new(1).unwrap()]);
 }
 
 #[test]

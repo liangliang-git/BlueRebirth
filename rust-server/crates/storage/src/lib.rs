@@ -387,15 +387,17 @@ impl ProfileStore {
         }
 
         let mut statement = connection.prepare(
-            "SELECT fleet_id, formation_id, tactic_id
+            "SELECT fleet_id, tactic_name, formation_id, tactic_id, tactic_type
              FROM fleets WHERE profile_id = ?1 ORDER BY fleet_id",
         )?;
         let fleets = statement
             .query_map(params![profile_id.as_str()], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -404,9 +406,12 @@ impl ProfileStore {
             account.fleet.fleets.insert(
                 id,
                 FleetRecord {
-                    formation_id: non_negative_u32(row.1, "formation id")?,
-                    tactic_id: non_negative_u32(row.2, "tactic id")?,
+                    tactic_name: row.1,
+                    formation_id: non_negative_u32(row.2, "formation id")?,
+                    tactic_id: non_negative_u32(row.3, "tactic id")?,
+                    tactic_type: non_negative_u32(row.4, "tactic type")?.max(1),
                     members: Vec::new(),
+                    ex_members: Vec::new(),
                 },
             );
         }
@@ -434,6 +439,34 @@ impl ProfileStore {
                     fleet.members.resize(position + 1, hero_id);
                 }
                 fleet.members[position] = hero_id;
+            }
+        }
+        let mut statement = connection.prepare(
+            "SELECT fleet_id, position, hero_id
+             FROM fleet_ex_members WHERE profile_id = ?1 ORDER BY fleet_id, position",
+        )?;
+        let ex_members = statement
+            .query_map(params![profile_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for row in ex_members {
+            let fleet_id = positive_fleet_id(row.0, "fleet ex member fleet id")?;
+            let hero_id = positive_hero_id(row.2, "fleet ex member hero id")?;
+            if let Some(fleet) = account.fleet.fleets.get_mut(&fleet_id) {
+                let position = usize::try_from(row.1).map_err(|_| {
+                    StorageError::InvalidTypedAccount(
+                        "fleet ex member position is invalid".to_owned(),
+                    )
+                })?;
+                if fleet.ex_members.len() <= position {
+                    fleet.ex_members.resize(position + 1, hero_id);
+                }
+                fleet.ex_members[position] = hero_id;
             }
         }
 
@@ -2530,13 +2563,16 @@ impl ProfileStore {
         }
         for (fleet_id, fleet) in &account.fleet.fleets {
             transaction.execute(
-                "INSERT INTO fleets(profile_id, fleet_id, formation_id, tactic_id)
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO fleets(
+                    profile_id, fleet_id, tactic_name, formation_id, tactic_id, tactic_type
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     profile.id.as_str(),
                     typed_i64(fleet_id.get(), "fleet id")?,
+                    fleet.tactic_name,
                     typed_i64(fleet.formation_id, "formation id")?,
                     typed_i64(fleet.tactic_id, "tactic id")?,
+                    typed_i64(fleet.tactic_type, "tactic type")?,
                 ],
             )?;
             for (position, hero_id) in fleet.members.iter().enumerate() {
@@ -2548,6 +2584,18 @@ impl ProfileStore {
                         typed_i64(fleet_id.get(), "fleet id")?,
                         typed_i64(position, "fleet member position")?,
                         typed_i64(hero_id.get(), "fleet member hero id")?,
+                    ],
+                )?;
+            }
+            for (position, hero_id) in fleet.ex_members.iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO fleet_ex_members(profile_id, fleet_id, position, hero_id)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        profile.id.as_str(),
+                        typed_i64(fleet_id.get(), "fleet id")?,
+                        typed_i64(position, "fleet ex member position")?,
+                        typed_i64(hero_id.get(), "fleet ex member hero id")?,
                     ],
                 )?;
             }
@@ -3712,6 +3760,7 @@ fn clear_normalized_account(
         "supply_heroes",
         "support_entry_heroes",
         "support_entries",
+        "fleet_ex_members",
         "fleet_members",
         "fleets",
         "hero_equip_slots",
@@ -3849,6 +3898,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0031_local_profile_storage.sql"),
     include_str!("../../../migrations/0032_account_revision_foreign_key.sql"),
     include_str!("../../../migrations/0033_hero_fashioning.sql"),
+    include_str!("../../../migrations/0034_fleet_tactic_metadata.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {
