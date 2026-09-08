@@ -3790,6 +3790,7 @@ fn clear_normalized_account(
         "hero_equip_slots",
         "equipments",
         "heroes",
+        "fashion_entries",
         "inventory",
         "characters",
         "friend_relations",

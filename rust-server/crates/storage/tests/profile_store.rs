@@ -47,6 +47,32 @@ fn profiles_are_upserted_and_isolated() {
 }
 
 #[test]
+fn typed_account_with_fashions_can_be_saved_repeatedly() {
+    let (store, root) = store();
+    let profile_id = ProfileId::new("fashion-save").unwrap();
+    let mut account = NewAccountFactory::create(profile_id.clone(), "Captain");
+    account
+        .fashion
+        .entries
+        .entry(1_021_051)
+        .or_default()
+        .extend([
+            TemplateId::new(1_021_051).unwrap(),
+            TemplateId::new(1_021_054).unwrap(),
+        ]);
+
+    store.save_typed_account(&mut account).unwrap();
+    store.save_typed_account(&mut account).unwrap();
+
+    let loaded = store
+        .load_typed_account(&profile_id)
+        .unwrap()
+        .expect("account should remain available");
+    assert_eq!(loaded.fashion.entries[&1_021_051].len(), 2);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn reset_removes_only_selected_profile() {
     let (store, root) = store();
     store

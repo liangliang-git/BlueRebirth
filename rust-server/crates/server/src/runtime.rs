@@ -15,10 +15,7 @@ fn load_or_create_typed_account(
 ) -> Result<AccountState, blueoath_storage::StorageError> {
     let profile_id = ProfileId::new(profile_id.to_owned())
         .map_err(|_| blueoath_storage::StorageError::InvalidProfileId)?;
-    if let Some(mut account) = store.load_typed_account(&profile_id)? {
-        if grant_all_catalog_fashions(&mut account, fashion_catalog) {
-            store.save_typed_account(&mut account)?;
-        }
+    if let Some(account) = store.load_typed_account(&profile_id)? {
         return Ok(account);
     }
     let mut account = NewAccountFactory::create(profile_id.clone(), name.to_owned());
@@ -971,28 +968,27 @@ mod tests {
     }
 
     #[test]
-    fn existing_account_missing_fashions_is_repaired_and_persisted() {
-        let root = test_root("repair-fashions");
+    fn existing_account_missing_fashions_is_not_changed() {
+        let root = test_root("keep-fashions");
         let store = ProfileStore::open(&root).unwrap();
-        let profile_id = ProfileId::new("repair-fashions").unwrap();
+        let profile_id = ProfileId::new("keep-fashions").unwrap();
         let mut account = NewAccountFactory::create(profile_id.clone(), "Captain");
         store.save_typed_account(&mut account).unwrap();
 
-        let repaired = load_or_create_typed_account(
+        let loaded = load_or_create_typed_account(
             &store,
-            "repair-fashions",
+            "keep-fashions",
             "Captain",
             &test_fashion_catalog(),
         )
         .unwrap();
-        assert_eq!(repaired.fashion.entries[&1_032_031].len(), 2);
+        assert!(loaded.fashion.entries.is_empty());
 
         let persisted = store
             .load_typed_account(&profile_id)
             .unwrap()
             .expect("account should remain available");
-        assert_eq!(persisted.fashion.entries[&1_021_051].len(), 2);
-        assert_eq!(persisted.fashion.entries[&1_032_031].len(), 2);
+        assert!(persisted.fashion.entries.is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
 
