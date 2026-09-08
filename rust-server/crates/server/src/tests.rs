@@ -23,20 +23,20 @@ use super::{
     equip_list_from_account, expand_build_drop, fashion_equip_state, fashion_list_from_account,
     finish_building_state, finish_study_state, fleet_info_from_account,
     fleet_info_from_typed_account, hero_advance_max_level_state, hero_advance_mub_state,
-    hero_advance_state, hero_auto_equip_state, hero_auto_unequip_state, hero_change_equip_state,
-    hero_equip_binding_state, hero_equip_effect_state, hero_equip_lock_transplant_state,
-    hero_intensify_state, hero_remould_state, illustrate_info_payload,
-    illustrate_info_payload_for_templates, json_i32, load_affection_catalog, load_battle_catalog,
-    load_chapter_catalog, load_equip_catalog, load_server_shop_goods, load_ship_break_catalog,
-    load_ship_intensify_catalog, load_ship_stat_catalog, load_shop_catalog, load_task_catalog,
-    mark_battle_fleet_passed, mop_up_pass_rets, mop_up_payload, mop_up_payload_with_pass_rets,
-    normalize_daily_copy_state, normalize_task_state, prepare_local_request,
-    preset_fleet_info_from_account, preset_fleet_info_from_typed_account,
-    process_game_login_frame_with_catalogs_typed_mut, receive_construction, record_battle_pass,
-    renovate_equip_state, resolve_study_skill_id, return_shop_buy_response, scale_reward,
-    sea_difficulty_for_account, set_fleet_on_typed_account, set_preset_fleet_from_account,
-    set_preset_fleet_on_typed_account, set_sea_difficulty, settle_mop_up,
-    settle_mop_up_with_config, settle_support_state, ship_attributes_for_hero,
+    hero_advance_state, hero_auto_equip_state, hero_auto_unequip_state,
+    hero_bag_from_typed_account, hero_change_equip_state, hero_equip_binding_state,
+    hero_equip_effect_state, hero_equip_lock_transplant_state, hero_intensify_state,
+    hero_remould_state, illustrate_info_payload, illustrate_info_payload_for_templates, json_i32,
+    load_affection_catalog, load_battle_catalog, load_chapter_catalog, load_equip_catalog,
+    load_server_shop_goods, load_ship_break_catalog, load_ship_intensify_catalog,
+    load_ship_stat_catalog, load_shop_catalog, load_task_catalog, mark_battle_fleet_passed,
+    mop_up_pass_rets, mop_up_payload, mop_up_payload_with_pass_rets, normalize_daily_copy_state,
+    normalize_task_state, prepare_local_request, preset_fleet_info_from_account,
+    preset_fleet_info_from_typed_account, process_game_login_frame_with_catalogs_typed_mut,
+    receive_construction, record_battle_pass, renovate_equip_state, resolve_study_skill_id,
+    return_shop_buy_response, scale_reward, sea_difficulty_for_account, set_fleet_on_typed_account,
+    set_preset_fleet_from_account, set_preset_fleet_on_typed_account, set_sea_difficulty,
+    settle_mop_up, settle_mop_up_with_config, settle_support_state, ship_attributes_for_hero,
     ship_attributes_for_template, shop_costs_from_value, shop_info_payload, start_construction,
     start_study_state, start_support_state, story_memory_payload, study_info_payload,
     study_skill_state, sync_achievement_points, task_completed, task_info_payload,
@@ -61,6 +61,15 @@ use blueoath_protocol::{
 use blueoath_transport::NetSocketFrameCodec;
 use serde_json::json;
 use tokio::io::duplex;
+
+#[test]
+fn typed_starter_hero_has_default_fashioning_for_home_model() {
+    let account = NewAccountFactory::create(ProfileId::new("starter-fashion").unwrap(), "Captain");
+    let bag = hero_bag_from_typed_account(&account);
+
+    assert_eq!(bag.heroes[0].template_id, 10_210_511);
+    assert_eq!(bag.heroes[0].fashioning, 1_021_051);
+}
 
 #[tokio::test]
 async fn typed_user_routes_update_account_state_without_json_account() {
@@ -152,6 +161,7 @@ fn typed_fleet_mutation_validates_hero_ownership() {
         blueoath_domain::HeroState {
             id: hero_id,
             template_id: blueoath_domain::TemplateId::new(1001).unwrap(),
+            fashioning: 100,
             name: String::new(),
             change_name_time: 0,
             level: 1,

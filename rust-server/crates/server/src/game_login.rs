@@ -330,11 +330,11 @@ where
 
     let request = RequestContext::from(TMessageCodec::decode_request(&frame.payload)?);
     let request_args = request.args.as_slice();
-    if std::env::var_os("BLUEOATH_TRACE_METHODS").is_some() {
-        eprintln!(
-            "game-login method={} args={}",
-            request.method,
-            request_args.len()
+    if state.trace_methods {
+        tracing::debug!(
+            method = %request.method,
+            args = request_args.len(),
+            "game-login request"
         );
     }
     let method = GameMethod::parse(&request.method);
@@ -1837,15 +1837,15 @@ where
             client_error_code,
             client_error_message,
         );
-    if std::env::var_os("BLUEOATH_TRACE_METHODS").is_some() {
-        eprintln!(
-            "game-login result method={} err={} msg={} ret={} pre_pushes={} post_pushes={}",
-            trace_method,
-            client_error_code,
-            trace_err_msg,
-            trace_ret_len,
-            pre_pushes.len(),
-            post_pushes.len()
+    if state.trace_methods {
+        tracing::debug!(
+            method = %trace_method,
+            error_code = client_error_code,
+            error_message = %trace_err_msg,
+            response_bytes = trace_ret_len,
+            pre_pushes = pre_pushes.len(),
+            post_pushes = post_pushes.len(),
+            "game-login response"
         );
     }
     #[cfg(test)]

@@ -165,6 +165,12 @@ pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountStat
         .map(|hero| HeroGrid {
             hero_id: u32::try_from(hero.id.get()).unwrap_or(u32::MAX),
             template_id: i32::try_from(hero.template_id.get()).unwrap_or(i32::MAX),
+            fashioning: i32::try_from(if hero.fashioning == 0 {
+                hero.template_id.get().saturating_sub(1) / 10
+            } else {
+                u64::from(hero.fashioning)
+            })
+            .unwrap_or(i32::MAX),
             marry_time: i32::try_from(
                 account
                     .activities

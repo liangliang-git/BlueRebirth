@@ -259,7 +259,7 @@ fn migration_from_schema_v6_normalizes_local_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
@@ -420,6 +420,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
         HeroState {
             id: hero_id,
             template_id: TemplateId::new(100).unwrap(),
+            fashioning: 9,
             name: String::new(),
             change_name_time: 0,
             level: 2,
@@ -735,6 +736,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
     );
     assert!(loaded.guide.plot_rewards.contains(&42));
     assert_eq!(loaded.supply.hero_ids, vec![hero_id]);
+    assert_eq!(loaded.dock.heroes[&hero_id].fashioning, 9);
     assert_eq!(loaded.support.entries[0].support_id, 7001);
     assert_eq!(loaded.support.entries[0].hero_ids, vec![hero_id]);
     assert_eq!(loaded.invite_score.have_got_ssr, 1);

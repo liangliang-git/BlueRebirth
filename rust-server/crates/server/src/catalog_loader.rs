@@ -2585,18 +2585,20 @@ pub(super) fn load_battle_catalog(client_path: Option<&PathBuf>) -> BattleCatalo
         Ok(value) => value,
         Err(error) => {
             if error.kind() != std::io::ErrorKind::NotFound {
-                eprintln!(
-                    "Cannot read {}: {error}; using bundled drop quantities",
-                    quantities_path.display()
+                tracing::warn!(
+                    path = %quantities_path.display(),
+                    %error,
+                    "cannot read drop quantities; using bundled values"
                 );
             }
             bundled_quantities.to_owned()
         }
     };
     catalog.drop_quantities = serde_json::from_str(&quantities).unwrap_or_else(|error| {
-        eprintln!(
-            "Invalid {}: {error}; using bundled drop quantities",
-            quantities_path.display()
+        tracing::warn!(
+            path = %quantities_path.display(),
+            %error,
+            "invalid drop quantities; using bundled values"
         );
         serde_json::from_str(bundled_quantities).unwrap_or_default()
     });

@@ -1433,6 +1433,7 @@ mod tests {
             blueoath_domain::HeroState {
                 id: hero_id,
                 template_id: blueoath_domain::TemplateId::new(10_210_511).unwrap(),
+                fashioning: 1_021_051,
                 name: String::new(),
                 change_name_time: 0,
                 level: 1,

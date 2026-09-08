@@ -1,0 +1,1 @@
+ALTER TABLE heroes ADD COLUMN fashioning INTEGER NOT NULL DEFAULT 0 CHECK (fashioning >= 0);

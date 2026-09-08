@@ -174,6 +174,9 @@ impl Default for CharacterState {
 pub struct HeroState {
     pub id: HeroId,
     pub template_id: TemplateId,
+    /// Currently equipped ship display/model skin (ship_show id).
+    #[serde(default)]
+    pub fashioning: u32,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
@@ -1125,6 +1128,7 @@ impl NewAccountFactory {
                 id: starter_hero_id,
                 template_id: TemplateId::new(10_210_511)
                     .expect("starter hero template is positive"),
+                fashioning: 1_021_051,
                 name: String::new(),
                 change_name_time: 0,
                 level: 1,

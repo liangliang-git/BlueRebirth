@@ -233,7 +233,7 @@ impl ProfileStore {
         }
 
         let mut statement = connection.prepare(
-            "SELECT hero_id, template_id, name, change_name_time, level, exp, mood, affection, hp, lock_state
+            "SELECT hero_id, template_id, fashioning, name, change_name_time, level, exp, mood, affection, hp, lock_state
              FROM heroes WHERE profile_id = ?1 ORDER BY hero_id",
         )?;
         let heroes = statement
@@ -241,33 +241,40 @@ impl ProfileStore {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
                     row.get::<_, i64>(4)?,
                     row.get::<_, i64>(5)?,
                     row.get::<_, i64>(6)?,
                     row.get::<_, i64>(7)?,
                     row.get::<_, i64>(8)?,
                     row.get::<_, i64>(9)?,
+                    row.get::<_, i64>(10)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         for row in heroes {
             let id = positive_hero_id(row.0, "hero id")?;
             let template_id = positive_template_id(row.1, "hero template id")?;
+            let fashioning = if row.2 == 0 {
+                u32::try_from(template_id.get().saturating_sub(1) / 10).unwrap_or(u32::MAX)
+            } else {
+                non_negative_u32(row.2, "hero fashioning")?
+            };
             account.dock.heroes.insert(
                 id,
                 HeroState {
                     id,
                     template_id,
-                    name: row.2,
-                    change_name_time: non_negative_u64(row.3, "hero change name time")?,
-                    level: positive_u32(row.4, "hero level")?,
-                    exp: non_negative_u64(row.5, "hero exp")?,
-                    mood: non_negative_u32(row.6, "hero mood")?,
-                    affection: non_negative_u64(row.7, "hero affection")?,
-                    hp: non_negative_u64(row.8, "hero hp")?,
-                    locked: row.9 != 0,
+                    fashioning,
+                    name: row.3,
+                    change_name_time: non_negative_u64(row.4, "hero change name time")?,
+                    level: positive_u32(row.5, "hero level")?,
+                    exp: non_negative_u64(row.6, "hero exp")?,
+                    mood: non_negative_u32(row.7, "hero mood")?,
+                    affection: non_negative_u64(row.8, "hero affection")?,
+                    hp: non_negative_u64(row.9, "hero hp")?,
+                    locked: row.10 != 0,
                     equip_slots: Vec::new(),
                     pskills: std::collections::BTreeMap::new(),
                 },
@@ -2459,13 +2466,14 @@ impl ProfileStore {
         for hero in account.dock.heroes.values() {
             transaction.execute(
                 "INSERT INTO heroes(
-                profile_id, hero_id, template_id, name, change_name_time,
+                profile_id, hero_id, template_id, fashioning, name, change_name_time,
                     level, exp, mood, affection, hp, lock_state, created_utc
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
                     profile.id.as_str(),
                     typed_i64(hero.id.get(), "hero id")?,
                     typed_i64(hero.template_id.get(), "hero template id")?,
+                    typed_i64(hero.fashioning, "hero fashioning")?,
                     hero.name,
                     typed_i64(hero.change_name_time, "hero change name time")?,
                     typed_i64(hero.level, "hero level")?,
@@ -3835,6 +3843,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0030_daily_copy_ex_star.sql"),
     include_str!("../../../migrations/0031_local_profile_storage.sql"),
     include_str!("../../../migrations/0032_account_revision_foreign_key.sql"),
+    include_str!("../../../migrations/0033_hero_fashioning.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {

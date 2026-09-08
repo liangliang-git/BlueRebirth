@@ -1,4 +1,4 @@
-use blueoath_server::{ServerConfig, ServerConfigError};
+use blueoath_server::{LogLevel, ServerConfig, ServerConfigError};
 
 #[test]
 fn parses_equals_and_separate_value_arguments() {
@@ -70,6 +70,51 @@ fn mood_and_affection_multipliers_default_to_one() {
     assert_eq!(config.affection_multiplier, 1.0);
     assert_eq!(config.building_oil_multiplier, 1.0);
     assert_eq!(config.building_gold_multiplier, 1.0);
+}
+
+#[test]
+fn log_level_defaults_to_info_and_accepts_cli_values() {
+    let config = ServerConfig::from_args(Vec::<String>::new()).expect("valid defaults");
+    assert_eq!(config.log_level, LogLevel::Info);
+
+    let config = ServerConfig::from_args(["--log-level".to_owned(), "DEBUG".to_owned()])
+        .expect("valid log level");
+    assert_eq!(config.log_level, LogLevel::Debug);
+}
+
+#[test]
+fn config_file_overrides_default_log_level() {
+    let path = std::env::temp_dir().join(format!(
+        "blueoath-server-config-{}-{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock is after epoch")
+            .as_nanos()
+    ));
+    std::fs::write(
+        &path,
+        r#"{"logLevel":"warning","traceMethods":true,"traceKcp":true}"#,
+    )
+    .expect("write config");
+
+    let config = ServerConfig::from_args(["--config".to_owned(), path.display().to_string()])
+        .expect("valid config file");
+    std::fs::remove_file(path).expect("remove config");
+    assert_eq!(config.log_level, LogLevel::Warn);
+    assert!(config.trace_methods);
+    assert!(config.trace_kcp);
+}
+
+#[test]
+fn rejects_invalid_log_level() {
+    let error = ServerConfig::from_args(["--log-level=verbose".to_owned()]).unwrap_err();
+
+    assert!(matches!(
+        error,
+        ServerConfigError::InvalidValue { flag, value }
+            if flag == "--log-level" && value == "verbose"
+    ));
 }
 
 #[test]

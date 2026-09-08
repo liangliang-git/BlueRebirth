@@ -70,6 +70,9 @@ cargo run --manifest-path .\rust-server\Cargo.toml -p blueoath-server -- --port=
 {
   "port": 7080,
   "gameLoginPort": 7201,
+  "logLevel": "info",
+  "traceMethods": false,
+  "traceKcp": false,
   "dropMultiplier": 1.0,
   "shipExpMultiplier": 1.0,
   "commanderExpMultiplier": 1.0,
@@ -80,6 +83,13 @@ cargo run --manifest-path .\rust-server\Cargo.toml -p blueoath-server -- --port=
   "buildingGoldMultiplier": 1.0
 }
 ```
+
+服务端日志同时写入 CMD 窗口和可执行文件目录下的 `rust-server.log`。`logLevel` 支持
+`off`、`error`、`warn`、`info`、`debug`、`trace`，默认值为 `info`；命令行
+`--log-level` 优先覆盖配置文件值。
+
+`traceMethods` 开启游戏登录请求/响应摘要日志，`traceKcp` 开启 KCP 收发包调试日志；
+两项默认关闭，需同时将 `logLevel` 设为 `debug` 或 `trace` 才会输出。
 
 `shipStatMultiplier` 作用于服务端舰船战斗属性：耐久、炮击、装甲、雷装、雷防、舰载机轰炸/雷击、命中、闪避、暴击、抗暴，并包含等级成长和舰船强化属性（intensify）。倍率只作用于新产生的奖励和战斗属性；账号存档不会被倍率或初始模板覆盖。新 `profile-id` 首次登录时创建初始账号。
 

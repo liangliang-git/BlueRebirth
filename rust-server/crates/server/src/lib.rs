@@ -43,6 +43,7 @@ pub(crate) use features::equip::service::{
     mark_equip_activity_reward, mark_new_test_reward, resolve_new_test_reward,
 };
 mod local_protocol;
+mod logging;
 mod projection;
 #[path = "common/protocol_payload.rs"]
 mod protocol_payload;
@@ -68,7 +69,7 @@ use common::clock::{Clock, SystemClock};
 use common::json::*;
 use config::{normalize_multiplier, normalize_profile_id, scale_reward, DEFAULT_PROFILE_ID};
 pub use config::{
-    BattleOutcome, Formation, ServerConfig, ServerConfigError, ServerState, Ship, Stage,
+    BattleOutcome, Formation, LogLevel, ServerConfig, ServerConfigError, ServerState, Ship, Stage,
 };
 use features::battle::state::*;
 #[cfg(test)]
@@ -105,6 +106,7 @@ use wire::{
     append_bytes_field, append_message_field, append_varint, append_varint_field, read_varint,
 };
 
+pub use logging::init_logging;
 pub(crate) use runtime::current_unix_millis;
 #[cfg(test)]
 pub(crate) use runtime::normalize_task_state;

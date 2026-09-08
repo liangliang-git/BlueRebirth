@@ -239,6 +239,7 @@ mod tests {
             HeroState {
                 id: hero_id,
                 template_id: TemplateId::new(70).unwrap(),
+                fashioning: 6,
                 name: String::new(),
                 change_name_time: 0,
                 level: 1,

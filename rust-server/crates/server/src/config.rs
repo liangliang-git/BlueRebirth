@@ -15,6 +15,55 @@ pub enum ServerConfigError {
     InvalidValue { flag: &'static str, value: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    Off,
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl LogLevel {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" => Some(Self::Off),
+            "error" => Some(Self::Error),
+            "warn" | "warning" => Some(Self::Warn),
+            "info" => Some(Self::Info),
+            "debug" => Some(Self::Debug),
+            "trace" => Some(Self::Trace),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn filter(self) -> tracing_subscriber::filter::LevelFilter {
+        match self {
+            Self::Off => tracing_subscriber::filter::LevelFilter::OFF,
+            Self::Error => tracing_subscriber::filter::LevelFilter::ERROR,
+            Self::Warn => tracing_subscriber::filter::LevelFilter::WARN,
+            Self::Info => tracing_subscriber::filter::LevelFilter::INFO,
+            Self::Debug => tracing_subscriber::filter::LevelFilter::DEBUG,
+            Self::Trace => tracing_subscriber::filter::LevelFilter::TRACE,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LogLevel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "unsupported log level `{value}`; expected off, error, warn, info, debug, or trace"
+            ))
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct SharedPush {
     pub(crate) recipient_uid: u64,
@@ -96,6 +145,8 @@ pub struct ServerState {
     pub profile_id: String,
     pub name: String,
     pub version: String,
+    pub(crate) trace_methods: bool,
+    pub(crate) trace_kcp: bool,
     /// Port used by battle/session control-plane payloads. Runtime replaces the
     /// default after binding the front-door listener, including when port=0.
     pub(crate) battle_port: u16,
@@ -164,6 +215,8 @@ impl ServerState {
             profile_id: profile_id.into(),
             name: name.into(),
             version: version.into(),
+            trace_methods: false,
+            trace_kcp: false,
             battle_port: 7080,
             coins: 0,
             fuel: 100,
@@ -241,6 +294,9 @@ pub struct ServerConfig {
     pub profile_id: String,
     pub profile_name: String,
     pub version: String,
+    pub log_level: LogLevel,
+    pub trace_methods: bool,
+    pub trace_kcp: bool,
     pub data_root: PathBuf,
     pub client_path: Option<PathBuf>,
     pub drop_multiplier: f64,
@@ -265,6 +321,12 @@ struct ServerFileConfig {
     #[serde(alias = "profileName")]
     profile_name: Option<String>,
     version: Option<String>,
+    #[serde(alias = "logLevel")]
+    log_level: Option<LogLevel>,
+    #[serde(alias = "traceMethods")]
+    trace_methods: Option<bool>,
+    #[serde(alias = "traceKcp")]
+    trace_kcp: Option<bool>,
     #[serde(alias = "dataRoot")]
     data: Option<PathBuf>,
     #[serde(alias = "clientPath")]
@@ -298,6 +360,9 @@ impl Default for ServerConfig {
             profile_id: DEFAULT_PROFILE_ID.to_owned(),
             profile_name: DEFAULT_PROFILE_ID.to_owned(),
             version: "1.4.0".to_owned(),
+            log_level: LogLevel::Info,
+            trace_methods: false,
+            trace_kcp: false,
             data_root: default_data_root(),
             client_path: default_client_path(),
             drop_multiplier: 1.0,
@@ -419,6 +484,15 @@ impl ServerConfig {
             if let Some(value) = file.version {
                 config.version = value;
             }
+            if let Some(value) = file.log_level {
+                config.log_level = value;
+            }
+            if let Some(value) = file.trace_methods {
+                config.trace_methods = value;
+            }
+            if let Some(value) = file.trace_kcp {
+                config.trace_kcp = value;
+            }
             if let Some(value) = file.data {
                 config.data_root = value;
             }
@@ -485,6 +559,13 @@ impl ServerConfig {
                 if value.eq_ignore_ascii_case("cn") {
                     config.version = "1.5.20".to_owned();
                 }
+            } else if let Some(value) = strip_prefix_ci(&arg, "--log-level=") {
+                config.log_level = parse_log_level("--log-level", value)?;
+            } else if arg.eq_ignore_ascii_case("--log-level") {
+                config.log_level = parse_log_level(
+                    "--log-level",
+                    next_value(&mut args, "--log-level")?.as_str(),
+                )?;
             } else if let Some(value) = strip_prefix_ci(&arg, "--data=") {
                 if !value.is_empty() {
                     config.data_root = PathBuf::from(value);
@@ -618,6 +699,7 @@ fn is_known_flag(value: &str) -> bool {
         "--profile-id",
         "--profile-name",
         "--region",
+        "--log-level",
         "--data",
         "--client-path",
         "--config",
@@ -653,6 +735,13 @@ fn parse_multiplier(flag: &'static str, value: &str) -> Result<f64, ServerConfig
         });
     }
     Ok(parsed.min(1_000_000.0))
+}
+
+fn parse_log_level(flag: &'static str, value: &str) -> Result<LogLevel, ServerConfigError> {
+    LogLevel::parse(value).ok_or_else(|| ServerConfigError::InvalidValue {
+        flag,
+        value: value.to_owned(),
+    })
 }
 
 pub(super) fn scale_reward(value: i64, multiplier: f64) -> i64 {

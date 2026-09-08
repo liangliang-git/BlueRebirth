@@ -569,6 +569,8 @@ fn receive_typed_construction(
             blueoath_domain::HeroState {
                 id: hero_id,
                 template_id,
+                fashioning: u32::try_from(template_id.get().saturating_sub(1) / 10)
+                    .unwrap_or(u32::MAX),
                 name: String::new(),
                 change_name_time: 0,
                 level: 1,

@@ -167,6 +167,8 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
         .unwrap_or(profile_name);
     let mut initial_state = ServerState::new(profile_id.clone(), initial_name, version);
     initial_state.battle_port = address.port();
+    initial_state.trace_methods = config.trace_methods;
+    initial_state.trace_kcp = config.trace_kcp;
     // Runtime tuning is server-owned; persisted player snapshots keep only gameplay state.
     initial_state.drop_multiplier = normalize_multiplier(config.drop_multiplier);
     initial_state.ship_exp_multiplier = normalize_multiplier(config.ship_exp_multiplier);
@@ -179,6 +181,13 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
     initial_state.social_store = Some(store.clone());
     let state = Arc::new(Mutex::new(initial_state));
     let persist_lock = Arc::new(tokio::sync::Mutex::new(()));
+    tracing::info!(
+        port = address.port(),
+        game_login_port = ?advertised_game_login_port,
+        kcp_game_login_port = ?kcp_game_login_port,
+        profile_id = %profile_id,
+        "server ready"
+    );
     println!(
         "{}",
         serde_json::to_string(&json!({
@@ -199,7 +208,7 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
             if let Err(error) =
                 run_game_login_listener(listener, state, store, persist_lock, catalogs).await
             {
-                eprintln!("game-login listener failed: {error}");
+                tracing::error!(%error, "game-login listener failed");
             }
         });
     }
@@ -213,7 +222,7 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
             if let Err(error) =
                 run_kcp_game_login_listener(listener, state, store, persist_lock, catalogs).await
             {
-                eprintln!("kcp-game-login listener failed: {error}");
+                tracing::error!(%error, "kcp-game-login listener failed");
             }
         });
     }
@@ -235,7 +244,7 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
             )
             .await
             {
-                eprintln!("connection failed: {error}");
+                tracing::error!(%error, "connection failed");
             }
         });
     }
@@ -258,7 +267,7 @@ async fn run_game_login_listener(
             if let Err(error) =
                 handle_game_login_connection(stream, state, store, persist_lock, catalogs).await
             {
-                eprintln!("game-login connection failed: {error}");
+                tracing::error!(%error, "game-login connection failed");
             }
         });
     }
@@ -502,15 +511,15 @@ async fn run_kcp_game_login_listener(
     persist_lock: Arc<tokio::sync::Mutex<()>>,
     catalogs: Arc<GameCatalogs>,
 ) -> Result<(), ServerError> {
+    let trace_kcp = state.lock().map(|state| state.trace_kcp).unwrap_or(false);
     let mut peers = std::collections::HashMap::<std::net::SocketAddr, KcpPeer>::new();
     let mut buffer = vec![0_u8; 65_535];
     loop {
         tokio::select! {
             received = socket.recv_from(&mut buffer) => {
                 let (length, endpoint) = received?;
-                let trace_kcp = std::env::var_os("BLUEOATH_TRACE_KCP").is_some();
                 if trace_kcp {
-                    eprintln!("kcp datagram rx endpoint={endpoint} bytes={length}");
+                    tracing::debug!(%endpoint, bytes = length, "kcp datagram received");
                 }
                 let now = current_unix_millis();
                 let mut peer = if let Some(mut peer) = peers.remove(&endpoint) {
@@ -535,14 +544,15 @@ async fn run_kcp_game_login_listener(
                     let Some((packet, consumed)) = decoded else { break };
                     offset += consumed;
                     if trace_kcp {
-                        eprintln!(
-                            "kcp packet endpoint={endpoint} conv={} command={:?} frg={} sn={} una={} data={}",
-                            packet.conv,
-                            packet.command,
-                            packet.fragment,
-                            packet.sequence_number,
-                            packet.unacknowledged,
-                            packet.data.len()
+                        tracing::debug!(
+                            %endpoint,
+                            conv = packet.conv,
+                            command = ?packet.command,
+                            fragment = packet.fragment,
+                            sequence_number = packet.sequence_number,
+                            unacknowledged = packet.unacknowledged,
+                            data_bytes = packet.data.len(),
+                            "kcp packet"
                         );
                     }
                     if peer.connection.conv() != packet.conv {
@@ -559,14 +569,15 @@ async fn run_kcp_game_login_listener(
                     let messages = peer.connection.input(packet);
                     for message in messages {
                         if trace_kcp {
-                            eprintln!(
-                                "kcp application message endpoint={endpoint} bytes={} prefix={}",
-                                message.len(),
-                                message
+                            tracing::debug!(
+                                %endpoint,
+                                bytes = message.len(),
+                                prefix = %message
                                     .iter()
                                     .take(24)
                                     .map(|byte| format!("{byte:02x}"))
-                                    .collect::<String>()
+                                    .collect::<String>(),
+                                "kcp application message"
                             );
                         }
                         let responses = match build_kcp_wire_responses(
@@ -579,13 +590,13 @@ async fn run_kcp_game_login_listener(
                         ).await {
                             Ok(responses) => responses,
                             Err(error) => {
-                                eprintln!("dropping invalid KCP application message from {endpoint}: {error}");
+                                tracing::warn!(%endpoint, %error, "dropping invalid KCP application message");
                                 continue;
                             }
                         };
                         for response in responses {
                             if let Err(error) = peer.connection.send(&response, now) {
-                                eprintln!("dropping oversized KCP response for {endpoint}: {error}");
+                                tracing::warn!(%endpoint, %error, "dropping oversized KCP response");
                             }
                         }
                     }
@@ -593,7 +604,7 @@ async fn run_kcp_game_login_listener(
                 drain_kcp_shared_events(&mut peer, &state, now)?;
                 for datagram in peer.connection.flush(now) {
                     if trace_kcp {
-                        eprintln!("kcp datagram tx endpoint={endpoint} bytes={}", datagram.len());
+                        tracing::debug!(%endpoint, bytes = datagram.len(), "kcp datagram sent");
                     }
                     socket.send_to(&datagram, endpoint).await?;
                 }

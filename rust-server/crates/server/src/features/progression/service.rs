@@ -451,6 +451,7 @@ mod typed_tests {
             blueoath_domain::HeroState {
                 id: hero_id,
                 template_id: blueoath_domain::TemplateId::new(100).unwrap(),
+                fashioning: 9,
                 name: String::new(),
                 change_name_time: 0,
                 level: 1,
@@ -506,6 +507,7 @@ mod typed_tests {
             blueoath_domain::HeroState {
                 id: hero_id,
                 template_id: blueoath_domain::TemplateId::new(100).unwrap(),
+                fashioning: 9,
                 name: String::new(),
                 change_name_time: 0,
                 level: 1,
