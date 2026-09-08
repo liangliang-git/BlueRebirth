@@ -286,6 +286,12 @@ fn apply_response_effects(
     }
 }
 
+fn handler_payload(result: HandlerResult, method: &str) -> Option<Vec<u8>> {
+    result
+        .into_response(method)
+        .map(|response| response.payload)
+}
+
 pub(super) async fn process_game_login_frame_payload_with_catalogs_typed_mut<S>(
     stream: &mut S,
     state: &ServerState,
@@ -406,7 +412,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if typed_account.is_some()
             && matches!(request.method.as_str(), "copy.DotBase" | "copyinfo.DotBase") =>
@@ -428,7 +434,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if typed_account.is_some() && compat_feature::handles_typed(request.method.as_str()) => {
             let mut compat_effects = ResponseEffects::default();
@@ -450,7 +456,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if typed_account.is_some() && legacy_only_method(request.method.as_str()) => {
             handler_error = Some(GameError::InvalidRequest(
@@ -564,7 +570,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::Hero) => {
             let mut hero_effects = ResponseEffects::default();
@@ -593,7 +599,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if known_method == Some(KnownMethod::TacticGetHeros) => {
             let fleet = match typed_account.as_deref() {
@@ -909,7 +915,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::Guild) => {
             let mut guild_effects = ResponseEffects::default();
@@ -933,7 +939,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::Friend) => {
             let result = if let Some(typed) = typed_account.as_mut() {
@@ -944,7 +950,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::Chat) => {
             let mut chat_effects = ResponseEffects::default();
@@ -967,7 +973,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::Adventure) => {
             let result = if let Some(typed) = typed_account.as_mut() {
@@ -980,7 +986,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::Boss) => {
             let result = if let Some(typed) = typed_account.as_mut() {
@@ -996,7 +1002,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::GuildBox) => {
             let mut guildbox_effects = ResponseEffects::default();
@@ -1024,7 +1030,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::InviteScore) => {
             let mut invite_effects = ResponseEffects::default();
@@ -1049,7 +1055,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if activity_handler::handles(request.method.as_str()) => {
             let result = HandlerResult::Error(GameError::InvalidRequest(
@@ -1058,7 +1064,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if activity_extra_handler::handles(request.method.as_str()) => {
             let result = if let Some(typed) = typed_account.as_mut() {
@@ -1083,7 +1089,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if typed_account.is_some() && misc_handler::handles_typed(request.method.as_str()) => {
             let result = misc_handler::handle_typed(
@@ -1094,7 +1100,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if matches!(
             known_method,
@@ -1120,7 +1126,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if typed_account.is_none()
             && (method.is_family(MethodFamily::Exchange)
@@ -1137,7 +1143,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::TeachingServer) => {
             let result = if let Some(account) = typed_account.as_mut() {
@@ -1153,7 +1159,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::Outpost) => {
             let result = if let Some(typed) = typed_account.as_mut() {
@@ -1164,7 +1170,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::ShipTask) => {
             let mut shiptask_effects = ResponseEffects::default();
@@ -1190,7 +1196,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::SportsMeet)
             || method.is_family(MethodFamily::SportsMeetRank) =>
@@ -1220,7 +1226,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::Exchange) && typed_account.is_some() => {
             let mut exchange_effects = ResponseEffects::default();
@@ -1240,7 +1246,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::FoodCompose) && typed_account.is_some() => {
             let mut food_effects = ResponseEffects::default();
@@ -1260,7 +1266,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::WorldEvent) && typed_account.is_some() => {
             let mut world_event_effects = ResponseEffects::default();
@@ -1280,7 +1286,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if (method.is_family(MethodFamily::BattlePass)
             || method.is_family(MethodFamily::ActivityBattlePass))
@@ -1303,7 +1309,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if (method.is_family(MethodFamily::Magazine)
             || method.is_family(MethodFamily::InteractionItem))
@@ -1326,7 +1332,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if typed_account.is_some()
             && guildtask_handler::handles_typed(request.method.as_str()) =>
@@ -1347,7 +1353,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if guildtask_handler::handles(request.method.as_str()) => {
             let result = HandlerResult::Error(GameError::InvalidRequest(
@@ -1356,7 +1362,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if typed_account.is_some()
             && guild_extension_handler::handles_typed(request.method.as_str()) =>
@@ -1369,7 +1375,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if guild_extension_handler::handles(request.method.as_str()) => {
             let result = HandlerResult::Error(GameError::InvalidRequest(
@@ -1378,7 +1384,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if typed_account.is_some()
             && matches!(
@@ -1516,7 +1522,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::Equip)
             || method.is_family(MethodFamily::EquipTestCopy)
@@ -1547,7 +1553,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::Building)
             || method.is_family(MethodFamily::Build)
@@ -1589,7 +1595,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::BuildShip) => {
             let mut buildship_effects = ResponseEffects::default();
@@ -1616,7 +1622,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         "task.TaskInfo" => {
             let result = typed_account
@@ -1696,7 +1702,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if typed_account.is_some() && coop_handler::handles_typed(request.method.as_str()) => {
             let mut coop_effects = ResponseEffects::default();
@@ -1716,7 +1722,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::MatchServer)
             || method.is_family(MethodFamily::Room)
@@ -1739,7 +1745,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         "dailycopy.GetData" | "dailycopy.SelectEx" => {
             let mut daily_copy_effects = ResponseEffects::default();
@@ -1776,7 +1782,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         "dailycopy.UpdateDailyCopyData" => typed_account.as_ref().map(|typed| {
             daily_copy_snapshot_payload_from_typed_account(
@@ -1804,7 +1810,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::Copy)
             && !matches!(
@@ -1864,7 +1870,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            let payload = result.into_payload();
+            let payload = handler_payload(result, request.method.as_str());
             if typed_handled && request.method == "dailycopy.CopyEnter" {
                 if let Some(typed) = typed_account.as_deref() {
                     append_method_push(
@@ -1908,7 +1914,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::Tower) => {
             let result = if let Some(typed) = typed_account.as_mut() {
@@ -1925,7 +1931,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         _ if method.is_family(MethodFamily::ActivityTower) => {
             let result = if let Some(typed) = typed_account.as_mut() {
@@ -1943,7 +1949,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            result.into_payload()
+            handler_payload(result, request.method.as_str())
         }
         "copy.ChooseSfLv" => {
             let (copy_id, requested) = match SeaDifficultyRequest::decode(request_args) {

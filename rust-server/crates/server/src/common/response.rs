@@ -70,13 +70,13 @@ pub enum HandlerResult {
 }
 
 impl HandlerResult {
-    pub fn into_payload(self) -> Option<Vec<u8>> {
+    pub fn into_response(self, method: impl Into<String>) -> Option<Response> {
         match self {
-            Self::Reply(response) => Some(response.payload),
+            Self::Reply(response) => Some(response),
             Self::PushOnly | Self::Empty => None,
             // Errors still complete request callback with empty payload. The
             // outer session carries client error code/message separately.
-            Self::Error(_) => Some(Vec::new()),
+            Self::Error(_) => Some(Response::raw(method, Vec::new())),
         }
     }
 }
@@ -156,7 +156,9 @@ mod tests {
     #[test]
     fn handler_error_still_completes_callback_with_empty_payload() {
         assert_eq!(
-            HandlerResult::Error(super::GameError::AccountUnavailable).into_payload(),
+            HandlerResult::Error(super::GameError::AccountUnavailable)
+                .into_response("user.GetUserInfo")
+                .map(|response| response.payload),
             Some(Vec::new())
         );
     }
