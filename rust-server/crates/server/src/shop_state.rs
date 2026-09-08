@@ -117,8 +117,28 @@ pub(super) fn encode_quality_buy_goods_response(
     output
 }
 
-pub(super) fn append_method_push(pushes: &mut Vec<Vec<u8>>, method: &str, ret: Vec<u8>) {
-    pushes.push(Response::new(method, ret).encode_push(current_unix_seconds()));
+pub(super) trait ResponsePushBuffer {
+    fn push_response(&mut self, response: Response);
+}
+
+impl ResponsePushBuffer for Vec<Response> {
+    fn push_response(&mut self, response: Response) {
+        self.push(response);
+    }
+}
+
+impl ResponsePushBuffer for Vec<Vec<u8>> {
+    fn push_response(&mut self, response: Response) {
+        self.push(response.encode_push(current_unix_seconds()));
+    }
+}
+
+pub(super) fn append_method_push<P: ResponsePushBuffer>(
+    pushes: &mut P,
+    method: &str,
+    ret: Vec<u8>,
+) {
+    pushes.push_response(Response::raw(method, ret));
 }
 
 #[cfg(test)]
@@ -351,4 +371,27 @@ pub(super) fn shop_refresh_payload(
     append_varint_field(&mut payload, 5, 0);
     append_varint_field(&mut payload, 6, 0);
     Ok(payload)
+}
+
+#[cfg(test)]
+mod response_push_tests {
+    use super::{append_method_push, Response};
+    use blueoath_protocol::TMessageCodec;
+
+    #[test]
+    fn typed_push_buffer_defers_wire_encoding() {
+        let mut responses = Vec::<Response>::new();
+        append_method_push(&mut responses, "bag.UpdateBagData", vec![1, 2, 3]);
+        assert_eq!(responses[0].method, "bag.UpdateBagData");
+        assert_eq!(responses[0].payload, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn legacy_push_buffer_still_encodes_compatibility_bytes() {
+        let mut pushes = Vec::<Vec<u8>>::new();
+        append_method_push(&mut pushes, "bag.UpdateBagData", vec![1, 2, 3]);
+        let response = TMessageCodec::decode_response(&pushes[0]).expect("encoded push");
+        assert_eq!(response.method, "bag.UpdateBagData");
+        assert_eq!(response.ret, Some(vec![1, 2, 3]));
+    }
 }

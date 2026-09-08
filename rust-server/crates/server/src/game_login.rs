@@ -255,6 +255,7 @@ where
     Ok(())
 }
 
+#[cfg(test)]
 fn apply_response_effects(
     effects: ResponseEffects,
     pre_pushes: &mut Vec<Vec<u8>>,
@@ -265,6 +266,21 @@ fn apply_response_effects(
     let now = current_unix_seconds();
     pre_pushes.extend(pre.into_iter().map(|response| response.encode_push(now)));
     post_pushes.extend(post.into_iter().map(|response| response.encode_push(now)));
+    if let Some(error) = error {
+        *handler_error = Some(error);
+    }
+}
+
+#[cfg(not(test))]
+fn apply_response_effects(
+    effects: ResponseEffects,
+    pre_pushes: &mut Vec<Response>,
+    post_pushes: &mut Vec<Response>,
+    handler_error: &mut Option<GameError>,
+) {
+    let (pre, post, error) = effects.into_parts();
+    pre_pushes.extend(pre);
+    post_pushes.extend(post);
     if let Some(error) = error {
         *handler_error = Some(error);
     }
@@ -340,8 +356,14 @@ where
             | "user.SetPlayerHeadFrame"
             | "user.SetHead"
     );
+    #[cfg(test)]
     let mut pre_pushes = Vec::<Vec<u8>>::new();
+    #[cfg(not(test))]
+    let mut pre_pushes = Vec::<Response>::new();
+    #[cfg(test)]
     let mut post_pushes = Vec::<Vec<u8>>::new();
+    #[cfg(not(test))]
+    let mut post_pushes = Vec::<Response>::new();
     #[allow(unused_mut)]
     #[cfg(test)]
     let mut pass_details: Option<BattlePassDetails> = None;
@@ -2335,8 +2357,14 @@ where
             eprintln!("game-login StartBase ret_hex={trace_ret_hex}");
         }
     }
+    #[cfg(test)]
     for push in pre_pushes {
         NetSocketFrameCodec::write(stream, 0, &push).await?;
+    }
+    #[cfg(not(test))]
+    for push in pre_pushes {
+        let wire = push.encode_push(current_unix_seconds());
+        NetSocketFrameCodec::write(stream, 0, &wire).await?;
     }
     NetSocketFrameCodec::write(stream, 0, &response).await?;
     #[cfg(test)]
@@ -2790,8 +2818,14 @@ where
             sync_typed_daily_copy_state(typed, legacy, current_unix_seconds());
         }
     }
+    #[cfg(test)]
     for push in post_pushes {
         NetSocketFrameCodec::write(stream, 0, &push).await?;
+    }
+    #[cfg(not(test))]
+    for push in post_pushes {
+        let wire = push.encode_push(current_unix_seconds());
+        NetSocketFrameCodec::write(stream, 0, &wire).await?;
     }
     Ok(true)
 }
