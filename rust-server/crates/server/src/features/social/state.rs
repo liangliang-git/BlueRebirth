@@ -1,8 +1,8 @@
 use super::*;
 
-pub(super) const GUILD_MEMBER: i32 = 100;
-pub(super) const GUILD_LEADER: i32 = 1;
-pub(super) const DEFAULT_GUILD_ID: u64 = 9_000_001;
+pub(crate) const GUILD_MEMBER: i32 = 100;
+pub(crate) const GUILD_LEADER: i32 = 1;
+pub(crate) const DEFAULT_GUILD_ID: u64 = 9_000_001;
 
 fn append_limit(output: &mut Vec<u8>, level: i32) {
     let mut limit = Vec::new();
@@ -48,7 +48,7 @@ fn encode_typed_base_guild_info(guild: &blueoath_domain::GuildState) -> Vec<u8> 
     output
 }
 
-pub(super) fn guild_list_payload_from_typed(
+pub(crate) fn guild_list_payload_from_typed(
     account: &blueoath_domain::AccountState,
     from_rank: i32,
     num: i32,
@@ -67,7 +67,7 @@ pub(super) fn guild_list_payload_from_typed(
     output
 }
 
-pub(super) fn guild_search_payload_from_typed(
+pub(crate) fn guild_search_payload_from_typed(
     account: &blueoath_domain::AccountState,
     guild_id_arg: u64,
     name: &str,
@@ -85,7 +85,7 @@ pub(super) fn guild_search_payload_from_typed(
     output
 }
 
-pub(super) fn guild_info_payload_from_typed(account: &blueoath_domain::AccountState) -> Vec<u8> {
+pub(crate) fn guild_info_payload_from_typed(account: &blueoath_domain::AccountState) -> Vec<u8> {
     let Some(guild) = account.guild.as_ref() else {
         return Vec::new();
     };
@@ -108,7 +108,7 @@ pub(super) fn guild_info_payload_from_typed(account: &blueoath_domain::AccountSt
     output
 }
 
-pub(super) fn guild_user_info_payload_from_typed(
+pub(crate) fn guild_user_info_payload_from_typed(
     account: &blueoath_domain::AccountState,
 ) -> Vec<u8> {
     let mut output = Vec::new();
@@ -130,7 +130,7 @@ pub(super) fn guild_user_info_payload_from_typed(
     output
 }
 
-pub(super) fn guild_member_list_payload_from_typed(
+pub(crate) fn guild_member_list_payload_from_typed(
     account: &blueoath_domain::AccountState,
 ) -> Vec<u8> {
     let Some(guild) = account.guild.as_ref() else {
@@ -161,7 +161,7 @@ pub(super) fn guild_member_list_payload_from_typed(
     output
 }
 
-pub(super) fn guild_apply_list_payload_from_typed(
+pub(crate) fn guild_apply_list_payload_from_typed(
     account: &blueoath_domain::AccountState,
 ) -> Vec<u8> {
     let Some(guild) = account.guild.as_ref() else {

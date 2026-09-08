@@ -20,5 +20,6 @@ pub(crate) mod guild_handler;
 pub(crate) mod guildbox_handler;
 #[path = "guild_task_service.rs"]
 pub(crate) mod guildtask_handler;
-#[allow(unused_imports)]
-pub(crate) use crate::guild_state as state;
+#[path = "state.rs"]
+pub(crate) mod state;
+pub(crate) use state::*;
