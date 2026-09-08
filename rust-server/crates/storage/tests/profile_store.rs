@@ -175,6 +175,43 @@ fn typed_social_relations_round_trip_through_normalized_storage() {
 }
 
 #[test]
+fn typed_hero_compat_progress_round_trips_without_key_rewrite() {
+    let (store, root) = store();
+    let profile_id = ProfileId::new("hero-progress").unwrap();
+    let mut account = NewAccountFactory::create(profile_id.clone(), "Captain");
+    account
+        .activities
+        .progress
+        .insert("compat:hero:1:intensify:1:level".to_owned(), 7);
+    account
+        .activities
+        .progress
+        .insert("compat:hero:1:intensify:1:exp".to_owned(), 23);
+    store.create(&account).unwrap();
+
+    let loaded = store.load_typed_account(&profile_id).unwrap().unwrap();
+    assert_eq!(
+        loaded
+            .activities
+            .progress
+            .get("compat:hero:1:intensify:1:level"),
+        Some(&7)
+    );
+    assert_eq!(
+        loaded
+            .activities
+            .progress
+            .get("compat:hero:1:intensify:1:exp"),
+        Some(&23)
+    );
+    assert!(!loaded
+        .activities
+        .progress
+        .contains_key("compat:hero:1:intensify:1:level\u{1f}value"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn typed_tower_state_round_trips_through_normalized_storage() {
     let (store, root) = store();
     let profile_id = ProfileId::new("typed-tower").unwrap();

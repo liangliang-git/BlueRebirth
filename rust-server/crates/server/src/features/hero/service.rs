@@ -215,6 +215,49 @@ fn push_hero_changes(
     }
 }
 
+fn push_hero_delta_changes(
+    account: &blueoath_domain::AccountState,
+    target_id: u64,
+    consumed_ids: &[u64],
+    state: Option<&ServerState>,
+    effects: &mut ResponseEffects,
+) {
+    let full = hero_bag_from_typed_account(account);
+    let mut heroes = full
+        .heroes
+        .into_iter()
+        .filter(|hero| u64::from(hero.hero_id) == target_id)
+        .collect::<Vec<_>>();
+    heroes.extend(consumed_ids.iter().filter_map(|hero_id| {
+        u32::try_from(*hero_id).ok().map(|hero_id| HeroGrid {
+            hero_id,
+            template_id: 0,
+            ..HeroGrid::default()
+        })
+    }));
+    effects.push_pre(Response::raw(
+        "hero.UpdateHeroBagData",
+        HeroBagCodec::encode(&HeroBag {
+            heroes,
+            bag_size: full.bag_size,
+        }),
+    ));
+    effects.push_pre(Response::raw(
+        "bag.UpdateBagData",
+        BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+    ));
+    effects.push_pre(Response::raw(
+        "equip.UpdateEquipBagData",
+        EquipListCodec::encode(&equip_list_from_typed_account(account)),
+    ));
+    if let Some(state) = state {
+        effects.push_pre(Response::raw(
+            "user.UpdateUserInfo",
+            UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+        ));
+    }
+}
+
 fn handle_skill_upgrade(
     account: &mut blueoath_domain::AccountState,
     _method: &str,
@@ -453,7 +496,13 @@ fn handle_intensify(
             u64::try_from(diamond_cost).unwrap_or(u64::MAX),
         );
     }
-    push_hero_changes(account, state, effects, true);
+    push_hero_delta_changes(
+        account,
+        request.hero_id,
+        &request.consumed_hero_ids,
+        state,
+        effects,
+    );
     HandlerResult::PushOnly
 }
 
@@ -588,7 +637,13 @@ fn handle_advance(
     }
     let advance = hero_progress(account, request.hero_id, "advance").saturating_add(1);
     set_hero_progress(account, request.hero_id, "advance", advance);
-    push_hero_changes(account, state, effects, true);
+    push_hero_delta_changes(
+        account,
+        request.hero_id,
+        &request.consumed_hero_ids,
+        state,
+        effects,
+    );
     HandlerResult::PushOnly
 }
 

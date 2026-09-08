@@ -1750,10 +1750,15 @@ impl ProfileStore {
                     }
                 }
             } else {
-                account
-                    .activities
-                    .progress
-                    .insert(format!("{activity_id}\u{1f}{progress_kind}"), value);
+                let key = if progress_kind == "value" && activity_id.starts_with("compat:") {
+                    activity_id
+                        .strip_suffix("\u{1f}value")
+                        .unwrap_or(activity_id.as_str())
+                        .to_owned()
+                } else {
+                    format!("{activity_id}\u{1f}{progress_kind}")
+                };
+                account.activities.progress.insert(key, value);
             }
         }
 
