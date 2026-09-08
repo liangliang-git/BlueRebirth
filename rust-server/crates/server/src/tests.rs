@@ -2418,6 +2418,9 @@ async fn battle_routes_charge_supply_and_refresh_sweep_exp_with_zero_drops() {
     assert!(pass_responses
         .iter()
         .any(|r| r.method == "copy.PassBase" && r.err == 0));
+    assert!(pass_responses
+        .iter()
+        .any(|r| r.method == "user.UpdateUserInfo"));
     assert_eq!(account.resources.amount(CurrencyKind::Supply).get(), 80);
     let mut sweep = Vec::new();
     append_varint_field(&mut sweep, 1, 1);

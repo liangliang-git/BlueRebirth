@@ -1155,6 +1155,69 @@ pub(crate) fn consume_battle_supply_typed(
         .is_ok()
 }
 
+pub(crate) fn apply_battle_settlement_typed(
+    account: &mut blueoath_domain::AccountState,
+    hero_ids: &[blueoath_domain::HeroId],
+    mvp_hero_id: Option<u64>,
+    shipwrecked_ids: &std::collections::HashSet<u64>,
+    rule: BattleSettlementRule,
+    affection_multiplier: f64,
+) -> bool {
+    let mut changed = false;
+    for (position, hero_id) in hero_ids.iter().enumerate() {
+        let Some(hero) = account.dock.heroes.get_mut(hero_id) else {
+            continue;
+        };
+        let mood = i64::from(hero.mood.min(MOOD_MAX as u32));
+        let mut affection_gain = if mood > i64::from(MOOD_MIN) {
+            i64::from(rule.affection_add.max(0))
+        } else {
+            0
+        };
+        if mood > i64::from(MOOD_MIN) && position == 0 {
+            affection_gain =
+                affection_gain.saturating_add(i64::from(rule.affection_flagship_add.max(0)));
+        }
+        if mood > i64::from(MOOD_MIN) && mvp_hero_id == Some(hero_id.get()) {
+            affection_gain =
+                affection_gain.saturating_add(i64::from(rule.affection_mvp_add.max(0)));
+        }
+        let mood_multiplier = if mood >= MOOD_AFFECTION_BONUS_THRESHOLD {
+            1.2
+        } else {
+            1.0
+        };
+        let mut affection_delta =
+            scale_reward(affection_gain, affection_multiplier * mood_multiplier);
+        if shipwrecked_ids.contains(&hero_id.get()) {
+            affection_delta =
+                affection_delta.saturating_sub(i64::from(rule.affection_reduce.max(0)));
+        }
+        let affection = i64::try_from(hero.affection).unwrap_or(i64::MAX);
+        let next_affection = affection
+            .saturating_add(affection_delta)
+            .clamp(0, 1_000_000) as u64;
+        if next_affection != hero.affection {
+            hero.affection = next_affection;
+            changed = true;
+        }
+
+        let mood_reduce = if shipwrecked_ids.contains(&hero_id.get()) {
+            rule.mood_shipwrecks_reduce
+        } else {
+            rule.mood_reduce
+        };
+        let next_mood = mood
+            .saturating_sub(i64::from(mood_reduce.max(0)))
+            .clamp(i64::from(MOOD_MIN), i64::from(MOOD_MAX)) as u32;
+        if next_mood != hero.mood {
+            hero.mood = next_mood;
+            changed = true;
+        }
+    }
+    changed
+}
+
 #[cfg(test)]
 pub(crate) fn add_commander_battle_exp(
     account: &mut Value,

@@ -1771,7 +1771,9 @@ where
                         state.commander_exp_multiplier,
                         state.ship_exp_multiplier,
                         &mut battle_effects,
-                    ),
+                    )
+                    .with_server_state(state)
+                    .with_affection_multiplier(state.affection_multiplier),
                 );
                 if !matches!(result, HandlerResult::Empty) {
                     typed_handled = true;
@@ -2299,7 +2301,11 @@ fn append_typed_user_login_bootstrap(
     ));
     effects.push_pre(super::common::response::Response::raw(
         "guide.GuideInfo",
-        GuideInfoCodec::encode_initial_progress_completed(),
+        GuideInfoCodec::encode_progress(&account.guide.settings),
+    ));
+    effects.push_pre(super::common::response::Response::raw(
+        "strategy.GetStrategy",
+        base_handler::typed_strategy_info_payload(account),
     ));
     let last_copy_id = account
         .battle
@@ -2529,6 +2535,40 @@ mod route_guard_tests {
             decode_string_field(&prefs.payload.into_bytes(), 1).as_deref(),
             Some(r#"{"NewCopyButtomIndex":2}"#)
         );
+    }
+
+    #[test]
+    fn login_bootstrap_restores_guide_progress_and_initializes_strategy_data() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("saved-guide").unwrap(), "Captain");
+        account.guide.settings.insert(
+            "GUIDE_DONE_STAGES".to_owned(),
+            r#"{["10000"]=1,["1200000"]=1}"#.to_owned(),
+        );
+        let mut effects = ResponseEffects::default();
+
+        append_typed_user_login_bootstrap(
+            &mut effects,
+            &ServerState::new("saved-guide", "Captain", "test"),
+            &account,
+            None,
+            None,
+        );
+
+        let (pre, _, _) = effects.into_parts();
+        let guide = pre
+            .iter()
+            .find(|response| response.method == "guide.GuideInfo")
+            .expect("guide bootstrap push");
+        assert!(guide
+            .payload
+            .clone()
+            .into_bytes()
+            .windows(b"1200000".len())
+            .any(|window| window == b"1200000"));
+        assert!(pre
+            .iter()
+            .any(|response| response.method == "strategy.GetStrategy"));
     }
 
     #[test]

@@ -1160,7 +1160,7 @@ fn typed_support_grant(
     }
 }
 
-fn typed_strategy_info_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
+pub(crate) fn typed_strategy_info_payload(account: &blueoath_domain::AccountState) -> Vec<u8> {
     let mut entries = account
         .activities
         .progress

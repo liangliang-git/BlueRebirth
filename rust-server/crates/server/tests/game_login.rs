@@ -366,6 +366,7 @@ async fn game_login_session_returns_user_login_response_and_user_update_push() {
     let expected_pushes = [
         "user.UpdateUserInfo",
         "guide.GuideInfo",
+        "strategy.GetStrategy",
         "prefs.UpdatePrefsInfo",
         "copy.GetCopy",
         "copy.GetCopy",
@@ -468,7 +469,7 @@ async fn user_login_preserves_daily_copy_progress_from_account_snapshot() {
             .await
             .unwrap()
     );
-    for _ in 0..7 {
+    for _ in 0..8 {
         NetSocketFrameCodec::read(&mut client)
             .await
             .unwrap()

@@ -116,7 +116,6 @@ const SEA_DIFFICULTY_UNLOCK_LEVEL: i32 = 60;
 #[cfg(test)]
 const INITIAL_SUPPLY: i64 = 10_000;
 // Client mood values use fixed-point units with a scale of 10,000.
-#[cfg(test)]
 const MOOD_MIN: i32 = 0;
 const MOOD_MAX: i32 = 1_500_000;
 const MOOD_INITIAL: i32 = blueoath_domain::HERO_MOOD_INITIAL as i32;

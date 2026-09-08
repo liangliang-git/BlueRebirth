@@ -32,6 +32,32 @@ fn initial_guide_progress_skips_startup_but_keeps_feature_guides() {
 }
 
 #[test]
+fn guide_progress_restores_saved_settings_without_exposing_internal_preferences() {
+    let settings = [
+        (
+            "GUIDE_DONE_STAGES".to_owned(),
+            r#"{["10000"]=1,["1200000"]=1}"#.to_owned(),
+        ),
+        ("GUIDE_DOING_STAGE".to_owned(), "1200001".to_owned()),
+        ("__client_prefs".to_owned(), "private".to_owned()),
+    ]
+    .into_iter()
+    .collect();
+
+    let payload = GuideInfoCodec::encode_progress(&settings);
+
+    assert!(payload
+        .windows(b"1200000".len())
+        .any(|window| window == b"1200000"));
+    assert!(payload
+        .windows(b"1200001".len())
+        .any(|window| window == b"1200001"));
+    assert!(!payload
+        .windows(b"__client_prefs".len())
+        .any(|window| window == b"__client_prefs"));
+}
+
+#[test]
 fn request_encoding_matches_csharp_wire() {
     let request = TRequest {
         method: "player.Login".to_owned(),

@@ -24,6 +24,8 @@ pub(crate) fn handle_typed(
             ship_stat_multiplier: 1.0,
             commander_exp_multiplier: 1.0,
             ship_exp_multiplier: 1.0,
+            affection_multiplier: 1.0,
+            server_state: None,
             effects: &mut effects,
         },
     )
@@ -274,6 +276,8 @@ pub(crate) struct TypedBattleContext<'a> {
     ship_stat_multiplier: f64,
     commander_exp_multiplier: f64,
     ship_exp_multiplier: f64,
+    affection_multiplier: f64,
+    server_state: Option<&'a ServerState>,
     effects: &'a mut ResponseEffects,
 }
 
@@ -296,8 +300,20 @@ impl<'a> TypedBattleContext<'a> {
             ship_stat_multiplier,
             commander_exp_multiplier,
             ship_exp_multiplier,
+            affection_multiplier: 1.0,
+            server_state: None,
             effects,
         }
+    }
+
+    pub(crate) fn with_affection_multiplier(mut self, multiplier: f64) -> Self {
+        self.affection_multiplier = multiplier;
+        self
+    }
+
+    pub(crate) fn with_server_state(mut self, state: &'a ServerState) -> Self {
+        self.server_state = Some(state);
+        self
     }
 }
 
@@ -315,6 +331,8 @@ pub(crate) fn handle_typed_with_catalog(
         ship_stat_multiplier,
         commander_exp_multiplier,
         ship_exp_multiplier,
+        affection_multiplier,
+        server_state,
         effects,
     } = context;
     match method {
@@ -587,6 +605,33 @@ pub(crate) fn handle_typed_with_catalog(
                     } else {
                         Vec::new()
                     };
+                    let settlement_changed = if grade < 9 {
+                        let shipwrecked_ids = result
+                            .heroes
+                            .iter()
+                            .filter(|hero| hero.hp == 0)
+                            .map(|hero| hero.hero_id)
+                            .collect::<std::collections::HashSet<_>>();
+                        battle_catalog
+                            .and_then(|catalog| {
+                                catalog
+                                    .settlement_by_copy
+                                    .get(&i32::try_from(copy_id.get()).unwrap_or_default())
+                                    .copied()
+                            })
+                            .is_some_and(|rule| {
+                                apply_battle_settlement_typed(
+                                    account,
+                                    &hero_ids,
+                                    result.mvp_hero_id,
+                                    &shipwrecked_ids,
+                                    rule,
+                                    affection_multiplier,
+                                )
+                            })
+                    } else {
+                        false
+                    };
                     if supply_cost.is_some_and(|_| {
                         !consume_battle_supply_typed(
                             account,
@@ -605,7 +650,7 @@ pub(crate) fn handle_typed_with_catalog(
                         let star_level = account.battle.copy_stars.entry(copy_id).or_default();
                         *star_level = (*star_level).max(7);
                     }
-                    if !rewards.is_empty() || !exp_rewards.is_empty() {
+                    if !rewards.is_empty() || !exp_rewards.is_empty() || settlement_changed {
                         effects.push_post(Response::raw(
                             "bag.UpdateBagData",
                             BagInfoCodec::encode(&bag_info_from_typed_account(account)),
@@ -623,6 +668,15 @@ pub(crate) fn handle_typed_with_catalog(
                             FashionListCodec::encode(&fashion_list_from_typed_account(
                                 account,
                                 fashion_catalog,
+                            )),
+                        ));
+                    }
+                    if let Some(server_state) = server_state {
+                        effects.push_post(Response::raw(
+                            "user.UpdateUserInfo",
+                            UserInfoCodec::encode(&user_info_from_typed_account(
+                                server_state,
+                                account,
                             )),
                         ));
                     }
@@ -1546,6 +1600,129 @@ mod tests {
             payload.contains(&0x5a),
             "ship experience field 11 is missing"
         );
+    }
+
+    #[test]
+    fn typed_battle_settlement_updates_supply_mood_affection_and_mvp() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("battle-settlement-state").unwrap(), "Battle");
+        let fleet_id = FleetId::new(1).unwrap();
+        let hero_ids = account
+            .dock
+            .heroes
+            .keys()
+            .copied()
+            .take(1)
+            .collect::<Vec<_>>();
+        assert_eq!(hero_ids.len(), 1);
+        account.fleet.fleets.insert(
+            fleet_id,
+            blueoath_domain::FleetRecord {
+                members: hero_ids.clone(),
+                ..blueoath_domain::FleetRecord::default()
+            },
+        );
+        let mut catalog = BattleCatalog::default();
+        catalog.copies.insert(
+            9,
+            BattleCopy {
+                config_id: 9,
+                copy_type: 2,
+                fleet_ids: vec![7],
+            },
+        );
+        catalog.supply_cost_by_copy.insert(9, (10, 0));
+        catalog.settlement_by_copy.insert(
+            9,
+            BattleSettlementRule {
+                affection_add: 500,
+                affection_flagship_add: 125,
+                affection_mvp_add: 125,
+                affection_reduce: 10_000,
+                mood_reduce: 20_000,
+                mood_shipwrecks_reduce: 100_000,
+            },
+        );
+        let before_supply = account
+            .resources
+            .amount(blueoath_domain::CurrencyKind::Supply)
+            .get();
+        let before_flagship = account.dock.heroes[&hero_ids[0]].clone();
+        let mut start = Vec::new();
+        append_varint_field(&mut start, 2, 9);
+        let state = ServerState::new("battle-settlement-state", "Battle", "test");
+        let mut effects = ResponseEffects::default();
+        assert!(matches!(
+            handle_typed_with_catalog(
+                &mut account,
+                "copy.StartBase",
+                &start,
+                TypedBattleContext::new(
+                    Some(&catalog),
+                    None,
+                    None,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    &mut effects,
+                )
+                .with_server_state(&state),
+            ),
+            HandlerResult::Reply(_)
+        ));
+        let mut pass = Vec::new();
+        append_varint_field(&mut pass, 8, 1);
+        append_varint_field(&mut pass, 9, hero_ids[0].get());
+        for hero_id in &hero_ids {
+            let mut hero = Vec::new();
+            append_varint_field(&mut hero, 1, hero_id.get());
+            append_varint_field(&mut hero, 2, 100);
+            append_message_field(&mut pass, 18, &hero);
+        }
+
+        assert!(matches!(
+            handle_typed_with_catalog(
+                &mut account,
+                "copy.PassBase",
+                &pass,
+                TypedBattleContext::new(
+                    Some(&catalog),
+                    None,
+                    None,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    &mut effects,
+                )
+                .with_server_state(&state),
+            ),
+            HandlerResult::Reply(_)
+        ));
+
+        assert_eq!(
+            account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Supply)
+                .get(),
+            before_supply - 10
+        );
+        assert_eq!(
+            account.dock.heroes[&hero_ids[0]].affection,
+            before_flagship.affection + 900
+        );
+        assert_eq!(
+            account.dock.heroes[&hero_ids[0]].mood,
+            before_flagship.mood - 20_000
+        );
+        let (_, posts, _) = effects.into_parts();
+        assert!(posts
+            .iter()
+            .any(|response| response.method == "user.UpdateUserInfo"));
+        assert!(posts
+            .iter()
+            .any(|response| response.method == "hero.UpdateHeroBagData"));
     }
 
     #[test]

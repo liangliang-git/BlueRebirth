@@ -3805,6 +3805,10 @@ pub struct GuideInfoCodec;
 
 impl GuideInfoCodec {
     pub fn encode_initial_progress_completed() -> Vec<u8> {
+        Self::encode_progress(&std::collections::BTreeMap::new())
+    }
+
+    pub fn encode_progress(settings: &std::collections::BTreeMap<String, String>) -> Vec<u8> {
         let mut output = Vec::new();
         write_varint_field(&mut output, 1, 0);
         write_varint_field(&mut output, 2, 0);
@@ -3820,10 +3824,17 @@ impl GuideInfoCodec {
                 .collect::<Vec<_>>()
                 .join(",")
         );
-        for (key, value) in [
-            ("GUIDE_DONE_STAGES", done_stages.as_str()),
-            ("GUIDE_DOING_STAGE", ""),
-        ] {
+        let mut progress = std::collections::BTreeMap::from([
+            ("GUIDE_DONE_STAGES".to_owned(), done_stages),
+            ("GUIDE_DOING_STAGE".to_owned(), String::new()),
+        ]);
+        progress.extend(
+            settings
+                .iter()
+                .filter(|(key, _)| !key.starts_with("__"))
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
+        for (key, value) in progress {
             let mut setting = Vec::new();
             write_bytes(&mut setting, 1, key.as_bytes());
             write_bytes(&mut setting, 2, value.as_bytes());
