@@ -1,7 +1,7 @@
 {
   "port": 0,
   "gameLoginPort": 0,
-  "clientPath": "C:\\Users\\zhanl\\Desktop\\日服\\blueoath",
+  "catalogPath": ".\\rust-server\\catalog\\config",
   "dropMultiplier": 10.0,
   "shipExpMultiplier": 10.0,
   "commanderExpMultiplier": 10.0,

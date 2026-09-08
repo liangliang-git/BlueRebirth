@@ -117,29 +117,29 @@ Lua 文件和 `bootstrap.lua` 都由运行时读取。**只修改 Lua 一般不�
 <发布包>/Mods
 ```
 
-服务端装备扩展的定位规则不同。给定 `--client-path=<客户端目录>` 时，它读取：
+服务端装备扩展不再通过客户端目录定位。Rust 服务端运行时不读取客户端目录或客户端 `.db`；配置统一来自服务端 `catalog`。
 
 ```text
-<客户端目录的父目录>/Mods
+<服务端发布目录>/Mods
 ```
 
-未提供有效客户端路径时才回退到服务端程序目录下的 `Mods`。例如源码常用参数为：
+服务端不再接受 `--client-path`。服务端配置目录可用 `--catalog-path=<服务端 catalog/config>` 指定：
 
 ```text
---client-path=<仓库>/blueoath/blueoath
+--catalog-path=<仓库>/rust-server/catalog/config
 ```
 
 此时服务端装备扩展实际读取：
 
 ```text
-<仓库>/blueoath/Mods
+<仓库>/rust-server/Mods
 ```
 
 这个目录可能是启动器或发布流程生成的运行副本，不一定与 `<仓库>/Mods` 自动同步。因此开发同时影响客户端与服务端的装备 Mod 时：
 
 1. 先把 `<仓库>/Mods` 作为源码真源；
 2. 查看客户端日志确认 Lua Loader 的实际根目录；
-3. 根据服务端 `--client-path` 计算服务端 Mods 根目录；
+3. 根据服务端发布目录计算服务端 Mods 根目录；
 4. 通过正常部署流程同步 Mod，或在本地测试前显式复制同一版本；
 5. 查看服务端 `[equipment-mod] loaded ...` 日志确认它读到的版本。
 
@@ -870,7 +870,7 @@ client-injector/Mods/my-equipment.mod/
 6. 无论 `overrides` 写什么，最终强制把 `e_id` 改成新 `id`。
 7. 将结果加入服务端装备目录。
 
-服务端从哪里寻找这个文件由 `--client-path` 决定，详见 3.3。单元测试直接读取仓库根目录 `Mods`，不代表真实运行的服务端一定使用同一路径。
+服务端从服务端发布目录寻找这个文件。单元测试直接读取仓库根目录 `Mods`，不代表真实运行的服务端一定使用同一路径。
 
 装备校验规则：
 

@@ -298,7 +298,8 @@ pub struct ServerConfig {
     pub trace_methods: bool,
     pub trace_kcp: bool,
     pub data_root: PathBuf,
-    pub client_path: Option<PathBuf>,
+    /// Server-owned catalog config directory. Contains `config_*.json` files.
+    pub catalog_path: Option<PathBuf>,
     pub drop_multiplier: f64,
     pub ship_exp_multiplier: f64,
     pub commander_exp_multiplier: f64,
@@ -329,8 +330,8 @@ struct ServerFileConfig {
     trace_kcp: Option<bool>,
     #[serde(alias = "dataRoot")]
     data: Option<PathBuf>,
-    #[serde(alias = "clientPath")]
-    client_path: Option<PathBuf>,
+    #[serde(alias = "catalogPath")]
+    catalog_path: Option<PathBuf>,
     #[serde(alias = "dropMultiplier")]
     drop_multiplier: Option<f64>,
     #[serde(alias = "shipExpMultiplier")]
@@ -364,7 +365,7 @@ impl Default for ServerConfig {
             trace_methods: false,
             trace_kcp: false,
             data_root: default_data_root(),
-            client_path: default_client_path(),
+            catalog_path: default_catalog_path(),
             drop_multiplier: 1.0,
             ship_exp_multiplier: 1.0,
             commander_exp_multiplier: 1.0,
@@ -389,7 +390,7 @@ fn default_data_root() -> PathBuf {
         })
 }
 
-fn default_client_path() -> Option<PathBuf> {
+fn default_catalog_path() -> Option<PathBuf> {
     bundled_catalog_root().map(|root| root.join("config"))
 }
 
@@ -424,10 +425,8 @@ fn bundled_catalog_root() -> Option<PathBuf> {
             let data = root.join("data");
             config.is_dir()
                 && data.is_dir()
-                && (config.join("config_chapter.db").is_file()
-                    || config.join("config_shop.db").is_file()
-                    || config.join("config_chapter.json").is_file()
-                    || config.join("config_shop.json").is_file())
+                && config.join("config_chapter.json").is_file()
+                && config.join("config_shop.json").is_file()
                 && data.join("gm-goods.json").is_file()
         })
     })
@@ -496,8 +495,8 @@ impl ServerConfig {
             if let Some(value) = file.data {
                 config.data_root = value;
             }
-            if let Some(value) = file.client_path {
-                config.client_path = Some(value);
+            if let Some(value) = file.catalog_path {
+                config.catalog_path = Some(value);
             }
             if let Some(value) = file.drop_multiplier {
                 config.drop_multiplier = normalize_multiplier(value);
@@ -575,14 +574,14 @@ impl ServerConfig {
                 if !value.is_empty() {
                     config.data_root = PathBuf::from(value);
                 }
-            } else if let Some(value) = strip_prefix_ci(&arg, "--client-path=") {
+            } else if let Some(value) = strip_prefix_ci(&arg, "--catalog-path=") {
                 if !value.is_empty() {
-                    config.client_path = Some(PathBuf::from(value));
+                    config.catalog_path = Some(PathBuf::from(value));
                 }
-            } else if arg.eq_ignore_ascii_case("--client-path") {
-                let value = next_value(&mut args, "--client-path")?;
+            } else if arg.eq_ignore_ascii_case("--catalog-path") {
+                let value = next_value(&mut args, "--catalog-path")?;
                 if !value.is_empty() {
-                    config.client_path = Some(PathBuf::from(value));
+                    config.catalog_path = Some(PathBuf::from(value));
                 }
             } else if arg.eq_ignore_ascii_case("--config") {
                 let _ = next_value(&mut args, "--config")?;
@@ -701,7 +700,7 @@ fn is_known_flag(value: &str) -> bool {
         "--region",
         "--log-level",
         "--data",
-        "--client-path",
+        "--catalog-path",
         "--config",
         "--ship-stat-multiplier",
         "--mood-recovery-multiplier",

@@ -121,7 +121,6 @@ internal static class Program
         AddArgument(startInfo, "--port", config.HttpPort.ToString());
         AddArgument(startInfo, "--game-login-port", config.GameLoginPort.ToString());
         AddArgument(startInfo, "--kcp-game-login-port", config.KcpGameLoginPort.ToString());
-        AddArgument(startInfo, "--client-path", ResolvePath(baseDirectory, config.ClientRoot));
         AddArgument(startInfo, "--data", serverData);
         AddArgument(startInfo, "--profile-id", config.ProfileId);
 

@@ -1,4 +1,3 @@
-use rusqlite::{types::ValueRef, Connection};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -6,42 +5,28 @@ use std::sync::atomic::Ordering;
 use super::*;
 
 fn read_config_rows(path: &Path) -> Vec<(i32, Value)> {
-    if let Some(rows) = read_json_config_rows(path) {
-        return rows
-            .into_iter()
-            .filter(|(id, value)| *id > 0 && !value.is_null())
-            .collect();
-    }
-    let Ok(connection) =
-        Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-    else {
+    // Server catalogs are JSON-owned. The `.db` suffix at call sites is retained
+    // only as a legacy config key name; no SQLite/client file is opened.
+    let json_path = path.with_extension("json");
+    let Ok(bytes) = std::fs::read(json_path) else {
         return Vec::new();
     };
-    let Ok(mut statement) = connection.prepare("SELECT id, jsonbytes FROM DBObject") else {
+    let Ok(document) = serde_json::from_slice::<Value>(&bytes) else {
         return Vec::new();
     };
-    let Ok(rows) = statement.query_map([], |row| {
-        let id = row
-            .get::<_, String>(0)
-            .ok()
-            .and_then(|value| value.parse::<i32>().ok())
-            .or_else(|| {
-                row.get::<_, i64>(0)
-                    .ok()
-                    .and_then(|value| i32::try_from(value).ok())
-            })
-            .unwrap_or_default();
-        let bytes = match row.get_ref(1)? {
-            ValueRef::Blob(bytes) | ValueRef::Text(bytes) => bytes.to_vec(),
-            _ => Vec::new(),
-        };
-        let decoded: Vec<u8> = bytes.into_iter().map(|byte| byte ^ 0x55).collect();
-        let value: Value = serde_json::from_slice(&decoded).unwrap_or_default();
-        Ok((id, value))
-    }) else {
+    let Some(rows) = document.get("rows").and_then(Value::as_array) else {
         return Vec::new();
     };
-    rows.flatten()
+    rows.iter()
+        .filter_map(|row| {
+            let id = row.get("id")?;
+            let id = id
+                .as_i64()
+                .and_then(|value| i32::try_from(value).ok())
+                .or_else(|| id.as_str()?.parse::<i32>().ok())
+                .unwrap_or_default();
+            Some((id, row.get("value")?.clone()))
+        })
         .filter(|(id, value)| *id > 0 && !value.is_null())
         .collect()
 }
@@ -209,55 +194,22 @@ fn config_testship_reward(value: &Value) -> TestShipRewardConfig {
     }
 }
 
-fn read_json_config_rows(path: &Path) -> Option<Vec<(i32, Value)>> {
-    let json_path = path.with_extension("json");
-    let bytes = std::fs::read(json_path).ok()?;
-    let document: Value = serde_json::from_slice(&bytes).ok()?;
-    let rows = document.get("rows")?.as_array()?;
-    Some(
-        rows.iter()
-            .filter_map(|row| {
-                let id = row.get("id")?;
-                let id = id
-                    .as_i64()
-                    .and_then(|value| i32::try_from(value).ok())
-                    .or_else(|| id.as_str()?.parse::<i32>().ok())
-                    .unwrap_or_default();
-                Some((id, row.get("value")?.clone()))
-            })
-            .filter(|(id, value)| *id > 0 && !value.is_null())
-            .collect(),
-    )
+pub(super) fn config_dir(catalog_path: &Path) -> PathBuf {
+    catalog_path.to_path_buf()
 }
 
-pub(super) fn config_dir(client_path: &Path) -> PathBuf {
-    // Accept a server-local catalog directory containing config_*.db directly. This lets
-    // deployments copy client catalogs once and run without the installed client tree.
-    if client_path.join("config_chapter.db").is_file()
-        || client_path.join("config_shop.db").is_file()
-        || client_path.join("config_chapter.json").is_file()
-        || client_path.join("config_shop.json").is_file()
-    {
-        return client_path.to_path_buf();
-    }
-    client_path
-        .join("blueoath_Data")
-        .join("StreamingAssets")
-        .join("config")
-}
-
-pub(super) fn load_chapter_catalog(client_path: Option<&PathBuf>) -> ChapterCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_chapter_catalog(catalog_path: Option<&PathBuf>) -> ChapterCatalog {
+    let Some(catalog_path) = catalog_path else {
         return ChapterCatalog::fallback();
     };
-    let rows = read_config_rows(&config_dir(client_path).join("config_chapter.db"));
+    let rows = read_config_rows(&config_dir(catalog_path).join("config_chapter.db"));
     if rows.is_empty() {
         ChapterCatalog::fallback().with_mini_game_rows(read_config_rows(
-            &config_dir(client_path).join("config_minigame_copy.db"),
+            &config_dir(catalog_path).join("config_minigame_copy.db"),
         ))
     } else {
         ChapterCatalog::from_rows(rows).with_mini_game_rows(read_config_rows(
-            &config_dir(client_path).join("config_minigame_copy.db"),
+            &config_dir(catalog_path).join("config_minigame_copy.db"),
         ))
     }
 }
@@ -281,11 +233,11 @@ fn combination_costs(value: &Value, key: &str) -> Vec<(i32, i32, i32)> {
         .collect()
 }
 
-pub(super) fn load_combination_catalog(client_path: Option<&PathBuf>) -> CombinationCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_combination_catalog(catalog_path: Option<&PathBuf>) -> CombinationCatalog {
+    let Some(catalog_path) = catalog_path else {
         return CombinationCatalog::default();
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let open_sf_ids = read_config_rows(&dir.join("config_ship_fleet.db"))
         .into_iter()
         .filter(|(_, value)| json_i32(value, "combination_open") == Some(1))
@@ -316,20 +268,20 @@ pub(super) fn load_combination_catalog(client_path: Option<&PathBuf>) -> Combina
     }
 }
 
-pub(super) fn load_equip_new_test_catalog(client_path: Option<&PathBuf>) -> EquipNewTestCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_equip_new_test_catalog(catalog_path: Option<&PathBuf>) -> EquipNewTestCatalog {
+    let Some(catalog_path) = catalog_path else {
         return EquipNewTestCatalog::default();
     };
     EquipNewTestCatalog::from_rows(read_config_rows(
-        &config_dir(client_path).join("config_activity.db"),
+        &config_dir(catalog_path).join("config_activity.db"),
     ))
 }
 
-pub(super) fn load_fashion_catalog(client_path: Option<&PathBuf>) -> FashionList {
-    let Some(client_path) = client_path else {
+pub(super) fn load_fashion_catalog(catalog_path: Option<&PathBuf>) -> FashionList {
+    let Some(catalog_path) = catalog_path else {
         return FashionList::default();
     };
-    let path = config_dir(client_path).join("config_fashion.db");
+    let path = config_dir(catalog_path).join("config_fashion.db");
     let mut grouped = std::collections::BTreeMap::<i32, Vec<i32>>::new();
     for (fashion_tid, value) in read_config_rows(&path) {
         let sf_id = value
@@ -357,13 +309,14 @@ pub(super) fn load_fashion_catalog(client_path: Option<&PathBuf>) -> FashionList
     }
 }
 
-pub(super) fn load_equip_catalog(client_path: Option<&PathBuf>) -> EquipCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_equip_catalog(catalog_path: Option<&PathBuf>) -> EquipCatalog {
+    let Some(catalog_path) = catalog_path else {
         return EquipCatalog::default();
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let equip_rows = read_config_rows(&dir.join("config_equip.db"));
-    let skill_rows = read_config_rows(&config_dir(client_path).join("config_pskill_dict_group.db"));
+    let skill_rows =
+        read_config_rows(&config_dir(catalog_path).join("config_pskill_dict_group.db"));
     let max_levels = skill_rows
         .into_iter()
         .filter_map(|(skill_id, value)| {
@@ -590,12 +543,12 @@ pub(super) fn load_equip_catalog(client_path: Option<&PathBuf>) -> EquipCatalog 
 }
 
 pub(super) fn load_hero_skill_catalog(
-    client_path: Option<&PathBuf>,
+    catalog_path: Option<&PathBuf>,
 ) -> std::collections::BTreeMap<i32, Vec<i32>> {
-    let Some(client_path) = client_path else {
+    let Some(catalog_path) = catalog_path else {
         return std::collections::BTreeMap::new();
     };
-    read_config_rows(&config_dir(client_path).join("config_ship_main.db"))
+    read_config_rows(&config_dir(catalog_path).join("config_ship_main.db"))
         .into_iter()
         .filter_map(|(template_id, value)| {
             let mut skills = Vec::new();
@@ -615,14 +568,14 @@ pub(super) fn load_hero_skill_catalog(
 }
 
 pub(super) fn load_hero_skill_upgrade_catalog(
-    client_path: Option<&PathBuf>,
+    catalog_path: Option<&PathBuf>,
 ) -> HeroSkillUpgradeCatalog {
-    let Some(client_path) = client_path else {
+    let Some(catalog_path) = catalog_path else {
         return HeroSkillUpgradeCatalog::default();
     };
     let mut catalog = HeroSkillUpgradeCatalog::default();
     for (group_id, value) in
-        read_config_rows(&config_dir(client_path).join("config_pskill_dict_group.db"))
+        read_config_rows(&config_dir(catalog_path).join("config_pskill_dict_group.db"))
     {
         let costs = value
             .get("upgrade_materials")
@@ -662,11 +615,11 @@ pub(super) fn load_hero_skill_upgrade_catalog(
     catalog
 }
 
-pub(super) fn load_ship_stat_catalog(client_path: Option<&PathBuf>) -> ShipStatCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_ship_stat_catalog(catalog_path: Option<&PathBuf>) -> ShipStatCatalog {
+    let Some(catalog_path) = catalog_path else {
         return ShipStatCatalog::default();
     };
-    let by_template = read_config_rows(&config_dir(client_path).join("config_ship_main.db"))
+    let by_template = read_config_rows(&config_dir(catalog_path).join("config_ship_main.db"))
         .into_iter()
         .filter_map(|(template_id, value)| {
             (template_id > 0).then_some((
@@ -806,11 +759,11 @@ pub(super) fn ship_attributes_for_hero(
     .collect()
 }
 
-pub(super) fn load_talent_catalog(client_path: Option<&PathBuf>) -> TalentCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_talent_catalog(catalog_path: Option<&PathBuf>) -> TalentCatalog {
+    let Some(catalog_path) = catalog_path else {
         return TalentCatalog::default();
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let mut nodes = std::collections::BTreeMap::new();
     for (id, value) in read_config_rows(&dir.join("config_talent.db")) {
         if id <= 0 {
@@ -1032,11 +985,11 @@ pub(super) fn talent_change_payload(target: (i32, Vec<i32>, i32)) -> Vec<u8> {
     out
 }
 
-pub(super) fn load_shop_catalog(client_path: Option<&PathBuf>) -> ShopCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_shop_catalog(catalog_path: Option<&PathBuf>) -> ShopCatalog {
+    let Some(catalog_path) = catalog_path else {
         return ShopCatalog::default();
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let valid_goods = read_config_rows(&dir.join("config_shop_goods.db"))
         .into_iter()
         .map(|(id, _)| id)
@@ -1270,11 +1223,11 @@ fn load_reward_definitions(dir: &Path) -> std::collections::BTreeMap<i32, Vec<Sh
         .collect()
 }
 
-pub(super) fn load_recharge_catalog(client_path: Option<&PathBuf>) -> RechargeCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_recharge_catalog(catalog_path: Option<&PathBuf>) -> RechargeCatalog {
+    let Some(catalog_path) = catalog_path else {
         return RechargeCatalog::default();
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let rewards = load_reward_definitions(&dir);
     let mut catalog = RechargeCatalog::default();
     for (recharge_id, value) in read_config_rows(&dir.join("config_recharge.db")) {
@@ -1290,11 +1243,11 @@ pub(super) fn load_recharge_catalog(client_path: Option<&PathBuf>) -> RechargeCa
     catalog
 }
 
-pub(super) fn load_gameplay_catalog(client_path: Option<&PathBuf>) -> GameplayCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_gameplay_catalog(catalog_path: Option<&PathBuf>) -> GameplayCatalog {
+    let Some(catalog_path) = catalog_path else {
         return GameplayCatalog::default();
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let rows = |name: &str| {
         read_config_rows(&dir.join(name))
             .into_iter()
@@ -1578,11 +1531,11 @@ pub(super) fn load_server_mail_templates(data_root: &Path) -> Vec<MailTemplate> 
     templates
 }
 
-pub(super) fn load_hero_level_catalog(client_path: Option<&PathBuf>) -> HeroLevelCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_hero_level_catalog(catalog_path: Option<&PathBuf>) -> HeroLevelCatalog {
+    let Some(catalog_path) = catalog_path else {
         return HeroLevelCatalog::default();
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let mut catalog = HeroLevelCatalog::default();
     for (item_id, value) in read_config_rows(&dir.join("config_ship_exp_item.db")) {
         if let Some(exp) = json_i32(&value, "exp") {
@@ -1597,11 +1550,11 @@ pub(super) fn load_hero_level_catalog(client_path: Option<&PathBuf>) -> HeroLeve
     catalog
 }
 
-pub(super) fn load_affection_catalog(client_path: Option<&PathBuf>) -> AffectionCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_affection_catalog(catalog_path: Option<&PathBuf>) -> AffectionCatalog {
+    let Some(catalog_path) = catalog_path else {
         return AffectionCatalog::default();
     };
-    let exp_by_item = read_config_rows(&config_dir(client_path).join("config_affection_item.db"))
+    let exp_by_item = read_config_rows(&config_dir(catalog_path).join("config_affection_item.db"))
         .into_iter()
         .filter_map(|(item_id, value)| {
             let exp = json_i32(&value, "affection_exp")
@@ -1628,15 +1581,15 @@ pub(super) fn json_i64_pairs(value: &Value, key: &str) -> Vec<(i32, i64)> {
         .collect()
 }
 
-pub(super) fn load_ship_intensify_catalog(client_path: Option<&PathBuf>) -> ShipIntensifyCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_ship_intensify_catalog(catalog_path: Option<&PathBuf>) -> ShipIntensifyCatalog {
+    let Some(catalog_path) = catalog_path else {
         return ShipIntensifyCatalog {
             same_type_ratio: 10_000,
             diamond_cost_per_hero: 5,
             ..ShipIntensifyCatalog::default()
         };
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let mut catalog = ShipIntensifyCatalog {
         same_type_ratio: 10_000,
         diamond_cost_per_hero: 5,
@@ -1681,11 +1634,11 @@ pub(super) fn load_ship_intensify_catalog(client_path: Option<&PathBuf>) -> Ship
     catalog
 }
 
-pub(super) fn load_ship_break_catalog(client_path: Option<&PathBuf>) -> ShipBreakCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_ship_break_catalog(catalog_path: Option<&PathBuf>) -> ShipBreakCatalog {
+    let Some(catalog_path) = catalog_path else {
         return ShipBreakCatalog::default();
     };
-    let by_template = read_config_rows(&config_dir(client_path).join("config_ship_break.db"))
+    let by_template = read_config_rows(&config_dir(catalog_path).join("config_ship_break.db"))
         .into_iter()
         .filter_map(|(template_id, value)| {
             let break_to = value
@@ -1744,11 +1697,11 @@ pub(super) fn load_ship_break_catalog(client_path: Option<&PathBuf>) -> ShipBrea
     ShipBreakCatalog { by_template }
 }
 
-pub(super) fn load_ship_advance_catalog(client_path: Option<&PathBuf>) -> ShipAdvanceCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_ship_advance_catalog(catalog_path: Option<&PathBuf>) -> ShipAdvanceCatalog {
+    let Some(catalog_path) = catalog_path else {
         return ShipAdvanceCatalog::default();
     };
-    let by_level = read_config_rows(&config_dir(client_path).join("config_ship_advance.db"))
+    let by_level = read_config_rows(&config_dir(catalog_path).join("config_ship_advance.db"))
         .into_iter()
         .filter_map(|(level, value)| {
             let initial_level = json_i32(&value, "initial_level")?;
@@ -1765,11 +1718,11 @@ pub(super) fn load_ship_advance_catalog(client_path: Option<&PathBuf>) -> ShipAd
     ShipAdvanceCatalog { by_level }
 }
 
-pub(super) fn load_ship_remould_catalog(client_path: Option<&PathBuf>) -> ShipRemouldCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_ship_remould_catalog(catalog_path: Option<&PathBuf>) -> ShipRemouldCatalog {
+    let Some(catalog_path) = catalog_path else {
         return ShipRemouldCatalog::default();
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let mut ship_info_by_sf_id = std::collections::BTreeMap::new();
     for (id, value) in read_config_rows(&dir.join("config_ship_info.db")) {
         let sf_id = json_i32(&value, "sf_id").unwrap_or(id);
@@ -1839,13 +1792,15 @@ pub(super) fn load_ship_remould_catalog(client_path: Option<&PathBuf>) -> ShipRe
     }
 }
 
-pub(super) fn load_commander_level_catalog(client_path: Option<&PathBuf>) -> CommanderLevelCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_commander_level_catalog(
+    catalog_path: Option<&PathBuf>,
+) -> CommanderLevelCatalog {
+    let Some(catalog_path) = catalog_path else {
         return CommanderLevelCatalog::default();
     };
     let mut catalog = CommanderLevelCatalog::default();
     for (level, value) in
-        read_config_rows(&config_dir(client_path).join("config_player_levelup.db"))
+        read_config_rows(&config_dir(catalog_path).join("config_player_levelup.db"))
     {
         let level = json_i32(&value, "level").unwrap_or(level);
         let exp = json_i32(&value, "exp").unwrap_or_default();
@@ -1856,13 +1811,13 @@ pub(super) fn load_commander_level_catalog(client_path: Option<&PathBuf>) -> Com
     catalog
 }
 
-pub(super) fn load_hero_breakdown_catalog(client_path: Option<&PathBuf>) -> HeroBreakdownCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_hero_breakdown_catalog(catalog_path: Option<&PathBuf>) -> HeroBreakdownCatalog {
+    let Some(catalog_path) = catalog_path else {
         return HeroBreakdownCatalog::default();
     };
     let mut catalog = HeroBreakdownCatalog::default();
     for (template_id, value) in
-        read_config_rows(&config_dir(client_path).join("config_ship_main.db"))
+        read_config_rows(&config_dir(catalog_path).join("config_ship_main.db"))
     {
         let Some(entries) = value.get("break_down_get").and_then(Value::as_array) else {
             continue;
@@ -1887,12 +1842,12 @@ pub(super) fn load_hero_breakdown_catalog(client_path: Option<&PathBuf>) -> Hero
     catalog
 }
 
-pub(super) fn load_building_catalog(client_path: Option<&PathBuf>) -> BuildingCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_building_catalog(catalog_path: Option<&PathBuf>) -> BuildingCatalog {
+    let Some(catalog_path) = catalog_path else {
         return BuildingCatalog::default();
     };
     let building_configs =
-        read_config_rows(&config_dir(client_path).join("config_buildinginfo.db"))
+        read_config_rows(&config_dir(catalog_path).join("config_buildinginfo.db"))
             .into_iter()
             .filter(|(template_id, _)| *template_id > 0)
             .collect::<std::collections::BTreeMap<_, _>>();
@@ -1921,7 +1876,7 @@ pub(super) fn load_building_catalog(client_path: Option<&PathBuf>) -> BuildingCa
             ))
         })
         .collect();
-    let recipe_configs = read_config_rows(&config_dir(client_path).join("config_recipe.db"))
+    let recipe_configs = read_config_rows(&config_dir(catalog_path).join("config_recipe.db"))
         .into_iter()
         .filter(|(recipe_id, _)| *recipe_id > 0)
         .collect::<std::collections::BTreeMap<_, _>>();
@@ -1941,7 +1896,7 @@ pub(super) fn load_building_catalog(client_path: Option<&PathBuf>) -> BuildingCa
         })
         .collect();
     let resource_time_seconds =
-        read_config_rows(&config_dir(client_path).join("config_parameter.db"))
+        read_config_rows(&config_dir(catalog_path).join("config_parameter.db"))
             .into_iter()
             .filter_map(|(parameter_id, value)| {
                 let seconds = json_i32(&value, "value")?;
@@ -1960,11 +1915,11 @@ pub(super) fn load_building_catalog(client_path: Option<&PathBuf>) -> BuildingCa
     }
 }
 
-pub(super) fn load_support_catalog(client_path: Option<&PathBuf>) -> SupportCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_support_catalog(catalog_path: Option<&PathBuf>) -> SupportCatalog {
+    let Some(catalog_path) = catalog_path else {
         return SupportCatalog::default();
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let rewards = |value: &Value, key: &str| {
         value
             .get(key)
@@ -2067,12 +2022,12 @@ pub(super) fn load_support_catalog(client_path: Option<&PathBuf>) -> SupportCata
     }
 }
 
-pub(super) fn load_handbook_behaviours(client_path: Option<&PathBuf>) -> Vec<i32> {
-    let Some(client_path) = client_path else {
+pub(super) fn load_handbook_behaviours(catalog_path: Option<&PathBuf>) -> Vec<i32> {
+    let Some(catalog_path) = catalog_path else {
         return Vec::new();
     };
     let mut ids =
-        read_config_rows(&config_dir(client_path).join("config_handbook_behaviour_index.db"))
+        read_config_rows(&config_dir(catalog_path).join("config_handbook_behaviour_index.db"))
             .into_iter()
             .map(|(id, _)| id)
             .filter(|id| *id > 0)
@@ -2082,12 +2037,12 @@ pub(super) fn load_handbook_behaviours(client_path: Option<&PathBuf>) -> Vec<i32
     ids
 }
 
-pub(super) fn load_hero_memories(client_path: Option<&PathBuf>) -> Vec<(i32, i32)> {
-    let Some(client_path) = client_path else {
+pub(super) fn load_hero_memories(catalog_path: Option<&PathBuf>) -> Vec<(i32, i32)> {
+    let Some(catalog_path) = catalog_path else {
         return Vec::new();
     };
     let mut memories =
-        read_config_rows(&config_dir(client_path).join("config_building_character_story.db"))
+        read_config_rows(&config_dir(catalog_path).join("config_building_character_story.db"))
             .into_iter()
             .filter_map(|(plot_id, value)| {
                 let hero_id = value
@@ -2177,11 +2132,11 @@ pub(super) fn task_definition_from_value(
     })
 }
 
-pub(super) fn load_task_catalog(client_path: Option<&PathBuf>) -> TaskCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_task_catalog(catalog_path: Option<&PathBuf>) -> TaskCatalog {
+    let Some(catalog_path) = catalog_path else {
         return TaskCatalog::default();
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let mut definitions = Vec::new();
     for (task_type, file) in [
         (1, "config_task_main.db"),
@@ -2277,11 +2232,11 @@ pub(super) fn load_task_catalog(client_path: Option<&PathBuf>) -> TaskCatalog {
     }
 }
 
-pub(super) fn load_build_ship_catalog(client_path: Option<&PathBuf>) -> BuildShipCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_build_ship_catalog(catalog_path: Option<&PathBuf>) -> BuildShipCatalog {
+    let Some(catalog_path) = catalog_path else {
         return BuildShipCatalog::default();
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let mut catalog = BuildShipCatalog::default();
     for (pool_id, value) in read_config_rows(&dir.join("config_extract_ship.db")) {
         if let Some(extract_type) = json_i32(&value, "extract_type") {
@@ -2458,12 +2413,12 @@ pub(super) fn load_build_ship_catalog(client_path: Option<&PathBuf>) -> BuildShi
 }
 
 pub(super) fn load_build_formula_catalog(
-    client_path: Option<&PathBuf>,
+    catalog_path: Option<&PathBuf>,
 ) -> BuildFormulaCatalogRuntime {
-    let Some(client_path) = client_path else {
+    let Some(catalog_path) = catalog_path else {
         return BuildFormulaCatalogRuntime::default();
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let mut configured_rows = Vec::new();
     for (_id, value) in read_config_rows(&dir.join("config_build_ship.db")) {
         let range = |key: &str| {
@@ -2657,11 +2612,11 @@ pub(super) fn build_drop_exists(catalog: &BuildShipCatalog, pool_id: i32) -> boo
     !expand_build_drop(catalog, extract).is_empty()
 }
 
-pub(super) fn load_battle_catalog(client_path: Option<&PathBuf>) -> BattleCatalog {
-    let Some(client_path) = client_path else {
+pub(super) fn load_battle_catalog(catalog_path: Option<&PathBuf>) -> BattleCatalog {
+    let Some(catalog_path) = catalog_path else {
         return BattleCatalog::default();
     };
-    let dir = config_dir(client_path);
+    let dir = config_dir(catalog_path);
     let mut catalog = BattleCatalog::default();
     // This file is server-owned balance data, independent of client assets.
     let quantities_path = dir

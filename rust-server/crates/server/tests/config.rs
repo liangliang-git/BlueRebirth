@@ -12,7 +12,7 @@ fn parses_equals_and_separate_value_arguments() {
         "--region=cn".to_owned(),
         "--data".to_owned(),
         "profiles".to_owned(),
-        "--client-path".to_owned(),
+        "--catalog-path".to_owned(),
         "game".to_owned(),
         "--mood-recovery-multiplier=2.5".to_owned(),
         "--affection-multiplier".to_owned(),
@@ -30,7 +30,7 @@ fn parses_equals_and_separate_value_arguments() {
     assert_eq!(config.profile_name, "Captain");
     assert_eq!(config.version, "1.5.20");
     assert_eq!(config.data_root, std::path::PathBuf::from("profiles"));
-    assert_eq!(config.client_path, Some(std::path::PathBuf::from("game")));
+    assert_eq!(config.catalog_path, Some(std::path::PathBuf::from("game")));
     assert_eq!(config.mood_recovery_multiplier, 2.5);
     assert_eq!(config.affection_multiplier, 0.5);
     assert_eq!(config.building_oil_multiplier, 2.0);

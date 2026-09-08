@@ -68,7 +68,6 @@ dependencies = [
  "blueoath-protocol",
  "blueoath-storage",
  "blueoath-transport",
- "rusqlite",
  "serde",
  "serde_json",
  "thiserror",

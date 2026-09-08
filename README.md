@@ -59,7 +59,7 @@
 # 固定端口，供代理转发
 cargo run --manifest-path .\rust-server\Cargo.toml -p blueoath-server -- `
   --port=7080 --game-login-port=7201 --region=jp --data=.\runtime\jp `
-  --client-path=.\blueoath\blueoath
+  --catalog-path=.\rust-server\catalog\config
 ```
 
 服务端启动后，另开终端执行 `.\start-rust-client-only.bat` 注入客户端。

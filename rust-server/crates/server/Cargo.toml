@@ -15,7 +15,6 @@ blueoath-storage = { path = "../storage" }
 blueoath-protocol = { path = "../protocol" }
 serde.workspace = true
 serde_json.workspace = true
-rusqlite.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

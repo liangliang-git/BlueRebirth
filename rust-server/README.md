@@ -14,11 +14,9 @@ Rust server is the canonical local server. Current slice provides:
   bag/fashion/equip/hero/building/fleet/construction/bath/task/shop/recharge/buildship initialization
   pushes and request refreshes. `user.UserLogin` sends the C#-ordered
   minimum bootstrap sequence (`user.UpdateUserInfo`, `guide.GuideInfo`, four `copy.GetCopy` snapshots,
-  `dailycopy.UpdateDailyCopyData`) before its response. `config_chapter.db` is loaded dynamically;
-  built-in IDs are used only when client config is unavailable. When
-  `--client-path` is provided, `config_fashion.db` is read with C#'s XOR-0x55 format and merged
-  into the fashion push; `config_shop.db` and `config_shop_goods.db` provide valid shop/shelf IDs
-  for compatibility; server-local `catalog/data/shops/shop-*.json` files are preferred
+  `dailycopy.UpdateDailyCopyData`) before its response. All runtime catalogs are loaded from
+  server-owned `catalog/config/*.json` files; installed client files are never read.
+  Server-local `catalog/data/shops/shop-*.json` files are preferred
   for `shop.BuyGoods` and `shop.QualityBuyGoods`, with `gm-goods.json` as fallback;
   handbook behaviour and story tables populate illustration
   bootstrap fields; server-local `gm-mails.json` drives repeatable `mail.GetMailList` and
@@ -61,7 +59,7 @@ cargo run --manifest-path .\rust-server\Cargo.toml -p blueoath-server -- --port=
 # Set `--kcp-game-login-port=<port>` to expose the same login protocol over KCP/UDP.
 # If `catalog/config` and `catalog/data` exist beside the binary (or in the
 # repository's `rust-server/catalog`), they are loaded automatically. Explicit
-# `--client-path`/`--data` override these bundled paths.
+# `--catalog-path`/`--data` override these bundled paths.
 ```
 
 启动参数可放在仓库根目录 `server.json`，命令行参数优先覆盖文件值：
@@ -121,10 +119,10 @@ For the Japanese client at `C:\Users\zhanl\Desktop\日服\blueoath`, use fixed l
 ```powershell
 cargo run --manifest-path .\rust-server\Cargo.toml -p blueoath-server -- `
   --port=7080 --game-login-port=7201 --profile-id=local-player `
-  --client-path='C:\Users\zhanl\Desktop\日服\blueoath'
+  --catalog-path='.\rust-server\catalog\config'
 ```
 
-Create server-local JSON catalog snapshot (removes runtime dependency on game install):
+Create server-local JSON catalog snapshot (export step may inspect a game install; runtime does not):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\export-rust-catalog.ps1 `
@@ -133,11 +131,10 @@ cargo run --manifest-path .\rust-server\Cargo.toml -p blueoath-server -- --port=
 # bundled catalog is auto-detected; flags remain valid for custom locations
 ```
 
-The exporter converts all 100 configuration tables currently referenced by Rust loaders
+The exporter converts all configuration tables currently referenced by Rust loaders
 from XOR/SQLite to `config_*.json`, plus server-owned runtime JSON files. The loader
-prefers JSON and accepts legacy DB files as fallback. Use `-ConfigFormat db` only for a
-legacy DB snapshot, or `-ConfigFormat both` during migration. Keep generated catalog
-files with deployment; re-export when client configuration changes. JSON export also
+reads JSON only; legacy `.db` files are ignored. Keep generated catalog files with
+deployment; re-export when client configuration changes. JSON export also
 runs the field audit/pruner: typed tables keep only fields read by Rust, while raw
 gameplay/forward-compatible tables stay intact. Run it manually after editing JSON:
 

@@ -5597,53 +5597,43 @@ fn sea_difficulty_is_locked_below_commander_level_60() {
 }
 
 #[test]
-fn battle_catalog_loads_xor_config_rows() {
-    let root = std::env::temp_dir().join(format!("blueoath-battle-catalog-{}", std::process::id()));
-    let config = root.join("blueoath_Data/StreamingAssets/config");
+fn battle_catalog_loads_server_json_rows() {
+    let config =
+        std::env::temp_dir().join(format!("blueoath-battle-json-only-{}", std::process::id()));
     std::fs::create_dir_all(&config).unwrap();
     for (name, rows) in [
         (
-            "config_copy.db",
-            vec![(
-                77,
-                r#"{"copy_id":10001,"fleet_id":[42],"blood_range_lower":-1,"random_weight":1000}"#,
-            )],
+            "config_copy.json",
+            json!([{"id":77,"value":{"copy_id":10001,"fleet_id":[42],"blood_range_lower":-1,"random_weight":1000}}]),
         ),
         (
-            "config_fleet.db",
-            vec![(42, r#"{"copy_enemys":[900],"copy_attacheds":[[43,1]]}"#)],
+            "config_fleet.json",
+            json!([{"id":42,"value":{"copy_enemys":[900],"copy_attacheds":[[43,1]]}}]),
         ),
         (
-            "config_ship_enemy.db",
-            vec![(900, r#"{"hp":123,"attack":456,"ship_info_id":7}"#)],
+            "config_ship_enemy.json",
+            json!([{ "id":900,"value":{"hp":123,"attack":456,"ship_info_id":7}}]),
         ),
         (
-            "config_copy_display.db",
-            vec![(10001, r#"{"search_3d":1}"#)],
+            "config_copy_display.json",
+            json!([{ "id":10001,"value":{"search_3d":1}}]),
         ),
     ] {
-        let connection = rusqlite::Connection::open(config.join(name)).unwrap();
-        connection
-            .execute("CREATE TABLE DBObject (id INTEGER, jsonbytes BLOB)", [])
-            .unwrap();
-        for (id, json) in rows {
-            let encoded: Vec<u8> = json.as_bytes().iter().map(|byte| byte ^ 0x55).collect();
-            connection
-                .execute(
-                    "INSERT INTO DBObject (id, jsonbytes) VALUES (?1, ?2)",
-                    rusqlite::params![id, encoded],
-                )
-                .unwrap();
-        }
+        std::fs::write(
+            config.join(name),
+            serde_json::to_vec(&json!({"format":"blueoath-catalog-json","version":1,"rows":rows}))
+                .unwrap(),
+        )
+        .unwrap();
     }
-    let catalog = load_battle_catalog(Some(&root));
+    let catalog = load_battle_catalog(Some(&config));
     assert_eq!(catalog.copies[&10001].config_id, 77);
     assert_eq!(catalog.copies[&10001].fleet_ids, vec![42]);
     assert!(catalog.search_3d.contains(&10001));
     assert_eq!(catalog.fleet_enemies[&42], vec![900]);
     assert_eq!(catalog.attached_fleet_ids[&42], vec![43]);
     assert_eq!(catalog.enemies[&900].hp, 123);
-    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(config).unwrap();
 }
 
 #[test]
@@ -5652,7 +5642,7 @@ fn battle_catalog_loads_plain_json_rows_without_database() {
         "blueoath-battle-json-catalog-{}",
         std::process::id()
     ));
-    let config = root.join("blueoath_Data/StreamingAssets/config");
+    let config = root.join("config");
     std::fs::create_dir_all(&config).unwrap();
     for (name, rows) in [
         (
@@ -5683,7 +5673,7 @@ fn battle_catalog_loads_plain_json_rows_without_database() {
         std::fs::write(config.join(name), serde_json::to_vec(&document).unwrap()).unwrap();
     }
 
-    let catalog = load_battle_catalog(Some(&root));
+    let catalog = load_battle_catalog(Some(&config));
     assert_eq!(catalog.copies[&10001].config_id, 77);
     assert_eq!(catalog.copies[&10001].fleet_ids, vec![42]);
     assert!(catalog.search_3d.contains(&10001));
@@ -5694,26 +5684,20 @@ fn battle_catalog_loads_plain_json_rows_without_database() {
 }
 
 #[test]
-fn ship_stat_catalog_loads_xor_config_rows() {
-    let root =
-        std::env::temp_dir().join(format!("blueoath-ship-stat-catalog-{}", std::process::id()));
-    let config = root.join("blueoath_Data/StreamingAssets/config");
+fn ship_stat_catalog_loads_server_json_rows() {
+    let config = std::env::temp_dir().join(format!(
+        "blueoath-ship-stat-json-only-{}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&config).unwrap();
-    let connection = rusqlite::Connection::open(config.join("config_ship_main.db")).unwrap();
-    connection
-        .execute("CREATE TABLE DBObject (id INTEGER, jsonbytes BLOB)", [])
-        .unwrap();
-    let json = br#"{"hp":1083,"attack":157,"defense":216,"torpedo_attack":716,"torpedo_defense":217,"ship_bomb_attack":216,"ship_torpedo_attack":87,"carry_plane_count":2,"to_air_attack":216,"hit":100,"dodge":35}"#;
-    let encoded: Vec<u8> = json.iter().map(|byte| byte ^ 0x55).collect();
-    connection
-        .execute(
-            "INSERT INTO DBObject (id, jsonbytes) VALUES (?1, ?2)",
-            rusqlite::params![10210511, encoded],
-        )
-        .unwrap();
-    drop(connection);
+    let value = json!({"hp":1083,"attack":157,"defense":216,"torpedo_attack":716,"torpedo_defense":217,"ship_bomb_attack":216,"ship_torpedo_attack":87,"carry_plane_count":2,"to_air_attack":216,"hit":100,"dodge":35});
+    std::fs::write(
+        config.join("config_ship_main.json"),
+        serde_json::to_vec(&json!({"format":"blueoath-catalog-json","version":1,"rows":[{"id":10210511,"value":value}]})).unwrap(),
+    )
+    .unwrap();
 
-    let catalog = load_ship_stat_catalog(Some(&root));
+    let catalog = load_ship_stat_catalog(Some(&config));
     let stats = &catalog.by_template[&10210511];
     assert_eq!(stats.hp, 1083);
     assert_eq!(stats.attack, 157);
@@ -5721,7 +5705,7 @@ fn ship_stat_catalog_loads_xor_config_rows() {
     assert_eq!(stats.ship_bomb_attack, 216);
     assert_eq!(stats.ship_torpedo_attack, 87);
     assert_eq!(stats.carry_plane_count, 2);
-    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(config).unwrap();
 }
 
 #[test]
@@ -5736,30 +5720,25 @@ fn battle_catalog_includes_new_account_tutorial_copy() {
 }
 
 #[test]
-fn chapter_catalog_loads_xor_config_db_from_client_path() {
-    let root =
-        std::env::temp_dir().join(format!("blueoath-chapter-catalog-{}", std::process::id()));
-    let config_dir = root.join("blueoath_Data/StreamingAssets/config");
+fn chapter_catalog_loads_server_json_rows() {
+    let config_dir =
+        std::env::temp_dir().join(format!("blueoath-chapter-json-only-{}", std::process::id()));
     std::fs::create_dir_all(&config_dir).unwrap();
-    let path = config_dir.join("config_chapter.db");
-    let connection = rusqlite::Connection::open(&path).unwrap();
-    connection
-        .execute("CREATE TABLE DBObject (id INTEGER, jsonbytes BLOB)", [])
-        .unwrap();
-    let json = br#"{"class_type":2,"level_list":[201,202]}"#;
-    let encoded: Vec<u8> = json.iter().map(|byte| byte ^ 0x55).collect();
-    connection
-        .execute(
-            "INSERT INTO DBObject (id, jsonbytes) VALUES (?1, ?2)",
-            rusqlite::params![20, encoded],
-        )
-        .unwrap();
-    drop(connection);
+    std::fs::write(
+        config_dir.join("config_chapter.json"),
+        serde_json::to_vec(&json!({
+            "format":"blueoath-catalog-json",
+            "version":1,
+            "rows":[{"id":20,"value":{"class_type":2,"level_list":[201,202]}}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
 
-    let catalog = load_chapter_catalog(Some(&root));
+    let catalog = load_chapter_catalog(Some(&config_dir));
     assert_eq!(catalog.sea, vec![201, 202]);
     assert!(catalog.plot.is_empty());
-    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(config_dir).unwrap();
 }
 
 #[test]
