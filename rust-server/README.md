@@ -18,8 +18,8 @@ Rust server is the canonical local server. Current slice provides:
   built-in IDs are used only when client config is unavailable. When
   `--client-path` is provided, `config_fashion.db` is read with C#'s XOR-0x55 format and merged
   into the fashion push; `config_shop.db` and `config_shop_goods.db` provide valid shop/shelf IDs
-  for `shop.UpdateShopInfo`; server-local `gm-goods.json` drives `shop.BuyGoods` and
-  `shop.QualityBuyGoods` rewards, while `config_shop_goods.db` supplies purchase costs;
+  for compatibility; server-local `catalog/data/shops/shop-*.json` files are preferred
+  for `shop.BuyGoods` and `shop.QualityBuyGoods`, with `gm-goods.json` as fallback;
   handbook behaviour and story tables populate illustration
   bootstrap fields; server-local `gm-mails.json` drives repeatable `mail.GetMailList` and
   `mail.FetchItem`/`mail.FetchAllItems` rewards. Mutations use a serialized candidate-state → SQLite-save → in-memory-commit

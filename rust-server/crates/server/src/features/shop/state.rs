@@ -268,7 +268,13 @@ pub(crate) fn shop_info_payload(catalog: Option<&ShopCatalog>) -> Vec<u8> {
     let server_goods = catalog.filter(|catalog| !catalog.goods_by_id.is_empty());
     let configured = catalog.filter(|catalog| !catalog.goods_by_shop.is_empty());
     let shop_ids = if server_goods.is_some() {
-        SHOP_IDS.iter().map(|id| *id as i32).collect::<Vec<_>>()
+        let mut ids = SHOP_IDS.iter().map(|id| *id as i32).collect::<Vec<_>>();
+        if let Some(catalog) = server_goods {
+            ids.extend(catalog.goods_by_shop.keys().copied());
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids
     } else {
         configured
             .map(|catalog| catalog.goods_by_shop.keys().copied().collect::<Vec<_>>())

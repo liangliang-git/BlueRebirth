@@ -3786,6 +3786,42 @@ fn invalid_server_shop_inventory_does_not_retain_client_shelves() {
 }
 
 #[test]
+fn server_shop_page_files_load_inline_goods_and_costs() {
+    let root = std::env::temp_dir().join(format!("blueoath-shop-pages-{}", std::process::id()));
+    let pages = root.join("shops");
+    std::fs::create_dir_all(&pages).unwrap();
+    std::fs::write(
+        pages.join("shop-777.json"),
+        r#"{
+            "shopId": 777,
+            "label": "test-page",
+            "goods": [{
+                "goodId": 7001,
+                "type": 18,
+                "itemId": 1032014,
+                "num": 1,
+                "costs": [{"type": 5, "itemId": 2, "amount": 680}]
+            }]
+        }"#,
+    )
+    .unwrap();
+
+    let mut catalog = ShopCatalog::default();
+    load_server_shop_goods(&mut catalog, &root);
+
+    assert_eq!(catalog.goods_by_shop.get(&777), Some(&vec![7001]));
+    let good = catalog.goods_by_id.get(&7001).unwrap();
+    assert_eq!(good.shop_id, 777);
+    assert_eq!(good.goods_type, 18);
+    assert_eq!(good.item_id, 1032014);
+    assert_eq!(good.costs[0].goods_type, 5);
+    assert_eq!(good.costs[0].item_id, 2);
+    assert_eq!(good.costs[0].amount, 680);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn shop_equipment_quantity_creates_distinct_instances() {
     let mut account = default_account_snapshot("alice", "Alice", 123);
     let before = account["equip"]["items"].as_array().unwrap().len();

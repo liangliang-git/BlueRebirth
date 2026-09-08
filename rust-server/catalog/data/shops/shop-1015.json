@@ -1,0 +1,58 @@
+{
+  "shopId": 1015,
+  "label": "shop-1015",
+  "goods": [
+    {
+      "goodId": 101163,
+      "type": 1,
+      "itemId": 17557,
+      "num": 1,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 17558,
+          "amount": 8
+        }
+      ]
+    },
+    {
+      "goodId": 101164,
+      "type": 5,
+      "itemId": 1,
+      "num": 1000,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 17558,
+          "amount": 1
+        }
+      ]
+    },
+    {
+      "goodId": 101165,
+      "type": 1,
+      "itemId": 19604,
+      "num": 1,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 17558,
+          "amount": 300
+        }
+      ]
+    },
+    {
+      "goodId": 101166,
+      "type": 25,
+      "itemId": 253009,
+      "num": 1,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 17558,
+          "amount": 600
+        }
+      ]
+    }
+  ]
+}

@@ -1097,10 +1097,16 @@ pub(super) fn shop_costs_from_value(value: &Value) -> Vec<ShopCost> {
 }
 
 pub(super) fn load_server_shop_goods(catalog: &mut ShopCatalog, data_root: &Path) {
-    // GM inventory is authoritative. Never retain client shelf IDs when the
-    // server inventory is missing or malformed; those IDs cannot be purchased.
+    // Server-local page files are authoritative when present. Never retain
+    // client shelf IDs when server inventory is available.
     catalog.goods_by_shop.clear();
     catalog.goods_by_id.clear();
+    if load_server_shop_pages(catalog, &data_root.join("shops")) {
+        normalize_server_shop_goods(catalog);
+        return;
+    }
+
+    // Compatibility fallback for deployments that still have only gm-goods.json.
     let path = data_root.join("gm-goods.json");
     let Ok(bytes) = std::fs::read(path) else {
         return;
@@ -1147,6 +1153,89 @@ pub(super) fn load_server_shop_goods(catalog: &mut ShopCatalog, data_root: &Path
             );
         }
     }
+    normalize_server_shop_goods(catalog);
+}
+
+fn load_server_shop_pages(catalog: &mut ShopCatalog, pages_dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(pages_dir) else {
+        return false;
+    };
+    let mut loaded_any = false;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(root) = serde_json::from_slice::<Value>(&bytes) else {
+            continue;
+        };
+        let Some(shop_id) = json_i32(&root, "shopId").filter(|value| *value > 0) else {
+            continue;
+        };
+        let Some(goods) = root.get("goods").and_then(Value::as_array) else {
+            continue;
+        };
+        for value in goods {
+            let Some(good_id) = json_i32(value, "goodId").filter(|value| *value > 0) else {
+                continue;
+            };
+            if catalog.goods_by_id.contains_key(&good_id) {
+                continue;
+            }
+            let Some(goods_type) = json_i32(value, "type").filter(|value| *value > 0) else {
+                continue;
+            };
+            let Some(item_id) = json_i32(value, "itemId").filter(|value| *value > 0) else {
+                continue;
+            };
+            let num = json_i32(value, "num").unwrap_or(1).max(1);
+            let costs = server_shop_costs_from_value(value);
+            catalog
+                .goods_by_shop
+                .entry(shop_id)
+                .or_default()
+                .push(good_id);
+            catalog.goods_by_id.insert(
+                good_id,
+                ShopGood {
+                    shop_id,
+                    goods_type,
+                    item_id,
+                    num,
+                    costs,
+                },
+            );
+            loaded_any = true;
+        }
+    }
+    loaded_any
+}
+
+fn server_shop_costs_from_value(value: &Value) -> Vec<ShopCost> {
+    value
+        .get("costs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|cost| {
+            let goods_type = json_i32(cost, "type")
+                .or_else(|| json_i32(cost, "goodsType"))
+                .filter(|value| *value > 0)?;
+            let item_id = json_i32(cost, "itemId").filter(|value| *value > 0)?;
+            let amount = json_i64(cost, "amount").filter(|value| *value > 0)?;
+            Some(ShopCost {
+                goods_type,
+                item_id,
+                amount,
+            })
+        })
+        .collect()
+}
+
+fn normalize_server_shop_goods(catalog: &mut ShopCatalog) {
     for goods in catalog.goods_by_shop.values_mut() {
         goods.sort_unstable();
         goods.dedup();

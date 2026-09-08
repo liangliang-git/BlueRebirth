@@ -1,0 +1,32 @@
+{
+  "shopId": 1014,
+  "label": "shop-1014",
+  "goods": [
+    {
+      "goodId": 101161,
+      "type": 1,
+      "itemId": 10194,
+      "num": 1,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 10007,
+          "amount": 1
+        }
+      ]
+    },
+    {
+      "goodId": 101162,
+      "type": 12,
+      "itemId": 120004,
+      "num": 1,
+      "costs": [
+        {
+          "type": 12,
+          "itemId": 120005,
+          "amount": 1
+        }
+      ]
+    }
+  ]
+}

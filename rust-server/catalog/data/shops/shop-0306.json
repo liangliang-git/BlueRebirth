@@ -1,0 +1,292 @@
+{
+  "shopId": 306,
+  "label": "shop-0306",
+  "goods": [
+    {
+      "goodId": 94060,
+      "type": 1,
+      "itemId": 12301,
+      "num": 1,
+      "costs": [
+        {
+          "type": 5,
+          "itemId": 2,
+          "amount": 180
+        }
+      ]
+    },
+    {
+      "goodId": 94061,
+      "type": 1,
+      "itemId": 10007,
+      "num": 1,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 80
+        }
+      ]
+    },
+    {
+      "goodId": 94062,
+      "type": 5,
+      "itemId": 5,
+      "num": 2000,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 40
+        }
+      ]
+    },
+    {
+      "goodId": 94063,
+      "type": 1,
+      "itemId": 11022,
+      "num": 1,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 20
+        }
+      ]
+    },
+    {
+      "goodId": 94064,
+      "type": 1,
+      "itemId": 11023,
+      "num": 1,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 20
+        }
+      ]
+    },
+    {
+      "goodId": 94065,
+      "type": 1,
+      "itemId": 11024,
+      "num": 1,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 20
+        }
+      ]
+    },
+    {
+      "goodId": 94066,
+      "type": 1,
+      "itemId": 11025,
+      "num": 1,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 20
+        }
+      ]
+    },
+    {
+      "goodId": 94067,
+      "type": 1,
+      "itemId": 11026,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 5
+        }
+      ]
+    },
+    {
+      "goodId": 94068,
+      "type": 1,
+      "itemId": 11027,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 5
+        }
+      ]
+    },
+    {
+      "goodId": 94069,
+      "type": 1,
+      "itemId": 11028,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 5
+        }
+      ]
+    },
+    {
+      "goodId": 94070,
+      "type": 1,
+      "itemId": 11029,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 5
+        }
+      ]
+    },
+    {
+      "goodId": 94071,
+      "type": 1,
+      "itemId": 11030,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 10
+        }
+      ]
+    },
+    {
+      "goodId": 94072,
+      "type": 1,
+      "itemId": 11031,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 10
+        }
+      ]
+    },
+    {
+      "goodId": 94073,
+      "type": 1,
+      "itemId": 11032,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 10
+        }
+      ]
+    },
+    {
+      "goodId": 94074,
+      "type": 1,
+      "itemId": 11033,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 15
+        }
+      ]
+    },
+    {
+      "goodId": 94075,
+      "type": 1,
+      "itemId": 11034,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 15
+        }
+      ]
+    },
+    {
+      "goodId": 94076,
+      "type": 1,
+      "itemId": 11035,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 15
+        }
+      ]
+    },
+    {
+      "goodId": 94077,
+      "type": 1,
+      "itemId": 10000,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 10
+        }
+      ]
+    },
+    {
+      "goodId": 94078,
+      "type": 6,
+      "itemId": 60002,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 10
+        }
+      ]
+    },
+    {
+      "goodId": 94079,
+      "type": 1,
+      "itemId": 10184,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 8
+        }
+      ]
+    },
+    {
+      "goodId": 94080,
+      "type": 1,
+      "itemId": 10187,
+      "num": 10,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 8
+        }
+      ]
+    },
+    {
+      "goodId": 94081,
+      "type": 5,
+      "itemId": 1,
+      "num": 10000,
+      "costs": [
+        {
+          "type": 1,
+          "itemId": 12302,
+          "amount": 4
+        }
+      ]
+    }
+  ]
+}
