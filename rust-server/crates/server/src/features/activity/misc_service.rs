@@ -2,7 +2,7 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     state: &ServerState,
     account: &mut blueoath_domain::AccountState,
     method: &str,

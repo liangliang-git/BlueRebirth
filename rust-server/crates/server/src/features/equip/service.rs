@@ -17,7 +17,7 @@ fn typed_currency_kind(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
     }
 }
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],

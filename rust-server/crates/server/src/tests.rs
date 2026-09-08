@@ -5465,7 +5465,7 @@ fn pve_room_payload_contains_room_owner_and_ready_state() {
         }],
         ..Default::default()
     };
-    let payload = super::game_login::coop_handler::typed_coop_room_payload(&room);
+    let payload = super::game_login::test_coop_handler::typed_coop_room_payload(&room);
     let users = decode_repeated_message_field(&payload, 5);
 
     assert_eq!(decode_varint_field(&payload, 1), 1234);
@@ -5487,8 +5487,11 @@ fn tower_info_payload_contains_initial_progress_and_reset_time() {
         tower_chapter_id: 30001,
         ..ChapterCatalog::default()
     };
-    let payload =
-        super::game_login::tower_handler::tower_info_payload_typed(&account, Some(&catalog), 456);
+    let payload = super::game_login::test_tower_handler::tower_info_payload_typed(
+        &account,
+        Some(&catalog),
+        456,
+    );
 
     assert_eq!(decode_varint_field(&payload, 1), 30001);
     assert_eq!(decode_varint_field(&payload, 2), 0);
@@ -5503,7 +5506,8 @@ fn activity_tower_payload_contains_reset_time() {
         blueoath_domain::ProfileId::new("activity-tower-payload").unwrap(),
         "Tower",
     );
-    let payload = super::game_login::tower_handler::activity_tower_payload_typed(&account, 456);
+    let payload =
+        super::game_login::test_tower_handler::activity_tower_payload_typed(&account, 456);
     assert_eq!(decode_varint_field(&payload, 1), 0);
     assert_eq!(decode_varint_field(&payload, 2), 456);
 }

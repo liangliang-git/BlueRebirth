@@ -3,7 +3,7 @@ use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 #[cfg(test)]
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
@@ -11,7 +11,7 @@ pub(super) fn handle_typed(
     handle_typed_with_catalog(account, method, request_args, None, 1.0)
 }
 
-pub(super) fn handle_typed_copy_star_reward(
+pub(crate) fn handle_typed_copy_star_reward(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
@@ -132,7 +132,7 @@ pub(super) fn handle_typed_copy_star_reward(
     HandlerResult::Reply(Response::raw(method, encode_task_reward_list(&pending)))
 }
 
-pub(super) fn handle_typed_with_catalog(
+pub(crate) fn handle_typed_with_catalog(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
@@ -656,7 +656,7 @@ pub(super) fn handle_typed_with_catalog(
     }
 }
 
-pub(super) fn handle_typed_mop_up(
+pub(crate) fn handle_typed_mop_up(
     state: &ServerState,
     account: &mut blueoath_domain::AccountState,
     method: &str,

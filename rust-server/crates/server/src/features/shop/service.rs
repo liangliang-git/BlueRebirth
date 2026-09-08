@@ -3,11 +3,11 @@ use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 #[derive(Clone, Copy)]
-pub(super) struct CommerceTypedCatalogs<'a> {
-    pub(super) shop: Option<&'a ShopCatalog>,
+pub(crate) struct CommerceTypedCatalogs<'a> {
+    pub(crate) shop: Option<&'a ShopCatalog>,
 }
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     state: &ServerState,
     method: &str,

@@ -3,7 +3,7 @@ use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 use blueoath_domain::AccountState;
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     account: &mut AccountState,
     state: &ServerState,
     method: &str,

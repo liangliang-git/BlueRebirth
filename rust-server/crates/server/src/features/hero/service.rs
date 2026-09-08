@@ -2,16 +2,16 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
-pub(super) struct HeroTypedCatalogs<'a> {
-    pub(super) hero_level: Option<&'a HeroLevelCatalog>,
-    pub(super) tasks: Option<&'a TaskCatalog>,
-    pub(super) breakdown: Option<&'a HeroBreakdownCatalog>,
-    pub(super) ship_exp_multiplier: f64,
+pub(crate) struct HeroTypedCatalogs<'a> {
+    pub(crate) hero_level: Option<&'a HeroLevelCatalog>,
+    pub(crate) tasks: Option<&'a TaskCatalog>,
+    pub(crate) breakdown: Option<&'a HeroBreakdownCatalog>,
+    pub(crate) ship_exp_multiplier: f64,
 }
 
 #[cfg(test)]
 impl HeroTypedCatalogs<'static> {
-    pub(super) const fn empty() -> Self {
+    pub(crate) const fn empty() -> Self {
         Self {
             hero_level: None,
             tasks: None,
@@ -21,7 +21,7 @@ impl HeroTypedCatalogs<'static> {
     }
 }
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
@@ -482,7 +482,7 @@ mod tests {
         let HandlerResult::Reply(response) = result else {
             panic!("typed hero info must reply");
         };
-        let hero_payload = response.payload;
+        let hero_payload = response.payload.into_bytes();
         assert!(hero_payload.len() > 2);
         assert_eq!(decode_varint_u64_field(&hero_payload, 2), 200);
     }

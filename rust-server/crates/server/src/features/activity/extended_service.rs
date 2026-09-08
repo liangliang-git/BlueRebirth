@@ -2,7 +2,7 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
-pub(super) fn handle_typed_battlepass(
+pub(crate) fn handle_typed_battlepass(
     state: &ServerState,
     account: &mut blueoath_domain::AccountState,
     method: &str,
@@ -254,7 +254,7 @@ fn typed_battlepass_info_payload(
     output
 }
 
-pub(super) fn handle_typed_exchange(
+pub(crate) fn handle_typed_exchange(
     state: &ServerState,
     account: &mut blueoath_domain::AccountState,
     method: &str,
@@ -331,7 +331,7 @@ pub(super) fn handle_typed_exchange(
     }
 }
 
-pub(super) fn handle_typed_food_compose(
+pub(crate) fn handle_typed_food_compose(
     state: &ServerState,
     account: &mut blueoath_domain::AccountState,
     method: &str,
@@ -420,7 +420,7 @@ pub(super) fn handle_typed_food_compose(
     }
 }
 
-pub(super) fn handle_typed_world_event(
+pub(crate) fn handle_typed_world_event(
     state: &ServerState,
     account: &mut blueoath_domain::AccountState,
     method: &str,
@@ -639,7 +639,7 @@ fn typed_currency(item: i32) -> Option<blueoath_domain::CurrencyKind> {
     })
 }
 
-pub(super) fn gameplay_catalog() -> &'static GameplayCatalog {
+pub(crate) fn gameplay_catalog() -> &'static GameplayCatalog {
     GAMEPLAY_CATALOG.get_or_init(GameplayCatalog::default)
 }
 

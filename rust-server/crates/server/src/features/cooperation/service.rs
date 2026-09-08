@@ -53,14 +53,14 @@ const COPY_ID_FIELD: u8 = 2;
 #[cfg(test)]
 const HERO_LIST_FIELD: u8 = 4;
 
-pub(super) fn handles_typed(method: &str) -> bool {
+pub(crate) fn handles_typed(method: &str) -> bool {
     matches!(
         GameMethod::parse(method).family(),
         MethodFamily::MatchServer | MethodFamily::Room | MethodFamily::Battle
     ) || canonical_typed_method(method).is_some()
 }
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     state: &ServerState,
     account: &mut blueoath_domain::AccountState,
     method: &str,

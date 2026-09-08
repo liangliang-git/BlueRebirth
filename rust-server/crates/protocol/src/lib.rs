@@ -3693,7 +3693,30 @@ impl GuideInfoCodec {
 
 pub struct CopyInfoCodec;
 
+/// Typed copy progress response. Codec owns wire field numbers; callers
+/// provide domain-level IDs and progress only.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CopyInfoPayload {
+    pub copy_type: i32,
+    pub copy_ids: Vec<i32>,
+    pub max_copy_id: i32,
+    pub passed_copy_ids: Vec<i32>,
+    pub passed_copy_counts: Vec<(i32, i32)>,
+    pub difficulty: i32,
+}
+
 impl CopyInfoCodec {
+    pub fn encode_payload(value: &CopyInfoPayload) -> Vec<u8> {
+        Self::encode_with_progress_and_difficulty_for_type(
+            value.copy_type,
+            &value.copy_ids,
+            value.max_copy_id,
+            &value.passed_copy_ids,
+            &value.passed_copy_counts,
+            value.difficulty,
+        )
+    }
+
     pub fn encode(copy_type: i32, copy_ids: &[i32], max_copy_id: i32) -> Vec<u8> {
         Self::encode_with_progress(copy_type, copy_ids, max_copy_id, copy_ids)
     }

@@ -2,7 +2,7 @@ use super::common::response::{HandlerResult, Response};
 use super::*;
 use blueoath_domain::{AccountState, AdventureState};
 
-pub(super) fn handle_typed(account: &mut AccountState, method: &str) -> HandlerResult {
+pub(crate) fn handle_typed(account: &mut AccountState, method: &str) -> HandlerResult {
     match method {
         "adventure.GetAdventure" => reply(method, typed_adventure_payload(&account.adventure)),
         "adventure.LevelUp" => {

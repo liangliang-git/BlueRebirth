@@ -1,8 +1,9 @@
-use super::common::error::GameError;
-use super::common::response::{HandlerResult, Response};
-use super::*;
+use crate::common::error::GameError;
+use crate::common::response::{HandlerResult, Response};
+use crate::*;
+use blueoath_protocol::{CopyIdRequest, Decode};
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
@@ -65,7 +66,7 @@ pub(super) fn handle_typed(
     }
 }
 
-pub(super) fn handle_activity_typed(
+pub(crate) fn handle_activity_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],

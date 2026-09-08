@@ -2,7 +2,7 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
@@ -74,7 +74,7 @@ fn invalid(message: &'static str) -> HandlerResult {
     HandlerResult::Error(GameError::InvalidRequest(message))
 }
 
-pub(super) fn outpost_info_payload_typed(account: &blueoath_domain::AccountState) -> Vec<u8> {
+pub(crate) fn outpost_info_payload_typed(account: &blueoath_domain::AccountState) -> Vec<u8> {
     let mut output = Vec::new();
     for (building_id, level) in &account.buildings.levels {
         let mut building = Vec::new();

@@ -3,10 +3,10 @@ use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
 #[derive(Clone, Copy)]
-pub(super) struct BuildingTypedCatalogs<'a> {
-    pub(super) building: Option<&'a BuildingCatalog>,
-    pub(super) oil_multiplier: f64,
-    pub(super) gold_multiplier: f64,
+pub(crate) struct BuildingTypedCatalogs<'a> {
+    pub(crate) building: Option<&'a BuildingCatalog>,
+    pub(crate) oil_multiplier: f64,
+    pub(crate) gold_multiplier: f64,
 }
 
 #[allow(dead_code)]
@@ -32,7 +32,7 @@ pub(crate) fn handle_typed(
     )
 }
 
-pub(super) fn handle_typed_with_multipliers(
+pub(crate) fn handle_typed_with_multipliers(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
@@ -326,7 +326,7 @@ fn typed_project_payload(project: &blueoath_domain::ConstructionProjectState) ->
     output
 }
 
-pub(super) fn typed_construction_info_payload(
+pub(crate) fn typed_construction_info_payload(
     account: &blueoath_domain::AccountState,
     now: u32,
 ) -> Vec<u8> {

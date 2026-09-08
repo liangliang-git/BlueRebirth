@@ -5,7 +5,7 @@ use blueoath_domain::{
     AccountState, CurrencyKind, EquipId, EquipmentState, HeroId, HeroState, TemplateId,
 };
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     account: &mut AccountState,
     method: &str,
     request_args: &[u8],

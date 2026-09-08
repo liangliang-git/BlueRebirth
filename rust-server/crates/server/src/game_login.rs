@@ -1,6 +1,4 @@
 use blueoath_domain::AccountState;
-#[cfg(test)]
-use blueoath_game::BattleService;
 use blueoath_protocol::*;
 use blueoath_transport::NetSocketFrameCodec;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -9,75 +7,44 @@ use super::catalog::*;
 use super::common::error::GameError;
 use super::common::request::RequestContext;
 use super::common::response::Response;
-use super::common::response::{HandlerResult, ResponseEffects};
+use super::common::response::{BattleResponse, HandlerResult, ResponseEffects};
+use super::features::user::{requests::UserRequest, responses as user_responses};
+use super::features::{
+    activity::{
+        adventure_service as adventure_handler, extended_service as extended_handler,
+        extra_service as activity_extra_handler, invite_score_service as invitescore_handler,
+        misc_service as misc_extended_handler, service as activity_handler,
+        ship_task_service as shiptask_handler, sports_meet_service as sportsmeet_handler,
+        talent_handler,
+    },
+    battle::service as battle_handler,
+    building::{
+        buildship_service as buildship_handler, outpost_service as outpost_handler,
+        service as building_handler,
+    },
+    cooperation::service as coop_handler,
+    copy::service as daily_copy_handler,
+    equip::service as equip_handler,
+    hero::{compat_service as compat_feature, service as hero_handler},
+    progression::service as progression_handler,
+    shop::service as commerce_handler,
+    social::{
+        boss_handler, chat_handler, friend_handler, guild_extension_handler, guild_handler,
+        guildbox_handler, guildtask_handler,
+    },
+    task::service as task_handler,
+    tower as tower_handler,
+    user::{
+        misc_service as misc_handler, service as base_handler, teaching_service as teaching_handler,
+    },
+};
+#[cfg(test)]
+pub(super) use super::features::{
+    cooperation::service as test_coop_handler, tower as test_tower_handler,
+};
 use super::router::{GameMethod, KnownMethod, MethodFamily};
 use super::wire::*;
 use super::*;
-
-#[path = "features/activity/extra_service.rs"]
-mod activity_extra_handler;
-#[path = "features/activity/service.rs"]
-mod activity_handler;
-#[path = "features/activity/adventure_service.rs"]
-mod adventure_handler;
-#[path = "features/user/service.rs"]
-mod base_handler;
-#[path = "features/battle/service.rs"]
-mod battle_handler;
-#[path = "features/social/boss_service.rs"]
-mod boss_handler;
-#[path = "features/building/service.rs"]
-pub(super) mod building_handler;
-#[path = "features/building/buildship_service.rs"]
-mod buildship_handler;
-#[path = "features/social/chat_service.rs"]
-mod chat_handler;
-#[path = "features/shop/service.rs"]
-mod commerce_handler;
-#[path = "features/hero/compat_service.rs"]
-mod compat_feature;
-#[path = "features/cooperation/service.rs"]
-pub(super) mod coop_handler;
-#[path = "features/copy/service.rs"]
-mod daily_copy_handler;
-#[path = "features/equip/service.rs"]
-pub(crate) mod equip_handler;
-#[path = "features/activity/extended_service.rs"]
-mod extended_handler;
-#[path = "features/social/friend_service.rs"]
-mod friend_handler;
-#[path = "features/social/guild_extension_service.rs"]
-mod guild_extension_handler;
-#[path = "features/social/guild_service.rs"]
-mod guild_handler;
-#[path = "features/social/guild_box_service.rs"]
-mod guildbox_handler;
-#[path = "features/social/guild_task_service.rs"]
-mod guildtask_handler;
-#[path = "features/hero/service.rs"]
-mod hero_handler;
-#[path = "features/activity/invite_score_service.rs"]
-mod invitescore_handler;
-#[path = "features/activity/misc_service.rs"]
-mod misc_extended_handler;
-#[path = "features/user/misc_service.rs"]
-mod misc_handler;
-#[path = "features/building/outpost_service.rs"]
-mod outpost_handler;
-#[path = "features/progression/service.rs"]
-mod progression_handler;
-#[path = "features/activity/ship_task_service.rs"]
-mod shiptask_handler;
-#[path = "features/activity/sports_meet_service.rs"]
-mod sportsmeet_handler;
-#[path = "features/activity/talent_service.rs"]
-mod talent_handler;
-#[path = "features/task/service.rs"]
-mod task_handler;
-#[path = "features/user/teaching_service.rs"]
-mod teaching_handler;
-#[path = "features/tower/service.rs"]
-pub(super) mod tower_handler;
 
 #[cfg(not(test))]
 async fn write_typed_bootstrap_push<S>(
@@ -266,6 +233,63 @@ fn response_payload(method: &str, payload: Vec<u8>) -> Option<Response> {
     Some(Response::raw(method, payload))
 }
 
+fn copy_info_payload(
+    catalog: &ChapterCatalog,
+    copy_type: i32,
+    passed_copy_ids: &[i32],
+) -> blueoath_protocol::CopyInfoPayload {
+    let (copy_ids, max_copy_id, response_passed) = match copy_type {
+        2 => (
+            catalog.sea.clone(),
+            copy_progress_max_or_initial(&catalog.sea, passed_copy_ids, catalog.sea_initial),
+            passed_copy_ids.to_vec(),
+        ),
+        33 => (
+            catalog.mubar.clone(),
+            catalog.mubar.iter().copied().max().unwrap_or_default(),
+            catalog.mubar.clone(),
+        ),
+        10 => (
+            catalog.goods_copy.clone(),
+            catalog.goods_copy.iter().copied().max().unwrap_or_default(),
+            catalog.goods_copy.clone(),
+        ),
+        24 => (
+            catalog.tower.clone(),
+            catalog.tower.iter().copied().max().unwrap_or_default(),
+            catalog.tower.clone(),
+        ),
+        34 => (
+            catalog.equip_new_test.clone(),
+            catalog
+                .equip_new_test
+                .iter()
+                .copied()
+                .max()
+                .unwrap_or_default(),
+            catalog.equip_new_test.clone(),
+        ),
+        9 => (
+            catalog.daily.clone(),
+            catalog.daily.iter().copied().max().unwrap_or_default(),
+            catalog.daily.clone(),
+        ),
+        _ => (
+            catalog.plot.clone(),
+            copy_progress_max_or_first(&catalog.plot, passed_copy_ids),
+            passed_copy_ids.to_vec(),
+        ),
+    };
+    blueoath_protocol::CopyInfoPayload {
+        copy_type,
+        copy_ids,
+        max_copy_id,
+        passed_copy_ids: response_passed,
+        passed_copy_counts: Vec::new(),
+        difficulty: 1,
+    }
+}
+
 fn handler_payload(result: HandlerResult, method: &str) -> Option<Response> {
     result.into_response(method)
 }
@@ -404,11 +428,7 @@ where
         }
         _ if known_method == Some(KnownMethod::PlayerLogin) => Some(Response::user(
             request.method.as_str(),
-            GameLoginCodec::encode_response(&TRetLogin {
-                ret: "ok".to_owned(),
-                feign_role_id: state.profile_id.clone(),
-                err_code: 0,
-            }),
+            user_responses::player_login(state.profile_id.clone()),
         )),
         _ if known_method == Some(KnownMethod::PlayerGetUserList) => {
             let user = match typed_account.as_deref() {
@@ -420,7 +440,7 @@ where
             };
             Some(Response::user(
                 request.method.as_str(),
-                UserListCodec::encode(&[user]),
+                user_responses::user_list(user),
             ))
         }
         _ if known_method == Some(KnownMethod::PlayerCreateUser) => {
@@ -433,7 +453,7 @@ where
             };
             Some(Response::user(
                 request.method.as_str(),
-                PlayerUserCodec::encode(&user),
+                user_responses::player(user),
             ))
         }
         _ if known_method == Some(KnownMethod::CacheData)
@@ -608,7 +628,7 @@ where
             };
             Some(Response::user(
                 request.method.as_str(),
-                UserInfoCodec::encode(&user),
+                user_responses::info(user),
             ))
         }
         _ if known_method == Some(KnownMethod::UserLogin) => {
@@ -633,77 +653,26 @@ where
             }
             Some(Response::user(
                 request.method.as_str(),
-                UserLoginCodec::encode_response("ok", "", 0),
+                user_responses::login(),
             ))
         }
-        "user.SetUserSecretary" => {
-            match SetSecretaryRequest::decode(request_args) {
-                Ok(typed) => {
+        "user.SetUserSecretary"
+        | "user.ChangeName"
+        | "user.SetMessage"
+        | "user.SetPlayerHeadFrame"
+        | "user.SetHead" => {
+            match UserRequest::decode(request.method.as_str(), request_args) {
+                Ok(Some(request)) => {
                     if let Some(account) = typed_account.as_mut() {
-                        account.character.secretary_id = u64::try_from(typed.secretary_id)
-                            .ok()
-                            .and_then(|id| blueoath_domain::HeroId::new(id).ok());
+                        if let Err(error) = base_handler::apply_user_request(account, request) {
+                            handler_error = Some(error);
+                        }
+                    } else {
+                        handler_error = Some(GameError::AccountUnavailable);
                     }
                 }
-                Err(_) => {
-                    handler_error = Some(GameError::Internal(
-                        "secretary request is invalid".to_owned(),
-                    ));
-                }
-            }
-            response_payload(request.method.as_str(), Vec::new())
-        }
-        "user.ChangeName" => {
-            match ChangeNameRequest::decode(request_args) {
-                Ok(typed) => {
-                    if let Some(account) = typed_account.as_mut() {
-                        account.character.name = typed.name.clone();
-                    }
-                }
-                Err(_) => {
-                    handler_error = Some(GameError::Internal("name request is invalid".to_owned()));
-                }
-            }
-            response_payload(request.method.as_str(), Vec::new())
-        }
-        "user.SetMessage" => {
-            match SetMessageRequest::decode(request_args) {
-                Ok(typed) => {
-                    if let Some(account) = typed_account.as_mut() {
-                        account.character.message = typed.message.clone();
-                    }
-                }
-                Err(_) => {
-                    handler_error =
-                        Some(GameError::Internal("message request is invalid".to_owned()));
-                }
-            }
-            response_payload(request.method.as_str(), Vec::new())
-        }
-        "user.SetPlayerHeadFrame" => {
-            match SetHeadFrameRequest::decode(request_args) {
-                Ok(typed) => {
-                    if let Some(account) = typed_account.as_mut() {
-                        account.character.head_frame = typed.head_frame.max(0) as u32;
-                    }
-                }
-                Err(_) => {
-                    handler_error = Some(GameError::Internal(
-                        "head frame request is invalid".to_owned(),
-                    ));
-                }
-            }
-            response_payload(request.method.as_str(), Vec::new())
-        }
-        "user.SetHead" => {
-            match SetHeadRequest::decode(request_args) {
-                Ok(typed) => {
-                    if let Some(account) = typed_account.as_mut() {
-                        account.character.head = typed.head.max(0) as u32;
-                    }
-                }
-                Err(_) => {
-                    handler_error = Some(GameError::Internal("head request is invalid".to_owned()));
+                Ok(None) | Err(_) => {
+                    handler_error = Some(GameError::InvalidRequest("user request is invalid"));
                 }
             }
             response_payload(request.method.as_str(), Vec::new())
@@ -1567,7 +1536,7 @@ where
             handler_payload(result, request.method.as_str())
         }
         "dailycopy.UpdateDailyCopyData" => typed_account.as_ref().map(|typed| {
-            Response::battle(
+            Response::battle_bytes(
                 request.method.as_str(),
                 daily_copy_snapshot_payload_from_typed_account(
                     typed,
@@ -1807,58 +1776,7 @@ where
                 .unwrap_or_default();
             Some(Response::battle(
                 request.method.as_str(),
-                match copy_type {
-                    2 => {
-                        let pass_counts = Vec::new();
-                        CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
-                            &catalog.sea,
-                            copy_progress_max_or_initial(
-                                &catalog.sea,
-                                &passed,
-                                catalog.sea_initial,
-                            ),
-                            &passed,
-                            &pass_counts,
-                            1,
-                        )
-                    }
-                    33 => CopyInfoCodec::encode(
-                        33,
-                        &catalog.mubar,
-                        catalog.mubar.iter().copied().max().unwrap_or_default(),
-                    ),
-                    10 => CopyInfoCodec::encode(
-                        10,
-                        &catalog.goods_copy,
-                        catalog.goods_copy.iter().copied().max().unwrap_or_default(),
-                    ),
-                    24 => CopyInfoCodec::encode(
-                        24,
-                        &catalog.tower,
-                        catalog.tower.iter().copied().max().unwrap_or_default(),
-                    ),
-                    34 => CopyInfoCodec::encode(
-                        34,
-                        &catalog.equip_new_test,
-                        catalog
-                            .equip_new_test
-                            .iter()
-                            .copied()
-                            .max()
-                            .unwrap_or_default(),
-                    ),
-                    9 => CopyInfoCodec::encode(
-                        9,
-                        &catalog.daily,
-                        catalog.daily.iter().copied().max().unwrap_or_default(),
-                    ),
-                    _ => CopyInfoCodec::encode_with_progress(
-                        1,
-                        &catalog.plot,
-                        copy_progress_max_or_first(&catalog.plot, &passed),
-                        &passed,
-                    ),
-                },
+                BattleResponse::CopyInfo(copy_info_payload(catalog, copy_type, &passed)),
             ))
         }
         "copy.UnLockCopy" => {
@@ -1883,12 +1801,7 @@ where
                 .unwrap_or_default();
             Some(Response::battle(
                 request.method.as_str(),
-                CopyInfoCodec::encode_with_progress(
-                    1,
-                    &catalog.plot,
-                    copy_progress_max_or_first(&catalog.plot, &passed),
-                    &passed,
-                ),
+                BattleResponse::CopyInfo(copy_info_payload(catalog, 1, &passed)),
             ))
         }
         _ => None,

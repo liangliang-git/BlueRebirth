@@ -3,7 +3,7 @@ use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 use blueoath_domain::{AccountState, GuildMemberState, GuildState};
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     account: &mut AccountState,
     method: &str,
     request_args: &[u8],
@@ -178,7 +178,7 @@ fn new_typed_guild(
     }
 }
 
-pub(super) fn push_guild_state_typed(effects: &mut ResponseEffects, account: &AccountState) {
+pub(crate) fn push_guild_state_typed(effects: &mut ResponseEffects, account: &AccountState) {
     effects.push_pre(Response::raw(
         "guild.UpdateOurGuildData",
         guild_info_payload_from_typed(account),

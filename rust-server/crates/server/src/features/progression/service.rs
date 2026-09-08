@@ -3,7 +3,7 @@ use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 use blueoath_domain::{AccountState, BathroomHeroState};
 
-pub(super) fn handle_bathroom_typed(
+pub(crate) fn handle_bathroom_typed(
     account: &mut AccountState,
     method: &str,
     request_args: &[u8],
@@ -140,7 +140,7 @@ pub(super) fn handle_bathroom_typed(
     HandlerResult::Reply(Response::raw(method, response))
 }
 
-pub(super) fn handle_study_typed(
+pub(crate) fn handle_study_typed(
     account: &mut AccountState,
     method: &str,
     request_args: &[u8],
@@ -356,7 +356,7 @@ fn finish_study_typed(
     Ok(output)
 }
 
-pub(super) fn study_info_payload_from_typed(account: &AccountState, _now: u32) -> Vec<u8> {
+pub(crate) fn study_info_payload_from_typed(account: &AccountState, _now: u32) -> Vec<u8> {
     let mut output = Vec::new();
     append_varint_field(&mut output, 1, 2);
     for progress in &account.study.progress {
@@ -414,7 +414,7 @@ fn recover_typed_hero_mood(
     let _ = now;
 }
 
-pub(super) fn bathroom_info_payload_from_typed(account: &AccountState) -> Vec<u8> {
+pub(crate) fn bathroom_info_payload_from_typed(account: &AccountState) -> Vec<u8> {
     let mut output = Vec::new();
     if account.bathroom.heroes.is_empty() {
         output.extend_from_slice(&[0x0A, 0x00]);

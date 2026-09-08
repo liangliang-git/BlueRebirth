@@ -1,4 +1,7 @@
-use blueoath_protocol::{TMessageCodec, TResponse};
+use blueoath_protocol::{
+    CopyInfoCodec, CopyInfoPayload, GameLoginCodec, PlayerUserCodec, TMessageCodec, TResponse,
+    TRetLogin, UserInfo, UserInfoCodec, UserListCodec, UserLoginCodec,
+};
 
 use super::error::GameError;
 
@@ -10,50 +13,95 @@ pub struct Response {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResponsePayload {
-    User(Vec<u8>),
-    Battle(Vec<u8>),
+    User(Box<UserResponse>),
+    Battle(BattleResponse),
     Raw(Vec<u8>),
 }
 
 impl ResponsePayload {
     pub fn into_bytes(self) -> Vec<u8> {
         match self {
-            Self::User(payload) | Self::Battle(payload) | Self::Raw(payload) => payload,
-        }
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        match self {
-            Self::User(payload) | Self::Battle(payload) | Self::Raw(payload) => payload,
+            Self::User(payload) => payload.into_bytes(),
+            Self::Battle(payload) => payload.into_bytes(),
+            Self::Raw(payload) => payload,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.as_bytes().len()
+        match self {
+            Self::User(payload) => payload.encoded_len(),
+            Self::Battle(payload) => payload.encoded_len(),
+            Self::Raw(payload) => payload.len(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.as_bytes().is_empty()
-    }
-}
-
-impl AsRef<[u8]> for ResponsePayload {
-    fn as_ref(&self) -> &[u8] {
-        self.as_bytes()
-    }
-}
-
-impl std::ops::Deref for ResponsePayload {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        self.as_bytes()
+        self.len() == 0
     }
 }
 
 impl PartialEq<Vec<u8>> for ResponsePayload {
     fn eq(&self, other: &Vec<u8>) -> bool {
-        self.as_bytes() == other.as_slice()
+        self.len() == other.len() && self.clone().into_bytes() == *other
+    }
+}
+
+/// Typed user responses. Encoding stays at response/wire boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UserResponse {
+    PlayerLogin(TRetLogin),
+    UserList(Vec<UserInfo>),
+    Player(UserInfo),
+    Info(UserInfo),
+    Login(UserLoginResponse),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserLoginResponse {
+    pub ret: String,
+    pub ban_msg: String,
+    pub ban_time: i32,
+}
+
+impl UserResponse {
+    fn into_bytes(self) -> Vec<u8> {
+        match self {
+            Self::PlayerLogin(response) => GameLoginCodec::encode_response(&response),
+            Self::UserList(users) => UserListCodec::encode(&users),
+            Self::Player(user) => PlayerUserCodec::encode(&user),
+            Self::Info(user) => UserInfoCodec::encode(&user),
+            Self::Login(response) => {
+                UserLoginCodec::encode_response(&response.ret, &response.ban_msg, response.ban_time)
+            }
+        }
+    }
+
+    fn encoded_len(&self) -> usize {
+        self.clone().into_bytes().len()
+    }
+}
+
+/// Battle response category. `Raw` marks routes whose protocol DTO migration
+/// is still pending; callers must opt into it explicitly with `battle_bytes`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BattleResponse {
+    CopyInfo(CopyInfoPayload),
+    Raw(Vec<u8>),
+}
+
+impl BattleResponse {
+    fn into_bytes(self) -> Vec<u8> {
+        match self {
+            Self::CopyInfo(payload) => CopyInfoCodec::encode_payload(&payload),
+            Self::Raw(payload) => payload,
+        }
+    }
+
+    fn encoded_len(&self) -> usize {
+        match self {
+            Self::CopyInfo(payload) => CopyInfoCodec::encode_payload(payload).len(),
+            Self::Raw(payload) => payload.len(),
+        }
     }
 }
 
@@ -110,15 +158,20 @@ impl Response {
         }
     }
 
-    pub fn user(method: impl Into<String>, payload: Vec<u8>) -> Self {
-        Self::from_payload(method, ResponsePayload::User(payload))
+    pub fn user(method: impl Into<String>, payload: UserResponse) -> Self {
+        Self::from_payload(method, ResponsePayload::User(Box::new(payload)))
     }
 
-    pub fn battle(method: impl Into<String>, payload: Vec<u8>) -> Self {
+    pub fn battle(method: impl Into<String>, payload: BattleResponse) -> Self {
         Self::from_payload(method, ResponsePayload::Battle(payload))
+    }
+
+    pub fn battle_bytes(method: impl Into<String>, payload: Vec<u8>) -> Self {
+        Self::battle(method, BattleResponse::Raw(payload))
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HandlerResult {
     Reply(Response),
@@ -180,7 +233,9 @@ impl ResponseEffects {
 
 #[cfg(test)]
 mod tests {
-    use super::{HandlerResult, Response, ResponseEffects};
+    use super::{
+        BattleResponse, HandlerResult, Response, ResponseEffects, UserLoginResponse, UserResponse,
+    };
     use blueoath_protocol::TMessageCodec;
 
     #[test]
@@ -198,6 +253,49 @@ mod tests {
         assert_eq!(
             Response::raw("user.GetInfo", [1, 2, 3].to_vec()),
             Response::new("user.GetInfo", vec![1, 2, 3])
+        );
+    }
+
+    #[test]
+    fn typed_user_response_encodes_only_at_wire_boundary() {
+        let user = blueoath_protocol::UserInfo {
+            uid: 7,
+            uname: "Captain".to_owned(),
+            ..blueoath_protocol::UserInfo::default()
+        };
+        let response = Response::user("user.GetUserInfo", UserResponse::Info(user.clone()));
+        assert_eq!(
+            response.payload.len(),
+            blueoath_protocol::UserInfoCodec::encode(&user).len()
+        );
+        assert_eq!(
+            response.payload.clone().into_bytes(),
+            blueoath_protocol::UserInfoCodec::encode(&user)
+        );
+    }
+
+    #[test]
+    fn typed_login_response_preserves_protocol_fields() {
+        let response = Response::user(
+            "user.UserLogin",
+            UserResponse::Login(UserLoginResponse {
+                ret: "ok".to_owned(),
+                ban_msg: String::new(),
+                ban_time: 0,
+            }),
+        );
+        assert_eq!(
+            response.payload.into_bytes(),
+            blueoath_protocol::UserLoginCodec::encode_response("ok", "", 0)
+        );
+    }
+
+    #[test]
+    fn battle_raw_transition_is_explicit() {
+        let response = Response::battle_bytes("battle.End", vec![1, 2]);
+        assert_eq!(
+            response.payload,
+            super::ResponsePayload::Battle(BattleResponse::Raw(vec![1, 2]))
         );
     }
 

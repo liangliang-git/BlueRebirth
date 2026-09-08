@@ -2,15 +2,15 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
-pub(super) fn handles(method: &str) -> bool {
+pub(crate) fn handles(method: &str) -> bool {
     GameMethod::parse(method).is_family(MethodFamily::GuildTask)
 }
 
-pub(super) fn handles_typed(method: &str) -> bool {
+pub(crate) fn handles_typed(method: &str) -> bool {
     handles(method)
 }
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],

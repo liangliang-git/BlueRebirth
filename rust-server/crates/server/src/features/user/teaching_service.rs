@@ -1,7 +1,7 @@
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     state: &ServerState,
     account: &mut blueoath_domain::AccountState,
     method: &str,

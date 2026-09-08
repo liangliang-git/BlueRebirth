@@ -6,8 +6,29 @@ use serde_json::{json, Value};
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
+use crate::features::user::requests::UserRequest;
 
-pub(super) fn handle_typed(
+pub(crate) fn apply_user_request(
+    account: &mut blueoath_domain::AccountState,
+    request: UserRequest,
+) -> Result<(), GameError> {
+    match request {
+        UserRequest::SetSecretary(request) => {
+            account.character.secretary_id = u64::try_from(request.secretary_id)
+                .ok()
+                .and_then(|id| blueoath_domain::HeroId::new(id).ok());
+        }
+        UserRequest::ChangeName(request) => account.character.name = request.name,
+        UserRequest::SetMessage(request) => account.character.message = request.message,
+        UserRequest::SetHeadFrame(request) => {
+            account.character.head_frame = request.head_frame.max(0) as u32;
+        }
+        UserRequest::SetHead(request) => account.character.head = request.head.max(0) as u32,
+    }
+    Ok(())
+}
+
+pub(crate) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     state: &ServerState,
     method: &str,
@@ -1307,7 +1328,7 @@ fn encode_support_settlement(settlement: &SupportSettlement) -> Vec<u8> {
 }
 
 #[cfg(test)]
-pub(super) fn other_user_payload(
+pub(crate) fn other_user_payload(
     state: &ServerState,
     account: &Value,
     requested_uid: u64,
@@ -1356,7 +1377,7 @@ pub(super) fn other_user_payload(
     output
 }
 
-pub(super) fn other_user_payload_typed(
+pub(crate) fn other_user_payload_typed(
     state: &ServerState,
     current: &blueoath_domain::AccountState,
     requested_uid: u64,
@@ -1595,7 +1616,8 @@ mod tests {
         let HandlerResult::Reply(response) = result else {
             panic!("expected milestone response");
         };
-        let activities = decode_repeated_message_field(&response.payload, 1);
+        let payload = response.payload.into_bytes();
+        let activities = decode_repeated_message_field(&payload, 1);
         assert_eq!(decode_varint_field(&activities[0], 1), 9);
         let rewards = decode_repeated_message_field(&activities[0], 2);
         assert_eq!(decode_varint_field(&rewards[0], 1), 3);
@@ -1650,7 +1672,8 @@ mod tests {
         let HandlerResult::Reply(response) = result else {
             panic!("expected mini-game score response");
         };
-        assert_eq!(decode_varint_field(&response.payload, 1), 80);
+        let payload = response.payload.into_bytes();
+        assert_eq!(decode_varint_field(&payload, 1), 80);
         let mut lower_score_entry = Vec::new();
         append_varint_field(&mut lower_score_entry, 1, 101);
         append_varint_field(&mut lower_score_entry, 2, 20);
@@ -1667,7 +1690,8 @@ mod tests {
         let HandlerResult::Reply(response) = result else {
             panic!("expected lower mini-game score response");
         };
-        assert_eq!(decode_varint_field(&response.payload, 1), 80);
+        let payload = response.payload.into_bytes();
+        assert_eq!(decode_varint_field(&payload, 1), 80);
         let (pre, _, _) = effects.into_parts();
         assert!(pre
             .iter()
@@ -1716,7 +1740,8 @@ mod tests {
         let HandlerResult::Reply(response) = result else {
             panic!("expected typed other-user response");
         };
-        assert_eq!(decode_varint_field(&response.payload, 1), 1);
+        let payload = response.payload.into_bytes();
+        assert_eq!(decode_varint_field(&payload, 1), 1);
 
         let mut request = Vec::new();
         append_varint_field(&mut request, 1, 1);
@@ -1731,7 +1756,8 @@ mod tests {
         let HandlerResult::Reply(response) = result else {
             panic!("expected typed teacher rank response");
         };
-        let rows = decode_repeated_message_field(&response.payload, 1);
+        let payload = response.payload.into_bytes();
+        let rows = decode_repeated_message_field(&payload, 1);
         assert_eq!(decode_varint_field(&rows[0], 1), 1);
         assert_eq!(decode_varint_field(&rows[0], 11), 123);
         let _ = std::fs::remove_dir_all(root);

@@ -12,14 +12,14 @@ fn big_activity_rank_row(uid: u64, name: &str, merits: u64, rank: usize) -> Vec<
     row
 }
 
-pub(super) fn handles(method: &str) -> bool {
+pub(crate) fn handles(method: &str) -> bool {
     matches!(
         GameMethod::parse(method).family(),
         MethodFamily::BigActivity | MethodFamily::GuildBigActivity | MethodFamily::HeroAwaken
     )
 }
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     server_state: &ServerState,
     account: &mut blueoath_domain::AccountState,
     method: &str,

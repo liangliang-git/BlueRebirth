@@ -2,7 +2,7 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response};
 use super::*;
 
-pub(super) fn handles_typed(method: &str) -> bool {
+pub(crate) fn handles_typed(method: &str) -> bool {
     matches!(
         method,
         "archiveCopy.IsLoad"
@@ -16,7 +16,7 @@ pub(super) fn handles_typed(method: &str) -> bool {
     )
 }
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
@@ -138,7 +138,8 @@ mod tests {
         else {
             panic!("expected typed copy extra response");
         };
-        assert_eq!(decode_repeated_message_field(&response.payload, 1).len(), 1);
+        let payload = response.payload.into_bytes();
+        assert_eq!(decode_repeated_message_field(&payload, 1).len(), 1);
         let mut archive = Vec::new();
         append_varint_field(&mut archive, 1, 91);
         assert!(matches!(

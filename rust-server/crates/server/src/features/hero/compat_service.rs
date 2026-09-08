@@ -59,7 +59,7 @@ fn encode_treasure_response(rewards: &[ShopReward], treasure_id: i32) -> Vec<u8>
     output
 }
 
-pub(super) fn handles_typed(method: &str) -> bool {
+pub(crate) fn handles_typed(method: &str) -> bool {
     matches!(
         method,
         "cachedata.CacheData"
@@ -82,7 +82,7 @@ pub(super) fn handles_typed(method: &str) -> bool {
     )
 }
 
-pub(super) fn handle_typed(
+pub(crate) fn handle_typed(
     state: &ServerState,
     account: &mut blueoath_domain::AccountState,
     method: &str,
