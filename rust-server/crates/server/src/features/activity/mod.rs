@@ -1,9 +1,27 @@
 //! Activity feature services.
 
-pub(crate) use super::{
-    activity_extra_handler as extra_service, activity_handler as service,
-    adventure_handler as adventure_service, extended_handler as extended_service,
-    invitescore_handler as invite_score_service, misc_extended_handler as misc_service,
-    shiptask_handler as ship_task_service, sportsmeet_handler as sports_meet_service,
-    talent_handler,
-};
+use crate::catalog;
+use crate::common;
+pub(crate) use crate::common::error::GameError;
+pub(crate) use crate::router::{GameMethod, MethodFamily};
+use crate::*;
+use blueoath_protocol::*;
+
+#[path = "adventure_service.rs"]
+pub(crate) mod adventure_service;
+#[path = "extended_service.rs"]
+pub(crate) mod extended_service;
+#[path = "extra_service.rs"]
+pub(crate) mod extra_service;
+#[path = "invite_score_service.rs"]
+pub(crate) mod invite_score_service;
+#[path = "misc_service.rs"]
+pub(crate) mod misc_service;
+#[path = "service.rs"]
+pub(crate) mod service;
+#[path = "ship_task_service.rs"]
+pub(crate) mod ship_task_service;
+#[path = "sports_meet_service.rs"]
+pub(crate) mod sports_meet_service;
+#[path = "talent_service.rs"]
+pub(crate) mod talent_handler;
