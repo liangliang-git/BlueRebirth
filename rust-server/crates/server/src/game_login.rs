@@ -49,6 +49,7 @@ use super::*;
 #[cfg(not(test))]
 async fn write_typed_bootstrap_push<S>(
     stream: &mut S,
+    trace_methods: bool,
     method: &'static str,
     payload: Vec<u8>,
     now: u32,
@@ -56,6 +57,9 @@ async fn write_typed_bootstrap_push<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    if trace_methods {
+        tracing::debug!(method, push_bytes = payload.len(), "game-login push");
+    }
     Ok(
         NetSocketFrameCodec::write(stream, 0, &Response::new(method, payload).encode_push(now))
             .await?,
@@ -86,26 +90,49 @@ where
     let mut login_time = Vec::new();
     append_varint_field(&mut login_time, 1, u64::from(now));
     append_varint_field(&mut login_time, 2, u64::from(now.saturating_sub(3600)));
-    NetSocketFrameCodec::write(
+    write_typed_bootstrap_push(
         stream,
-        0,
-        &Response::new("user.UpdateLoginTime", login_time).encode_push(now),
+        state.trace_methods,
+        "user.UpdateLoginTime",
+        login_time,
+        now,
     )
     .await?;
 
     let mut server_time = Vec::new();
     append_varint_field(&mut server_time, 1, u64::from(now));
     append_varint_field(&mut server_time, 2, u64::from(now));
-    NetSocketFrameCodec::write(
+    write_typed_bootstrap_push(
         stream,
-        0,
-        &Response::new("user.UpdateSvrTime", server_time).encode_push(now),
+        state.trace_methods,
+        "user.UpdateSvrTime",
+        server_time,
+        now,
     )
     .await?;
 
+    if state.trace_methods {
+        let secretary_id = account
+            .character
+            .secretary_id
+            .map(|id| id.get())
+            .unwrap_or(1);
+        let secretary_fashioning = account
+            .dock
+            .heroes
+            .get(&blueoath_domain::HeroId::new(secretary_id).expect("secretary id is positive"))
+            .map(|hero| hero.fashioning);
+        tracing::debug!(
+            heroes = account.dock.heroes.len(),
+            secretary_id,
+            secretary_fashioning = ?secretary_fashioning,
+            "game-login hero bootstrap"
+        );
+    }
+
     macro_rules! write_payload {
         ($method:expr, $payload:expr $(,)?) => {
-            write_typed_bootstrap_push(stream, $method, $payload, now).await?;
+            write_typed_bootstrap_push(stream, state.trace_methods, $method, $payload, now).await?;
         };
     }
 
