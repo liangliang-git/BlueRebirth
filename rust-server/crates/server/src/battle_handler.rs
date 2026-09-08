@@ -691,6 +691,15 @@ pub(super) fn handle_typed_mop_up(
             for reward in &rewards {
                 let _ = grant_typed_task_reward(account, reward);
             }
+            apply_typed_sweep_experience(
+                account,
+                catalog,
+                copy_id,
+                fleet_id,
+                sweep_count,
+                state.commander_exp_multiplier,
+                state.ship_exp_multiplier,
+            );
             account
                 .sweep
                 .entries
@@ -778,6 +787,51 @@ fn typed_sweep_rewards(
         }
     }
     rewards
+}
+
+fn apply_typed_sweep_experience(
+    account: &mut blueoath_domain::AccountState,
+    catalog: &BattleCatalog,
+    copy_id: u64,
+    fleet_id: u64,
+    sweep_count: u64,
+    commander_multiplier: f64,
+    ship_multiplier: f64,
+) {
+    let Ok(fleet_id) = blueoath_domain::FleetId::new(fleet_id) else {
+        return;
+    };
+    let hero_ids = account
+        .fleet
+        .fleets
+        .get(&fleet_id)
+        .map(|fleet| fleet.members.clone())
+        .unwrap_or_default();
+    if hero_ids.is_empty() {
+        return;
+    }
+    let Ok(copy_id) = i32::try_from(copy_id) else {
+        return;
+    };
+    let (commander_base, ship_base) = battle_copy_experience(Some(catalog), copy_id);
+    let count = sweep_count as f64;
+    let commander_exp =
+        scale_reward(i64::from(commander_base), commander_multiplier * count).max(0) as u64;
+    account.character.exp = account.character.exp.saturating_add(commander_exp);
+
+    let ship_exp = scale_reward(i64::from(ship_base), ship_multiplier * count).max(0);
+    for hero_id in hero_ids {
+        let Some(hero) = account.dock.heroes.get_mut(&hero_id) else {
+            continue;
+        };
+        let mood_multiplier = if i64::from(hero.mood) >= MOOD_AFFECTION_BONUS_THRESHOLD {
+            1.2
+        } else {
+            1.0
+        };
+        let gained = scale_reward(ship_exp, mood_multiplier).max(0) as u64;
+        hero.exp = hero.exp.saturating_add(gained);
+    }
 }
 
 fn typed_mop_up_payload(account: &blueoath_domain::AccountState, pass_rets: &[Vec<u8>]) -> Vec<u8> {

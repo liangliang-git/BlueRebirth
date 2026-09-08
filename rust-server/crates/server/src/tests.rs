@@ -2052,6 +2052,42 @@ async fn typed_coop_route_test_request(
     responses
 }
 
+async fn typed_battle_route_test_request(
+    account: &mut blueoath_domain::AccountState,
+    state: &ServerState,
+    catalog: &BattleCatalog,
+    method: &str,
+    args: Vec<u8>,
+) -> Vec<blueoath_protocol::TResponse> {
+    let (mut client, mut server) = duplex(1_048_576);
+    let request = TMessageCodec::encode_request(&TRequest {
+        method: method.to_owned(),
+        args: Some(args),
+        callback_handler: 74,
+        ..TRequest::default()
+    });
+    NetSocketFrameCodec::write(&mut client, 0, &request)
+        .await
+        .unwrap();
+    let mut catalogs = GameLoginCatalogs::empty();
+    catalogs.battle = Some(catalog);
+    process_game_login_frame_with_catalogs_typed_mut(
+        &mut server,
+        state,
+        None,
+        Some(account),
+        &catalogs,
+    )
+    .await
+    .unwrap();
+    drop(server);
+    let mut responses = Vec::new();
+    while let Some(frame) = NetSocketFrameCodec::read(&mut client).await.unwrap() {
+        responses.push(TMessageCodec::decode_response(&frame.payload).unwrap());
+    }
+    responses
+}
+
 #[tokio::test]
 async fn battle_match_routes_return_typed_local_responses() {
     let mut account = NewAccountFactory::create(ProfileId::new("match-test").unwrap(), "Captain");
@@ -2476,12 +2512,22 @@ async fn battle_routes_charge_supply_and_refresh_sweep_exp_with_zero_drops() {
     state.drop_multiplier = 0.0;
     state.ship_exp_multiplier = 3.0;
     state.commander_exp_multiplier = 2.0;
-    let mut account = default_account_snapshot("battle-test", "test", 100);
-    account["character"]["supply"] = json!(100);
-    account["fleet"]["tactics"] = json!([{"heroInfo":[1]}]);
+    let mut account = NewAccountFactory::create(ProfileId::new("battle-test").unwrap(), "test");
+    account.character.uid = 100;
+    account
+        .resources
+        .debit(CurrencyKind::Supply, 9_900)
+        .unwrap();
+    account
+        .fleet
+        .fleets
+        .entry(FleetId::new(1).unwrap())
+        .or_default()
+        .members
+        .push(HeroId::new(1).unwrap());
     let mut start = Vec::new();
     append_varint_field(&mut start, 2, 5011);
-    let responses = battle_route_test_request(
+    let responses = typed_battle_route_test_request(
         &mut account,
         &state,
         &catalog,
@@ -2492,15 +2538,23 @@ async fn battle_routes_charge_supply_and_refresh_sweep_exp_with_zero_drops() {
     assert!(responses
         .iter()
         .any(|r| r.method == "copy.StartBase" && r.err == 0));
-    assert!(responses.iter().any(|r| r.method == "user.UpdateUserInfo"));
-    assert_eq!(account["character"]["supply"], 80);
-    account["battleSession"] = serde_json::Value::Null;
-    record_battle_pass(&mut account, 5011, 3, 10, Some(&catalog), &[]);
+    assert_eq!(account.resources.amount(CurrencyKind::Supply).get(), 80);
+    let pass_responses = typed_battle_route_test_request(
+        &mut account,
+        &state,
+        &catalog,
+        "copy.PassBase",
+        Vec::new(),
+    )
+    .await;
+    assert!(pass_responses
+        .iter()
+        .any(|r| r.method == "copy.PassBase" && r.err == 0));
     let mut sweep = Vec::new();
     append_varint_field(&mut sweep, 1, 1);
     append_varint_field(&mut sweep, 2, 5011);
     append_varint_field(&mut sweep, 3, 3);
-    let responses = battle_route_test_request(
+    let responses = typed_battle_route_test_request(
         &mut account,
         &state,
         &catalog,
@@ -2511,15 +2565,13 @@ async fn battle_routes_charge_supply_and_refresh_sweep_exp_with_zero_drops() {
     assert!(responses
         .iter()
         .any(|r| r.method == "mopUp.StartSweep" && r.err == 0));
-    assert!(responses
-        .iter()
-        .any(|r| r.method == "hero.UpdateHeroBagData"));
+    assert!(responses.iter().any(|r| r.method == "bag.UpdateBagData"));
     assert!(responses.iter().any(|r| r.method == "user.UpdateUserInfo"));
-    assert_eq!(account["character"]["supply"], 20);
-    assert_eq!(account["character"]["exp"], 60);
-    assert_eq!(account["dock"]["heroes"][0]["exp"], 216);
+    assert_eq!(account.resources.amount(CurrencyKind::Supply).get(), 20);
+    assert_eq!(account.character.exp, 60);
+    assert_eq!(account.dock.heroes[&HeroId::new(1).unwrap()].exp, 216);
     let settled = account.clone();
-    battle_route_test_request(
+    typed_battle_route_test_request(
         &mut account,
         &state,
         &catalog,
@@ -2529,15 +2581,17 @@ async fn battle_routes_charge_supply_and_refresh_sweep_exp_with_zero_drops() {
     .await;
     assert_eq!(account, settled);
     let responses =
-        battle_route_test_request(&mut account, &state, &catalog, "mopUp.StartSweep", sweep).await;
+        typed_battle_route_test_request(&mut account, &state, &catalog, "mopUp.StartSweep", sweep)
+            .await;
     assert!(responses
         .iter()
         .any(|r| r.method == "mopUp.StartSweep" && r.err != 0));
     assert_eq!(account, settled);
-    account["character"]["supply"] = json!(0);
+    account.resources.debit(CurrencyKind::Supply, 20).unwrap();
     let empty = account.clone();
     let responses =
-        battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start).await;
+        typed_battle_route_test_request(&mut account, &state, &catalog, "copy.StartBase", start)
+            .await;
     assert!(responses
         .iter()
         .any(|r| r.method == "copy.StartBase" && r.err != 0));

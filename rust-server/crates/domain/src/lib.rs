@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use thiserror::Error;
 
+pub const HERO_MOOD_INITIAL: u32 = 1_500_000;
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum DomainError {
     #[error("{0} must be positive")]
@@ -1127,7 +1129,7 @@ impl NewAccountFactory {
                 change_name_time: 0,
                 level: 1,
                 exp: 0,
-                mood: 100,
+                mood: HERO_MOOD_INITIAL,
                 affection: 500_000,
                 hp: 10_000_000_000,
                 locked: true,

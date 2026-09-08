@@ -123,7 +123,7 @@ const INITIAL_SUPPLY: i64 = 10_000;
 #[cfg(test)]
 const MOOD_MIN: i32 = 0;
 const MOOD_MAX: i32 = 1_500_000;
-const MOOD_INITIAL: i32 = MOOD_MAX;
+const MOOD_INITIAL: i32 = blueoath_domain::HERO_MOOD_INITIAL as i32;
 #[cfg(test)]
 const MOOD_NORMAL_LIMIT: i32 = 1_190_000;
 #[cfg(test)]
