@@ -304,15 +304,6 @@ fn handle_fashion_equip(
         if !belongs {
             return HandlerResult::Error(GameError::InvalidState("fashion is not for this hero"));
         }
-        let owned = selected.get() == sf_id as u64
-            || account
-                .fashion
-                .entries
-                .get(&(sf_id as u64))
-                .is_some_and(|items| items.contains(&selected));
-        if !owned {
-            return HandlerResult::Error(GameError::InvalidState("fashion is not owned by hero"));
-        }
     }
     let Some(hero) = account.dock.heroes.get_mut(&hero_id) else {
         return HandlerResult::Error(GameError::NotFound("hero"));
@@ -1720,7 +1711,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_fashion_equip_updates_owned_hero_fashion() {
+    fn typed_fashion_equip_accepts_catalog_fashion_for_new_hero() {
         let mut account = blueoath_domain::NewAccountFactory::create(
             blueoath_domain::ProfileId::new("fashion-equip-typed").unwrap(),
             "Captain",
@@ -1732,12 +1723,6 @@ mod tests {
             .saturating_sub(1)
             / 10;
         let fashion_tid = sf_id + 1;
-        account
-            .fashion
-            .entries
-            .entry(sf_id)
-            .or_default()
-            .insert(blueoath_domain::TemplateId::new(fashion_tid).unwrap());
         let catalog = FashionList {
             items: vec![FashionInfo {
                 sf_id: i32::try_from(sf_id).unwrap(),
