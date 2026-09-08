@@ -339,13 +339,9 @@ where
     let request_args = request.args.as_slice();
     if std::env::var_os("BLUEOATH_TRACE_METHODS").is_some() {
         eprintln!(
-            "game-login method={} args={} hex={}",
+            "game-login method={} args={}",
             request.method,
-            request_args.len(),
-            request_args
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect::<String>()
+            request_args.len()
         );
     }
     let method = GameMethod::parse(&request.method);
@@ -2329,15 +2325,6 @@ where
         .map(|error| (error.client_code(), error.to_string()))
         .unwrap_or((0, String::new()));
     let trace_err_msg = client_error_message.clone();
-    let trace_ret_hex = if trace_method == "copy.StartBase" {
-        ret.as_deref()
-            .unwrap_or_default()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-    } else {
-        String::new()
-    };
     let response = TMessageCodec::encode_response(&TResponse {
         err: client_error_code,
         err_msg: client_error_message,
@@ -2359,9 +2346,6 @@ where
             pre_pushes.len(),
             post_pushes.len()
         );
-        if trace_method == "copy.StartBase" {
-            eprintln!("game-login StartBase ret_hex={trace_ret_hex}");
-        }
     }
     #[cfg(test)]
     for push in pre_pushes {

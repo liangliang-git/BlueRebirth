@@ -1397,6 +1397,27 @@ mod tests {
 
     use super::*;
 
+    fn add_secretary_hero(account: &mut blueoath_domain::AccountState, hero_id: u64) {
+        let hero_id = blueoath_domain::HeroId::new(hero_id).unwrap();
+        account.dock.heroes.insert(
+            hero_id,
+            blueoath_domain::HeroState {
+                id: hero_id,
+                template_id: blueoath_domain::TemplateId::new(10_210_511).unwrap(),
+                name: String::new(),
+                change_name_time: 0,
+                level: 1,
+                exp: 0,
+                mood: 100,
+                affection: 0,
+                hp: 10_000_000_000,
+                locked: false,
+                equip_slots: Vec::new(),
+                pskills: std::collections::BTreeMap::new(),
+            },
+        );
+    }
+
     #[test]
     fn mini_game_scores_are_idempotent_and_sum_by_chapter() {
         let mut account = json!({"miniGameScores": []});
@@ -1669,6 +1690,7 @@ mod tests {
         friend.character.head = 7;
         friend.character.level = 9;
         friend.character.secretary_id = Some(blueoath_domain::HeroId::new(3).unwrap());
+        add_secretary_hero(&mut friend, 3);
         store.save_typed_account(&mut friend).unwrap();
 
         let mut current = blueoath_domain::NewAccountFactory::create(
@@ -1731,6 +1753,7 @@ mod tests {
         friend.character.head = 7;
         friend.character.level = 9;
         friend.character.secretary_id = Some(blueoath_domain::HeroId::new(3).unwrap());
+        add_secretary_hero(&mut friend, 3);
         store.save_typed_account(&mut friend).unwrap();
         let mut state = ServerState::new("local", "Local", "1.4.0");
         state.social_store = Some(store.clone());
