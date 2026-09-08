@@ -955,19 +955,31 @@ impl ProfileStore {
         }
 
         let mut statement = connection.prepare(
-            "SELECT copy_id, first_passed
+            "SELECT copy_id, first_passed, star_level
              FROM copy_progress WHERE profile_id = ?1 ORDER BY copy_id",
         )?;
         let passed_copies = statement
             .query_map(params![profile_id.as_str()], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        for (copy_value, first_passed) in passed_copies {
+        for (copy_value, first_passed, star_level) in passed_copies {
+            let copy_id = CopyId::new(positive_u64(copy_value, "copy progress id")?)
+                .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
             if first_passed != 0 {
-                let copy_id = CopyId::new(positive_u64(copy_value, "passed copy id")?)
-                    .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
                 account.battle.passed_copies.insert(copy_id);
+            }
+            if star_level > 0 {
+                account.battle.copy_stars.insert(
+                    copy_id,
+                    u32::try_from(star_level).map_err(|_| {
+                        StorageError::InvalidTypedAccount("copy star level is invalid".to_owned())
+                    })?,
+                );
             }
         }
         let mut statement = connection.prepare(
@@ -2728,14 +2740,26 @@ impl ProfileStore {
                 ],
             )?;
         }
-        for copy_id in &account.battle.passed_copies {
+        let mut copy_progress_ids = account.battle.passed_copies.clone();
+        copy_progress_ids.extend(account.battle.copy_stars.keys().copied());
+        for copy_id in &copy_progress_ids {
             transaction.execute(
                 "INSERT INTO copy_progress(
                     profile_id, copy_id, star_level, first_passed
-                 ) VALUES (?1, ?2, 0, 1)",
+                 ) VALUES (?1, ?2, ?3, ?4)",
                 params![
                     profile.id.as_str(),
                     typed_i64(copy_id.get(), "passed copy id")?,
+                    typed_i64(
+                        account
+                            .battle
+                            .copy_stars
+                            .get(copy_id)
+                            .copied()
+                            .unwrap_or_default(),
+                        "copy star level",
+                    )?,
+                    i64::from(account.battle.passed_copies.contains(copy_id)),
                 ],
             )?;
         }

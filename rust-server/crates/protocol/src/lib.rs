@@ -3845,6 +3845,7 @@ pub struct CopyInfoPayload {
     pub max_copy_id: i32,
     pub passed_copy_ids: Vec<i32>,
     pub passed_copy_counts: Vec<(i32, i32)>,
+    pub copy_star_levels: Vec<(i32, i32)>,
     pub difficulty: i32,
 }
 
@@ -3856,6 +3857,7 @@ impl CopyInfoCodec {
             value.max_copy_id,
             &value.passed_copy_ids,
             &value.passed_copy_counts,
+            &value.copy_star_levels,
             value.difficulty,
         )
     }
@@ -3881,6 +3883,7 @@ impl CopyInfoCodec {
             max_copy_id,
             passed_copy_ids,
             &passed_copy_counts,
+            &[],
             1,
         )
     }
@@ -3920,6 +3923,49 @@ impl CopyInfoCodec {
             max_copy_id,
             passed_copy_ids,
             passed_copy_counts,
+            &[],
+            difficulty,
+        )
+    }
+
+    pub fn encode_with_progress_and_stars(
+        copy_type: i32,
+        copy_ids: &[i32],
+        max_copy_id: i32,
+        passed_copy_ids: &[i32],
+        copy_star_levels: &[(i32, i32)],
+    ) -> Vec<u8> {
+        let passed_copy_counts = passed_copy_ids
+            .iter()
+            .copied()
+            .map(|copy_id| (copy_id, 1))
+            .collect::<Vec<_>>();
+        Self::encode_with_progress_and_difficulty_for_type(
+            copy_type,
+            copy_ids,
+            max_copy_id,
+            passed_copy_ids,
+            &passed_copy_counts,
+            copy_star_levels,
+            1,
+        )
+    }
+
+    pub fn encode_with_progress_and_difficulty_and_counts_and_stars(
+        copy_ids: &[i32],
+        max_copy_id: i32,
+        passed_copy_ids: &[i32],
+        passed_copy_counts: &[(i32, i32)],
+        copy_star_levels: &[(i32, i32)],
+        difficulty: i32,
+    ) -> Vec<u8> {
+        Self::encode_with_progress_and_difficulty_for_type(
+            2,
+            copy_ids,
+            max_copy_id,
+            passed_copy_ids,
+            passed_copy_counts,
+            copy_star_levels,
             difficulty,
         )
     }
@@ -3930,6 +3976,7 @@ impl CopyInfoCodec {
         max_copy_id: i32,
         passed_copy_ids: &[i32],
         passed_copy_counts: &[(i32, i32)],
+        copy_star_levels: &[(i32, i32)],
         difficulty: i32,
     ) -> Vec<u8> {
         let mut output = Vec::new();
@@ -3938,7 +3985,12 @@ impl CopyInfoCodec {
             write_varint_field(&mut entry, 1, *copy_id as u32 as u64);
             write_varint_field(&mut entry, 2, 0);
             let passed = passed_copy_ids.contains(copy_id);
-            write_varint_field(&mut entry, 3, u64::from(passed) * 7);
+            let star_level = copy_star_levels
+                .iter()
+                .find(|(id, _)| id == copy_id)
+                .map(|(_, stars)| (*stars).clamp(0, 7))
+                .unwrap_or_else(|| if passed { 7 } else { 0 });
+            write_varint_field(&mut entry, 3, star_level as u64);
             write_varint_field(&mut entry, 4, 0);
             write_varint_field(&mut entry, 5, 0);
             write_varint_field(&mut entry, 6, u64::from(passed));

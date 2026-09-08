@@ -293,6 +293,8 @@ pub struct BattleProgressState {
     pub active: Option<BattleSession>,
     pub passed_copies: BTreeSet<CopyId>,
     #[serde(default)]
+    pub copy_stars: BTreeMap<CopyId, u32>,
+    #[serde(default)]
     pub records: Vec<CopyRecordState>,
     #[serde(default)]
     pub claimed_star_rewards: BTreeSet<(u32, u32)>,
@@ -1024,6 +1026,11 @@ impl AccountState {
             {
                 return Err(DomainError::InvalidState("battle session is invalid"));
             }
+        }
+        if self.battle.copy_stars.iter().any(|(copy_id, stars)| {
+            copy_id.get() == 0 || *stars > 7 || !self.battle.passed_copies.contains(copy_id)
+        }) {
+            return Err(DomainError::InvalidState("battle copy stars are invalid"));
         }
         for record in &self.battle.records {
             if record.hero_ids.iter().collect::<BTreeSet<_>>().len() != record.hero_ids.len()

@@ -18,6 +18,7 @@ pub(crate) fn handle_typed(
         request_args,
         TypedBattleContext {
             battle_catalog: None,
+            chapter_catalog: None,
             fashion_catalog: None,
             drop_multiplier: 1.0,
             ship_stat_multiplier: 1.0,
@@ -71,13 +72,23 @@ pub(crate) fn handle_typed_copy_star_reward(
     let star_num = chapter_rewards
         .level_ids
         .iter()
-        .filter(|copy_id| {
-            u64::try_from(**copy_id)
+        .filter_map(|copy_id| {
+            let copy_id = u64::try_from(*copy_id)
                 .ok()
-                .and_then(|id| blueoath_domain::CopyId::new(id).ok())
-                .is_some_and(|copy_id| account.battle.passed_copies.contains(&copy_id))
+                .and_then(|id| blueoath_domain::CopyId::new(id).ok())?;
+            if !account.battle.passed_copies.contains(&copy_id) {
+                return None;
+            }
+            Some(
+                account
+                    .battle
+                    .copy_stars
+                    .get(&copy_id)
+                    .copied()
+                    .unwrap_or(7),
+            )
         })
-        .map(|_| 7)
+        .map(|stars| i32::try_from(stars).unwrap_or(i32::MAX))
         .sum::<i32>();
     let mut pending = Vec::new();
     let mut pending_indexes = std::collections::BTreeSet::new();
@@ -255,6 +266,7 @@ fn draw_typed_battle_drop_rewards(
 
 pub(crate) struct TypedBattleContext<'a> {
     battle_catalog: Option<&'a BattleCatalog>,
+    chapter_catalog: Option<&'a ChapterCatalog>,
     fashion_catalog: Option<&'a FashionList>,
     drop_multiplier: f64,
     ship_stat_multiplier: f64,
@@ -264,6 +276,7 @@ pub(crate) struct TypedBattleContext<'a> {
 impl<'a> TypedBattleContext<'a> {
     pub(crate) fn new(
         battle_catalog: Option<&'a BattleCatalog>,
+        chapter_catalog: Option<&'a ChapterCatalog>,
         fashion_catalog: Option<&'a FashionList>,
         drop_multiplier: f64,
         ship_stat_multiplier: f64,
@@ -271,6 +284,7 @@ impl<'a> TypedBattleContext<'a> {
     ) -> Self {
         Self {
             battle_catalog,
+            chapter_catalog,
             fashion_catalog,
             drop_multiplier,
             ship_stat_multiplier,
@@ -287,6 +301,7 @@ pub(crate) fn handle_typed_with_catalog(
 ) -> HandlerResult {
     let TypedBattleContext {
         battle_catalog,
+        chapter_catalog,
         fashion_catalog,
         drop_multiplier,
         ship_stat_multiplier,
@@ -330,14 +345,20 @@ pub(crate) fn handle_typed_with_catalog(
                 return HandlerResult::Error(GameError::InvalidState("fleet has no heroes"));
             }
             if let Some(catalog) = battle_catalog {
+                let hero_ids = hero_ids.iter().map(|id| id.get()).collect::<Vec<_>>();
+                let Some(supply_cost) =
+                    battle_supply_cost_typed(account, Some(catalog), request.copy_id, &hero_ids, 1)
+                else {
+                    return HandlerResult::Error(GameError::InvalidRequest(
+                        "battle copy or supply is invalid",
+                    ));
+                };
                 if !catalog.copies.contains_key(&request.copy_id)
-                    || !consume_battle_supply_typed(
-                        account,
-                        Some(catalog),
-                        request.copy_id,
-                        &hero_ids.iter().map(|id| id.get()).collect::<Vec<_>>(),
-                        1,
-                    )
+                    || account
+                        .resources
+                        .amount(blueoath_domain::CurrencyKind::Supply)
+                        .get()
+                        < supply_cost
                 {
                     return HandlerResult::Error(GameError::InvalidRequest(
                         "battle copy or supply is invalid",
@@ -490,6 +511,36 @@ pub(crate) fn handle_typed_with_catalog(
                     ));
                 }
             }
+            let supply_cost = match battle_catalog {
+                Some(catalog) => {
+                    let Some(cost) = battle_supply_cost_typed(
+                        account,
+                        Some(catalog),
+                        i32::try_from(copy_id.get()).unwrap_or_default(),
+                        &hero_ids.iter().map(|id| id.get()).collect::<Vec<_>>(),
+                        1,
+                    ) else {
+                        return HandlerResult::Error(GameError::InvalidState(
+                            "battle supply configuration is invalid",
+                        ));
+                    };
+                    Some(cost)
+                }
+                None => None,
+            };
+            if let Some(supply_cost) = supply_cost {
+                if account
+                    .resources
+                    .amount(blueoath_domain::CurrencyKind::Supply)
+                    .get()
+                    < supply_cost
+                {
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "insufficient supply for battle settlement",
+                    ));
+                }
+            }
+            let account_before_settlement = account.clone();
             let first_pass = BattleService::settle_at(
                 account,
                 copy_id,
@@ -502,6 +553,24 @@ pub(crate) fn handle_typed_with_catalog(
                     for reward in &mut rewards {
                         let _ =
                             grant_typed_task_reward_with_fashion(account, reward, fashion_catalog);
+                    }
+                    if supply_cost.is_some_and(|_| {
+                        !consume_battle_supply_typed(
+                            account,
+                            battle_catalog,
+                            i32::try_from(copy_id.get()).unwrap_or_default(),
+                            &hero_ids.iter().map(|id| id.get()).collect::<Vec<_>>(),
+                            1,
+                        )
+                    }) {
+                        *account = account_before_settlement;
+                        return HandlerResult::Error(GameError::InvalidState(
+                            "battle supply settlement failed",
+                        ));
+                    }
+                    if grade < 9 {
+                        let star_level = account.battle.copy_stars.entry(copy_id).or_default();
+                        *star_level = (*star_level).max(7);
                     }
                     if !rewards.is_empty() {
                         effects.push_post(Response::raw(
@@ -521,6 +590,24 @@ pub(crate) fn handle_typed_with_catalog(
                             FashionListCodec::encode(&fashion_list_from_typed_account(
                                 account,
                                 fashion_catalog,
+                            )),
+                        ));
+                    }
+                    if let (Some(chapter_catalog), Some(copy_type)) = (
+                        chapter_catalog,
+                        battle_catalog.and_then(|catalog| {
+                            catalog
+                                .copies
+                                .get(&(copy_id.get() as i32))
+                                .map(|copy| copy.copy_type)
+                        }),
+                    ) {
+                        effects.push_post(Response::raw(
+                            "copy.GetCopy",
+                            CopyInfoCodec::encode_payload(&crate::game_login::copy_info_payload(
+                                chapter_catalog,
+                                copy_type,
+                                account,
                             )),
                         ));
                     }
@@ -597,6 +684,7 @@ pub(crate) fn handle_typed_with_catalog(
                 for reward in &mut rewards {
                     let _ = grant_typed_task_reward_with_fashion(account, reward, fashion_catalog);
                 }
+                account.battle.copy_stars.insert(copy_id_typed, 7);
                 effects.push_post(Response::raw(
                     "bag.UpdateBagData",
                     BagInfoCodec::encode(&bag_info_from_typed_account(account)),
@@ -1254,7 +1342,95 @@ mod tests {
             .battle
             .passed_copies
             .contains(&CopyId::new(9).unwrap()));
+        assert_eq!(
+            account.battle.copy_stars.get(&CopyId::new(9).unwrap()),
+            Some(&7)
+        );
         assert_eq!(account.battle.records.len(), 1);
+    }
+
+    #[test]
+    fn typed_battle_defers_supply_debit_until_settlement() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("battle-supply-order").unwrap(), "Battle");
+        let fleet_id = FleetId::new(1).unwrap();
+        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
+        account
+            .fleet
+            .fleets
+            .entry(fleet_id)
+            .or_default()
+            .members
+            .push(hero_id);
+        let mut catalog = BattleCatalog::default();
+        catalog.copies.insert(
+            9,
+            BattleCopy {
+                config_id: 9,
+                copy_type: 1,
+                fleet_ids: vec![1],
+            },
+        );
+        catalog.supply_cost_by_copy.insert(9, (10, 0));
+        let mut chapter_catalog = ChapterCatalog::default();
+        chapter_catalog.plot = vec![9];
+        let before = account
+            .resources
+            .amount(blueoath_domain::CurrencyKind::Supply)
+            .get();
+        let mut start = Vec::new();
+        append_varint_field(&mut start, 2, 9);
+        let mut effects = ResponseEffects::default();
+        assert!(matches!(
+            handle_typed_with_catalog(
+                &mut account,
+                "copy.StartBase",
+                &start,
+                TypedBattleContext::new(
+                    Some(&catalog),
+                    Some(&chapter_catalog),
+                    None,
+                    1.0,
+                    1.0,
+                    &mut effects,
+                ),
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Supply)
+                .get(),
+            before
+        );
+        assert!(matches!(
+            handle_typed_with_catalog(
+                &mut account,
+                "copy.PassBase",
+                &[],
+                TypedBattleContext::new(
+                    Some(&catalog),
+                    Some(&chapter_catalog),
+                    None,
+                    1.0,
+                    1.0,
+                    &mut effects,
+                ),
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Supply)
+                .get(),
+            before - 10
+        );
+        let (_, posts, _) = effects.into_parts();
+        assert!(posts
+            .iter()
+            .any(|response| response.method == "copy.GetCopy"));
     }
 
     #[test]
@@ -1333,6 +1509,55 @@ mod tests {
                 &mut effects,
             ),
             HandlerResult::Error(GameError::InvalidState(_))
+        ));
+    }
+
+    #[test]
+    fn typed_copy_star_reward_accumulates_saved_copy_stars() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("star-reward-sum").unwrap(), "Battle");
+        let first = CopyId::new(9).unwrap();
+        let second = CopyId::new(10).unwrap();
+        account.battle.passed_copies.insert(first);
+        account.battle.copy_stars.insert(first, 1);
+        let mut chapter_catalog = ChapterCatalog::default();
+        chapter_catalog.star_rewards_by_chapter.insert(
+            1,
+            ChapterStarRewards {
+                level_ids: vec![9, 10],
+                star_conditions: vec![3],
+                reward_ids: vec![9001],
+            },
+        );
+        let mut task_catalog = TaskCatalog::default();
+        task_catalog.rewards_by_id.insert(9001, vec![(1, 5001, 1)]);
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, 1);
+        append_varint_field(&mut request, 2, 1);
+        let mut effects = ResponseEffects::default();
+        assert!(matches!(
+            handle_typed_copy_star_reward(
+                &mut account,
+                "copy.StarReward",
+                &request,
+                Some(&chapter_catalog),
+                Some(&task_catalog),
+                &mut effects,
+            ),
+            HandlerResult::Error(GameError::InvalidState(_))
+        ));
+        account.battle.passed_copies.insert(second);
+        account.battle.copy_stars.insert(second, 2);
+        assert!(matches!(
+            handle_typed_copy_star_reward(
+                &mut account,
+                "copy.StarReward",
+                &request,
+                Some(&chapter_catalog),
+                Some(&task_catalog),
+                &mut effects,
+            ),
+            HandlerResult::Reply(_)
         ));
     }
 

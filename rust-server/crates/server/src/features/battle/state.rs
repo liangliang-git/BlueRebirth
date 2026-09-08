@@ -1090,18 +1090,18 @@ pub(crate) fn consume_battle_supply(
     true
 }
 
-pub(crate) fn consume_battle_supply_typed(
-    account: &mut blueoath_domain::AccountState,
+pub(crate) fn battle_supply_cost_typed(
+    account: &blueoath_domain::AccountState,
     catalog: Option<&BattleCatalog>,
     copy_id: i32,
     hero_ids: &[u64],
     count: i32,
-) -> bool {
+) -> Option<u64> {
     if !(1..=99).contains(&count) || hero_ids.is_empty() {
-        return false;
+        return None;
     }
     let Some(catalog) = catalog else {
-        return false;
+        return None;
     };
     let (base, factor) = catalog
         .supply_cost_by_copy
@@ -1120,7 +1120,7 @@ pub(crate) fn consume_battle_supply_typed(
             .values()
             .find(|hero| hero.id.get() == *id)
         else {
-            return false;
+            return None;
         };
         if factor > 0 {
             let template_id = i32::try_from(hero.template_id.get()).unwrap_or_default();
@@ -1136,7 +1136,17 @@ pub(crate) fn consume_battle_supply_typed(
     let cost = base
         .saturating_add(ship_cost.saturating_mul(factor).saturating_add(9999) / 10000)
         .saturating_mul(i64::from(count));
-    let Ok(cost) = u64::try_from(cost.max(0)) else {
+    u64::try_from(cost.max(0)).ok()
+}
+
+pub(crate) fn consume_battle_supply_typed(
+    account: &mut blueoath_domain::AccountState,
+    catalog: Option<&BattleCatalog>,
+    copy_id: i32,
+    hero_ids: &[u64],
+    count: i32,
+) -> bool {
+    let Some(cost) = battle_supply_cost_typed(account, catalog, copy_id, hero_ids, count) else {
         return false;
     };
     account

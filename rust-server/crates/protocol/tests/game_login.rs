@@ -94,6 +94,15 @@ fn copy_info_progress_marks_only_passed_stages() {
 }
 
 #[test]
+fn copy_info_progress_emits_saved_star_level() {
+    let payload =
+        CopyInfoCodec::encode_with_progress_and_stars(2, &[1001], 1001, &[1001], &[(1001, 2)]);
+
+    assert!(payload.windows(2).any(|window| window == [0x18, 0x02]));
+    assert!(!payload.windows(2).any(|window| window == [0x18, 0x07]));
+}
+
+#[test]
 fn sea_copy_info_encodes_selected_difficulty() {
     let payload = CopyInfoCodec::encode_with_progress_and_difficulty(&[1001], 1001, &[1001], 6);
 

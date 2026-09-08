@@ -151,6 +151,7 @@ fn typed_social_relations_round_trip_through_normalized_storage() {
     account.daily_copy.group_success_times.insert(1, 3);
     account.daily_copy.extra_group_success_times.insert(1, 4);
     account.battle.passed_copies.insert(CopyId::new(7).unwrap());
+    account.battle.copy_stars.insert(CopyId::new(7).unwrap(), 4);
     account.social.friends.insert(42);
     account.social.pending.insert(43);
     account.social.blacklist.insert(44);
@@ -161,6 +162,7 @@ fn typed_social_relations_round_trip_through_normalized_storage() {
     assert_eq!(loaded.social, account.social);
     assert_eq!(loaded.daily_copy, account.daily_copy);
     assert_eq!(loaded.battle.passed_copies, account.battle.passed_copies);
+    assert_eq!(loaded.battle.copy_stars, account.battle.copy_stars);
 
     let connection = rusqlite::Connection::open(root.join("profiles.db")).unwrap();
     let relation_count: i64 = connection

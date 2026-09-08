@@ -2406,7 +2406,7 @@ async fn battle_routes_charge_supply_and_refresh_sweep_exp_with_zero_drops() {
     assert!(responses
         .iter()
         .any(|r| r.method == "copy.StartBase" && r.err == 0));
-    assert_eq!(account.resources.amount(CurrencyKind::Supply).get(), 80);
+    assert_eq!(account.resources.amount(CurrencyKind::Supply).get(), 100);
     let pass_responses = typed_battle_route_test_request(
         &mut account,
         &state,
@@ -2418,6 +2418,7 @@ async fn battle_routes_charge_supply_and_refresh_sweep_exp_with_zero_drops() {
     assert!(pass_responses
         .iter()
         .any(|r| r.method == "copy.PassBase" && r.err == 0));
+    assert_eq!(account.resources.amount(CurrencyKind::Supply).get(), 80);
     let mut sweep = Vec::new();
     append_varint_field(&mut sweep, 1, 1);
     append_varint_field(&mut sweep, 2, 5011);

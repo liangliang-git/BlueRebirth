@@ -260,15 +260,32 @@ fn response_payload(method: &str, payload: Vec<u8>) -> Option<Response> {
     Some(Response::raw(method, payload))
 }
 
-fn copy_info_payload(
+pub(crate) fn copy_info_payload(
     catalog: &ChapterCatalog,
     copy_type: i32,
-    passed_copy_ids: &[i32],
+    account: &AccountState,
 ) -> blueoath_protocol::CopyInfoPayload {
+    let passed_copy_ids = account
+        .battle
+        .passed_copies
+        .iter()
+        .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
+        .collect::<Vec<_>>();
+    let copy_star_levels = account
+        .battle
+        .copy_stars
+        .iter()
+        .filter_map(|(copy_id, stars)| {
+            Some((
+                i32::try_from(copy_id.get()).ok()?,
+                i32::try_from(*stars).ok()?,
+            ))
+        })
+        .collect::<Vec<_>>();
     let (copy_ids, max_copy_id, response_passed) = match copy_type {
         2 => (
             catalog.sea.clone(),
-            copy_progress_max_or_initial(&catalog.sea, passed_copy_ids, catalog.sea_initial),
+            copy_progress_max_or_initial(&catalog.sea, &passed_copy_ids, catalog.sea_initial),
             passed_copy_ids.to_vec(),
         ),
         33 => (
@@ -303,7 +320,7 @@ fn copy_info_payload(
         ),
         _ => (
             catalog.plot.clone(),
-            copy_progress_max_or_first(&catalog.plot, passed_copy_ids),
+            copy_progress_max_or_first(&catalog.plot, &passed_copy_ids),
             passed_copy_ids.to_vec(),
         ),
     };
@@ -313,6 +330,7 @@ fn copy_info_payload(
         max_copy_id,
         passed_copy_ids: response_passed,
         passed_copy_counts: Vec::new(),
+        copy_star_levels,
         difficulty: 1,
     }
 }
@@ -1648,6 +1666,7 @@ where
                     request_args,
                     battle_handler::TypedBattleContext::new(
                         battle_catalog,
+                        chapter_catalog,
                         fashion_catalog,
                         state.drop_multiplier,
                         state.ship_stat_multiplier,
@@ -1810,10 +1829,21 @@ where
                         .iter()
                         .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
                         .collect::<Vec<_>>();
+                    let copy_star_levels = account
+                        .battle
+                        .copy_stars
+                        .iter()
+                        .filter_map(|(copy_id, stars)| {
+                            Some((
+                                i32::try_from(copy_id.get()).ok()?,
+                                i32::try_from(*stars).ok()?,
+                            ))
+                        })
+                        .collect::<Vec<_>>();
                     append_method_push(
                         &mut post_pushes,
                         "copy.GetCopy",
-                        CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
+                        CopyInfoCodec::encode_with_progress_and_difficulty_and_counts_and_stars(
                             &catalog.sea,
                             copy_progress_max_or_initial(
                                 &catalog.sea,
@@ -1822,6 +1852,7 @@ where
                             ),
                             &passed,
                             &[],
+                            &copy_star_levels,
                             account.sea.difficulty as i32,
                         ),
                     );
@@ -1848,20 +1879,14 @@ where
                     1
                 }
             };
-            let passed = typed_account
-                .as_deref()
-                .map(|account| {
-                    account
-                        .battle
-                        .passed_copies
-                        .iter()
-                        .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
             Some(Response::battle(
                 request.method.as_str(),
-                BattleResponse::CopyInfo(copy_info_payload(catalog, copy_type, &passed)),
+                BattleResponse::CopyInfo(
+                    typed_account
+                        .as_deref()
+                        .map(|account| copy_info_payload(catalog, copy_type, account))
+                        .unwrap_or_default(),
+                ),
             ))
         }
         "copy.UnLockCopy" => {
@@ -1873,20 +1898,14 @@ where
                     &fallback_catalog
                 }
             };
-            let passed = typed_account
-                .as_deref()
-                .map(|account| {
-                    account
-                        .battle
-                        .passed_copies
-                        .iter()
-                        .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
             Some(Response::battle(
                 request.method.as_str(),
-                BattleResponse::CopyInfo(copy_info_payload(catalog, 1, &passed)),
+                BattleResponse::CopyInfo(
+                    typed_account
+                        .as_deref()
+                        .map(|account| copy_info_payload(catalog, 1, account))
+                        .unwrap_or_default(),
+                ),
             ))
         }
         _ => None,
@@ -2206,6 +2225,17 @@ fn append_typed_user_login_bootstrap(
         .iter()
         .filter_map(|copy_id| i32::try_from(copy_id.get()).ok())
         .collect::<Vec<_>>();
+    let copy_star_levels = account
+        .battle
+        .copy_stars
+        .iter()
+        .filter_map(|(copy_id, stars)| {
+            Some((
+                i32::try_from(copy_id.get()).ok()?,
+                i32::try_from(*stars).ok()?,
+            ))
+        })
+        .collect::<Vec<_>>();
     effects.push_pre(super::common::response::Response::raw(
         "user.UpdateUserInfo",
         UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
@@ -2216,20 +2246,22 @@ fn append_typed_user_login_bootstrap(
     ));
     effects.push_pre(super::common::response::Response::raw(
         "copy.GetCopy",
-        CopyInfoCodec::encode_with_progress(
+        CopyInfoCodec::encode_with_progress_and_stars(
             1,
             &catalog.plot,
             copy_progress_max_or_first(&catalog.plot, &passed),
             &passed,
+            &copy_star_levels,
         ),
     ));
     effects.push_pre(super::common::response::Response::raw(
         "copy.GetCopy",
-        CopyInfoCodec::encode_with_progress_and_difficulty_and_counts(
+        CopyInfoCodec::encode_with_progress_and_difficulty_and_counts_and_stars(
             &catalog.sea,
             copy_progress_max_or_initial(&catalog.sea, &passed, catalog.sea_initial),
             &passed,
             &[],
+            &copy_star_levels,
             1,
         ),
     ));
