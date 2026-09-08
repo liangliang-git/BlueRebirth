@@ -36,8 +36,6 @@ mod catalog;
 mod catalog_loader;
 pub mod common;
 mod config;
-#[path = "features/equip/state.rs"]
-mod equip_state;
 pub(crate) mod features;
 mod frame_service;
 mod game_login;
@@ -91,11 +89,12 @@ use config::{normalize_multiplier, normalize_profile_id, scale_reward, DEFAULT_P
 pub use config::{
     BattleOutcome, Formation, ServerConfig, ServerConfigError, ServerState, Ship, Stage,
 };
-use equip_state::*;
 use features::battle::state::*;
 #[cfg(test)]
 pub(crate) use features::building::service::handle_typed as handle_typed_building;
 use features::building::{buildship_state::*, construction_state::*, state::*};
+#[cfg(test)]
+use features::equip::state::*;
 pub use frame_service::process_frame;
 use frame_service::{prepare_local_request, storage_failure_response};
 #[cfg(test)]

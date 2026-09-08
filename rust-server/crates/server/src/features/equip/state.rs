@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use super::*;
 
 #[cfg(test)]
-pub(super) fn auto_select_enhancement_materials(
+pub(crate) fn auto_select_enhancement_materials(
     account: &Value,
     catalog: Option<&EquipCatalog>,
     equip_id: u64,
@@ -57,7 +57,7 @@ pub(super) fn auto_select_enhancement_materials(
     selected
 }
 
-pub(super) fn encode_equip_enhance_response(equip_id: u64, level: i32, exp: i32) -> Vec<u8> {
+pub(crate) fn encode_equip_enhance_response(equip_id: u64, level: i32, exp: i32) -> Vec<u8> {
     let mut output = Vec::new();
     append_varint_field(&mut output, 1, equip_id);
     append_varint_field(&mut output, 2, level.max(0) as u64);
@@ -66,7 +66,7 @@ pub(super) fn encode_equip_enhance_response(equip_id: u64, level: i32, exp: i32)
 }
 
 #[cfg(test)]
-pub(super) fn encode_study_skill_response(hero_id: u64, skill_id: i32) -> Vec<u8> {
+pub(crate) fn encode_study_skill_response(hero_id: u64, skill_id: i32) -> Vec<u8> {
     let mut output = Vec::new();
     append_varint_field(&mut output, 1, hero_id);
     append_varint_field(&mut output, 2, skill_id.max(0) as u64);
@@ -74,7 +74,7 @@ pub(super) fn encode_study_skill_response(hero_id: u64, skill_id: i32) -> Vec<u8
 }
 
 #[cfg(test)]
-pub(super) fn enhance_equip_state(
+pub(crate) fn enhance_equip_state(
     account: &mut Value,
     catalog: Option<&EquipCatalog>,
     equip_id: u64,
@@ -209,7 +209,7 @@ pub(super) fn enhance_equip_state(
 }
 
 #[cfg(test)]
-pub(super) fn enhance_bind_equip_state(
+pub(crate) fn enhance_bind_equip_state(
     account: &mut Value,
     catalog: Option<&EquipCatalog>,
     equip_id: u64,
@@ -279,7 +279,7 @@ pub(super) fn enhance_bind_equip_state(
 }
 
 #[cfg(test)]
-pub(super) fn renovate_equip_state(
+pub(crate) fn renovate_equip_state(
     account: &mut Value,
     catalog: Option<&EquipCatalog>,
     equip_id: u64,
@@ -400,7 +400,7 @@ pub(super) fn renovate_equip_state(
 }
 
 #[cfg(test)]
-pub(super) fn dismantle_equip_state(
+pub(crate) fn dismantle_equip_state(
     account: &mut Value,
     catalog: Option<&EquipCatalog>,
     requested_ids: &[u64],
@@ -481,7 +481,7 @@ pub(super) fn dismantle_equip_state(
 }
 
 #[cfg(test)]
-pub(super) fn set_equip_hero_id(account: &mut Value, equip_id: u64, hero_id: u64) {
+pub(crate) fn set_equip_hero_id(account: &mut Value, equip_id: u64, hero_id: u64) {
     if equip_id == 0 {
         return;
     }

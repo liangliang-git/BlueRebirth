@@ -6,5 +6,6 @@ use blueoath_protocol::*;
 
 #[path = "service.rs"]
 pub(crate) mod service;
-#[allow(unused_imports)]
-pub(crate) use crate::equip_state as state;
+#[path = "state.rs"]
+pub(crate) mod state;
+pub(crate) use state::*;
