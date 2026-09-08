@@ -304,6 +304,15 @@ fn handle_fashion_equip(
         if !belongs {
             return HandlerResult::Error(GameError::InvalidState("fashion is not for this hero"));
         }
+        let owned = selected.get() == sf_id as u64
+            || account
+                .fashion
+                .entries
+                .get(&(sf_id as u64))
+                .is_some_and(|items| items.contains(&selected));
+        if !owned {
+            return HandlerResult::Error(GameError::InvalidState("fashion is not owned by hero"));
+        }
     }
     let Some(hero) = account.dock.heroes.get_mut(&hero_id) else {
         return HandlerResult::Error(GameError::NotFound("hero"));
@@ -1711,7 +1720,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_fashion_equip_accepts_catalog_fashion_for_new_hero() {
+    fn typed_fashion_equip_accepts_owned_fashion() {
         let mut account = blueoath_domain::NewAccountFactory::create(
             blueoath_domain::ProfileId::new("fashion-equip-typed").unwrap(),
             "Captain",
@@ -1723,6 +1732,12 @@ mod tests {
             .saturating_sub(1)
             / 10;
         let fashion_tid = sf_id + 1;
+        account
+            .fashion
+            .entries
+            .entry(sf_id)
+            .or_default()
+            .insert(blueoath_domain::TemplateId::new(fashion_tid).unwrap());
         let catalog = FashionList {
             items: vec![FashionInfo {
                 sf_id: i32::try_from(sf_id).unwrap(),
@@ -1749,6 +1764,47 @@ mod tests {
         assert!(matches!(result, HandlerResult::PushOnly));
         assert_eq!(account.dock.heroes[&hero_id].fashioning, fashion_tid as u32);
         assert_eq!(effects.into_parts().0.len(), 2);
+    }
+
+    #[test]
+    fn typed_fashion_equip_rejects_unowned_catalog_fashion() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("fashion-unowned-typed").unwrap(),
+            "Captain",
+        );
+        let hero_id = blueoath_domain::HeroId::new(1).unwrap();
+        let sf_id = account.dock.heroes[&hero_id]
+            .template_id
+            .get()
+            .saturating_sub(1)
+            / 10;
+        let fashion_tid = sf_id + 1;
+        let catalog = FashionList {
+            items: vec![FashionInfo {
+                sf_id: i32::try_from(sf_id).unwrap(),
+                fashion_tids: vec![i32::try_from(fashion_tid).unwrap()],
+            }],
+        };
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, fashion_tid);
+        append_varint_field(&mut args, 2, 1);
+        append_varint_field(&mut args, 3, hero_id.get());
+
+        let result = handle_typed(
+            &mut account,
+            "fashion.Equip",
+            &args,
+            &mut ResponseEffects::default(),
+            HeroTypedCatalogs {
+                fashion: Some(&catalog),
+                ..HeroTypedCatalogs::empty()
+            },
+        );
+
+        assert!(matches!(
+            result,
+            HandlerResult::Error(GameError::InvalidState("fashion is not owned by hero"))
+        ));
     }
 
     #[test]

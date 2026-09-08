@@ -562,6 +562,19 @@ where
             }
             handler_payload(result, request.method.as_str())
         }
+        _ if request.method == "fashion.updateData" => match typed_account.as_deref() {
+            Some(account) => response_payload(
+                request.method.as_str(),
+                FashionListCodec::encode(&fashion_list_from_typed_account(
+                    account,
+                    fashion_catalog,
+                )),
+            ),
+            None => {
+                handler_error = Some(GameError::AccountUnavailable);
+                response_payload(request.method.as_str(), Vec::new())
+            }
+        },
         _ if known_method == Some(KnownMethod::TacticGetHeros) => {
             let fleet = match typed_account.as_deref() {
                 Some(account) => fleet_info_from_typed_account(account),
@@ -1287,8 +1300,7 @@ where
             || method.is_family(MethodFamily::Recharge)
             || known_method == Some(KnownMethod::BagGetInfo)
             || request.method == "bag.CompositeItem"
-            || request.method == "bag.SaleBagItem"
-            || request.method == "fashion.updateData" =>
+            || request.method == "bag.SaleBagItem" =>
         {
             let mut commerce_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
@@ -1298,7 +1310,10 @@ where
                     request.method.as_str(),
                     request_args,
                     &mut commerce_effects,
-                    commerce_handler::CommerceTypedCatalogs { shop: shop_catalog },
+                    commerce_handler::CommerceTypedCatalogs {
+                        shop: shop_catalog,
+                        fashion: fashion_catalog,
+                    },
                 );
                 if matches!(result, HandlerResult::Empty) {
                     HandlerResult::Error(GameError::InvalidRequest(

@@ -513,7 +513,7 @@ pub(super) fn bag_info_from_typed_account(account: &blueoath_domain::AccountStat
 #[cfg(test)]
 pub(super) fn fashion_list_from_account(
     account: &Value,
-    catalog: Option<&FashionList>,
+    _catalog: Option<&FashionList>,
 ) -> FashionList {
     let fashion = account.get("fashion");
     let stored = fashion
@@ -536,26 +536,12 @@ pub(super) fn fashion_list_from_account(
                 .unwrap_or_default(),
         })
         .collect::<Vec<_>>();
-    let Some(catalog) = catalog else {
-        return FashionList { items: stored };
-    };
-    let mut items = catalog.items.clone();
-    for entry in stored {
-        if let Some(existing) = items.iter_mut().find(|item| item.sf_id == entry.sf_id) {
-            existing.fashion_tids.extend(entry.fashion_tids);
-            existing.fashion_tids.sort_unstable();
-            existing.fashion_tids.dedup();
-        } else {
-            items.push(entry);
-        }
-    }
-    items.sort_unstable_by_key(|item| item.sf_id);
-    FashionList { items }
+    FashionList { items: stored }
 }
 
 pub(super) fn fashion_list_from_typed_account(
     account: &blueoath_domain::AccountState,
-    catalog: Option<&FashionList>,
+    _catalog: Option<&FashionList>,
 ) -> FashionList {
     let stored = account
         .fashion
@@ -569,21 +555,7 @@ pub(super) fn fashion_list_from_typed_account(
                 .collect(),
         })
         .collect::<Vec<_>>();
-    let Some(catalog) = catalog else {
-        return FashionList { items: stored };
-    };
-    let mut items = catalog.items.clone();
-    for entry in stored {
-        if let Some(existing) = items.iter_mut().find(|item| item.sf_id == entry.sf_id) {
-            existing.fashion_tids.extend(entry.fashion_tids);
-            existing.fashion_tids.sort_unstable();
-            existing.fashion_tids.dedup();
-        } else {
-            items.push(entry);
-        }
-    }
-    items.sort_unstable_by_key(|item| item.sf_id);
-    FashionList { items }
+    FashionList { items: stored }
 }
 
 #[cfg(test)]

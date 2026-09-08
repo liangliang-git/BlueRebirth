@@ -5,6 +5,7 @@ use super::*;
 #[derive(Clone, Copy)]
 pub(crate) struct CommerceTypedCatalogs<'a> {
     pub(crate) shop: Option<&'a ShopCatalog>,
+    pub(crate) fashion: Option<&'a FashionList>,
 }
 
 pub(crate) fn handle_typed(
@@ -54,12 +55,14 @@ pub(crate) fn handle_typed(
                     "shop goods were not found",
                 ));
             };
-            let Some(reward) = apply_typed_shop_good(account, good, request.buy_num) else {
+            let Some(reward) =
+                apply_typed_shop_good(account, good, request.buy_num, catalogs.fashion)
+            else {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "shop goods could not be granted",
                 ));
             };
-            append_typed_shop_pushes(effects, state, account, reward);
+            append_typed_shop_pushes(effects, state, account, reward, catalogs.fashion);
             HandlerResult::Reply(Response::raw(
                 method,
                 return_shop_buy_response(request.good_id, request.buy_num, Some(reward)),
@@ -80,8 +83,8 @@ pub(crate) fn handle_typed(
                 else {
                     continue;
                 };
-                if let Some(reward) = apply_typed_shop_good(account, good, 1) {
-                    append_typed_shop_pushes(effects, state, account, reward);
+                if let Some(reward) = apply_typed_shop_good(account, good, 1, catalogs.fashion) {
+                    append_typed_shop_pushes(effects, state, account, reward, catalogs.fashion);
                     rewards.push(reward);
                 }
             }
@@ -200,8 +203,22 @@ fn apply_typed_shop_good(
     account: &mut blueoath_domain::AccountState,
     good: &ShopGood,
     buy_num: i32,
+    fashion_catalog: Option<&FashionList>,
 ) -> Option<ShopReward> {
     let buy_num = buy_num.max(1);
+    let fashion = if good.goods_type == 18 {
+        let fashion_tid =
+            blueoath_domain::TemplateId::new(u64::try_from(good.item_id).unwrap_or_default())
+                .ok()?;
+        let sf_id = fashion_catalog?
+            .items
+            .iter()
+            .find(|item| item.fashion_tids.contains(&good.item_id))
+            .map(|item| u64::try_from(item.sf_id).ok())??;
+        Some((sf_id, fashion_tid))
+    } else {
+        None
+    };
     if !deduct_typed_shop_costs(account, &good.costs, buy_num) {
         return None;
     }
@@ -293,6 +310,21 @@ fn apply_typed_shop_good(
                 .resources
                 .credit(kind, u64::try_from(total).ok()?)
                 .ok()?;
+            Some(ShopReward {
+                goods_type: good.goods_type,
+                item_id: good.item_id,
+                num: total,
+                instance_id: 0,
+            })
+        }
+        18 => {
+            let (sf_id, fashion_tid) = fashion?;
+            account
+                .fashion
+                .entries
+                .entry(sf_id)
+                .or_default()
+                .insert(fashion_tid);
             Some(ShopReward {
                 goods_type: good.goods_type,
                 item_id: good.item_id,
@@ -395,6 +427,7 @@ fn append_typed_shop_pushes(
     state: &ServerState,
     account: &blueoath_domain::AccountState,
     reward: ShopReward,
+    fashion_catalog: Option<&FashionList>,
 ) {
     effects.push_pre(Response::raw(
         "user.UpdateUserInfo",
@@ -413,6 +446,11 @@ fn append_typed_shop_pushes(
         effects.push_pre(Response::raw(
             "hero.UpdateHeroBagData",
             HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+        ));
+    } else if reward.goods_type == 18 {
+        effects.push_pre(Response::raw(
+            "fashion.updateData",
+            FashionListCodec::encode(&fashion_list_from_typed_account(account, fashion_catalog)),
         ));
     }
 }
@@ -436,7 +474,10 @@ mod tests {
             "recharge.DirectBuyItem",
             &[0x08, 0x01, 0x10, 0x01],
             &mut ResponseEffects::default(),
-            CommerceTypedCatalogs { shop: None },
+            CommerceTypedCatalogs {
+                shop: None,
+                fashion: None,
+            },
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert_eq!(account, before);
@@ -481,6 +522,7 @@ mod tests {
             &mut effects,
             CommerceTypedCatalogs {
                 shop: Some(&catalog),
+                fashion: None,
             },
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
@@ -498,6 +540,72 @@ mod tests {
         let (pushes, _, error) = effects.into_parts();
         assert_eq!(pushes.len(), 2);
         assert!(error.is_none());
+    }
+
+    #[test]
+    fn typed_shop_buy_unlocks_fashion_and_pushes_owned_list() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("typed-shop-fashion").unwrap(),
+            "Captain",
+        );
+        account
+            .resources
+            .credit(blueoath_domain::CurrencyKind::Gold, 100)
+            .unwrap();
+        let mut shop = ShopCatalog::default();
+        shop.goods_by_id.insert(
+            7,
+            ShopGood {
+                shop_id: 23,
+                goods_type: 18,
+                item_id: 1001,
+                num: 1,
+                costs: vec![ShopCost {
+                    goods_type: 5,
+                    item_id: 1,
+                    amount: 10,
+                }],
+            },
+        );
+        let fashion = FashionList {
+            items: vec![FashionInfo {
+                sf_id: 10,
+                fashion_tids: vec![1001],
+            }],
+        };
+        let state = ServerState::new("typed-shop-fashion", "Captain", "1.0.0");
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, 23);
+        append_varint_field(&mut args, 2, 7);
+        append_varint_field(&mut args, 3, 1);
+        let mut effects = ResponseEffects::default();
+        let result = handle_typed(
+            &mut account,
+            &state,
+            "shop.BuyGoods",
+            &args,
+            &mut effects,
+            CommerceTypedCatalogs {
+                shop: Some(&shop),
+                fashion: Some(&fashion),
+            },
+        );
+
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert_eq!(
+            account.fashion.entries[&10],
+            [blueoath_domain::TemplateId::new(1001).unwrap()]
+                .into_iter()
+                .collect()
+        );
+        assert_eq!(
+            account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Gold)
+                .get(),
+            90
+        );
+        assert_eq!(effects.into_parts().0.len(), 3);
     }
 
     #[test]
@@ -522,7 +630,10 @@ mod tests {
             "bag.SaleBagItem",
             &args,
             &mut ResponseEffects::default(),
-            CommerceTypedCatalogs { shop: None },
+            CommerceTypedCatalogs {
+                shop: None,
+                fashion: None,
+            },
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert_eq!(
