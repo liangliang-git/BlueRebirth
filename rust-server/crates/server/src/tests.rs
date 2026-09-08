@@ -21,9 +21,9 @@ use super::{
     draw_sr_build_reward_with_roll, encode_hero_add_exp_response, encode_mail_list_response,
     encode_retire_hero_response, enhance_bind_equip_state, enhance_equip_state,
     equip_list_from_account, expand_build_drop, fashion_equip_state, fashion_list_from_account,
-    finish_building_state, finish_study_state, fleet_info_from_account,
-    fleet_info_from_typed_account, hero_advance_max_level_state, hero_advance_mub_state,
-    hero_advance_state, hero_auto_equip_state, hero_auto_unequip_state,
+    fashion_list_from_typed_account, finish_building_state, finish_study_state,
+    fleet_info_from_account, fleet_info_from_typed_account, hero_advance_max_level_state,
+    hero_advance_mub_state, hero_advance_state, hero_auto_equip_state, hero_auto_unequip_state,
     hero_bag_from_typed_account, hero_change_equip_state, hero_equip_binding_state,
     hero_equip_effect_state, hero_equip_lock_transplant_state, hero_intensify_state,
     hero_remould_state, illustrate_info_payload, illustrate_info_payload_for_templates, json_i32,
@@ -4165,13 +4165,13 @@ async fn study_speedup_route_refreshes_hero_study_and_bag() {
 }
 
 #[test]
-fn fashion_catalog_merge_preserves_account_entries() {
+fn fashion_projection_only_contains_account_entries() {
     let account = json!({
         "fashion": {
             "entries": [{"sfId": 10, "fashionTids": [12, 11]}]
         }
     });
-    let merged = fashion_list_from_account(
+    let list = fashion_list_from_account(
         &account,
         Some(&FashionList {
             items: vec![FashionInfo {
@@ -4180,8 +4180,28 @@ fn fashion_catalog_merge_preserves_account_entries() {
             }],
         }),
     );
-    assert_eq!(merged.items[0].sf_id, 10);
-    assert_eq!(merged.items[0].fashion_tids, vec![11, 12, 13]);
+    assert_eq!(list.items[0].sf_id, 10);
+    assert_eq!(list.items[0].fashion_tids, vec![12, 11]);
+
+    let mut typed =
+        NewAccountFactory::create(ProfileId::new("fashion-projection").unwrap(), "Captain");
+    typed
+        .fashion
+        .entries
+        .entry(10)
+        .or_default()
+        .extend([TemplateId::new(11).unwrap(), TemplateId::new(12).unwrap()]);
+    let typed_list = fashion_list_from_typed_account(
+        &typed,
+        Some(&FashionList {
+            items: vec![FashionInfo {
+                sf_id: 10,
+                fashion_tids: vec![11, 13],
+            }],
+        }),
+    );
+    assert_eq!(typed_list.items.len(), 1);
+    assert_eq!(typed_list.items[0].fashion_tids, vec![11, 12]);
 }
 
 #[test]
