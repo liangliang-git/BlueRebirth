@@ -59,6 +59,7 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
         .get_or_init(|| load_build_formula_catalog(config.client_path.as_ref()));
     let _ = TALENT_CATALOG.get_or_init(|| load_talent_catalog(config.client_path.as_ref()));
     let _ = SHIP_STAT_CATALOG.get_or_init(|| load_ship_stat_catalog(config.client_path.as_ref()));
+    let _ = HERO_SKILL_CATALOG.get_or_init(|| load_hero_skill_catalog(config.client_path.as_ref()));
     let _ = HERO_SKILL_UPGRADE_CATALOG
         .get_or_init(|| load_hero_skill_upgrade_catalog(config.client_path.as_ref()));
     let _ = SHIP_INTENSIFY_CATALOG

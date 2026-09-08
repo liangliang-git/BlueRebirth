@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use super::*;
 
-fn typed_currency(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
+fn typed_base_currency(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
     Some(match item_id {
         1 => blueoath_domain::CurrencyKind::Gold,
         2 => blueoath_domain::CurrencyKind::Diamond,
@@ -17,9 +17,88 @@ fn typed_currency(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
     })
 }
 
+fn typed_currency_amount(account: &blueoath_domain::AccountState, item_id: i32) -> Option<u64> {
+    match typed_base_currency(item_id) {
+        Some(currency) => Some(account.resources.amount(currency).get()),
+        None if item_id > 0 => Some(
+            account
+                .activities
+                .progress
+                .get(&format!("compat:currency:{item_id}"))
+                .copied()
+                .unwrap_or_default(),
+        ),
+        None => None,
+    }
+}
+
+fn credit_typed_currency(
+    account: &mut blueoath_domain::AccountState,
+    item_id: i32,
+    amount: u64,
+) -> bool {
+    if let Some(currency) = typed_base_currency(item_id) {
+        return account.resources.credit(currency, amount).is_ok();
+    }
+    if item_id <= 0 {
+        return false;
+    }
+    let key = format!("compat:currency:{item_id}");
+    let current = account
+        .activities
+        .progress
+        .get(&key)
+        .copied()
+        .unwrap_or_default();
+    let Some(next) = current.checked_add(amount) else {
+        return false;
+    };
+    account.activities.progress.insert(key, next);
+    true
+}
+
+fn typed_next_hero_id(account: &blueoath_domain::AccountState) -> Option<blueoath_domain::HeroId> {
+    blueoath_domain::HeroId::new(
+        account
+            .dock
+            .heroes
+            .keys()
+            .map(|id| id.get())
+            .max()
+            .unwrap_or_default()
+            .checked_add(1)?,
+    )
+    .ok()
+}
+
+fn typed_next_equip_id(
+    account: &blueoath_domain::AccountState,
+) -> Option<blueoath_domain::EquipId> {
+    blueoath_domain::EquipId::new(
+        account
+            .dock
+            .equipments
+            .keys()
+            .map(|id| id.get())
+            .max()
+            .unwrap_or_default()
+            .checked_add(1)?,
+    )
+    .ok()
+}
+
 pub(crate) fn grant_typed_task_reward(
     account: &mut blueoath_domain::AccountState,
     reward: &ShopReward,
+) -> bool {
+    let mut reward = *reward;
+    grant_typed_task_reward_with_fashion(account, &mut reward, None)
+}
+
+pub(crate) fn grant_typed_task_reward_with_fashion(
+    account: &mut blueoath_domain::AccountState,
+    reward: &mut ShopReward,
+    fashion_catalog: Option<&FashionList>,
 ) -> bool {
     let Ok(amount) = u64::try_from(reward.num) else {
         return false;
@@ -28,12 +107,96 @@ pub(crate) fn grant_typed_task_reward(
         return false;
     }
     if reward.goods_type == 5 {
-        let Some(currency) = typed_currency(reward.item_id) else {
+        return credit_typed_currency(account, reward.item_id, amount);
+    }
+    if reward.goods_type == 16 {
+        account
+            .activities
+            .progress
+            .entry(format!("compat:medal:{}", reward.item_id))
+            .or_insert_with(|| u64::from(current_unix_seconds()));
+        return reward.item_id > 0;
+    }
+    if reward.goods_type == 18 {
+        let Ok(fashion_tid) = blueoath_domain::TemplateId::new(reward.item_id as u64) else {
             return false;
         };
-        return account.resources.credit(currency, amount).is_ok();
+        let sf_id = fashion_catalog
+            .and_then(|catalog| {
+                catalog
+                    .items
+                    .iter()
+                    .find(|item| item.fashion_tids.contains(&reward.item_id))
+                    .map(|item| item.sf_id as u64)
+            })
+            .unwrap_or(reward.item_id as u64);
+        account
+            .fashion
+            .entries
+            .entry(sf_id)
+            .or_default()
+            .insert(fashion_tid);
+        return true;
     }
-    if matches!(reward.goods_type, 1 | 6) {
+    if reward.goods_type == 3 {
+        let Ok(template_id) = blueoath_domain::TemplateId::new(reward.item_id as u64) else {
+            return false;
+        };
+        let mut last_id = None;
+        for _ in 0..amount {
+            let Some(id) = typed_next_hero_id(account) else {
+                return false;
+            };
+            account.dock.heroes.insert(
+                id,
+                blueoath_domain::HeroState {
+                    id,
+                    template_id,
+                    fashioning: u32::try_from(template_id.get().saturating_sub(1) / 10)
+                        .unwrap_or(u32::MAX),
+                    name: String::new(),
+                    change_name_time: 0,
+                    level: 1,
+                    exp: 0,
+                    mood: 100,
+                    affection: 500_000,
+                    hp: 10_000_000_000,
+                    locked: false,
+                    equip_slots: vec![None; 6],
+                    pskills: std::collections::BTreeMap::new(),
+                },
+            );
+            last_id = Some(id.get());
+        }
+        reward.instance_id = i32::try_from(last_id.unwrap_or_default()).unwrap_or(i32::MAX);
+        return true;
+    }
+    if reward.goods_type == 2 {
+        let Ok(template_id) = blueoath_domain::TemplateId::new(reward.item_id as u64) else {
+            return false;
+        };
+        let mut last_id = None;
+        for _ in 0..amount {
+            let Some(id) = typed_next_equip_id(account) else {
+                return false;
+            };
+            account.dock.equipments.insert(
+                id,
+                blueoath_domain::EquipmentState {
+                    id,
+                    template_id,
+                    enhance_level: 0,
+                    star: 0,
+                    enhance_exp: 0,
+                    hero_id: None,
+                },
+            );
+            last_id = Some(id.get());
+        }
+        reward.instance_id = i32::try_from(last_id.unwrap_or_default()).unwrap_or(i32::MAX);
+        return true;
+    }
+    if reward.goods_type > 0 {
         let Ok(template_id) = blueoath_domain::TemplateId::new(reward.item_id as u64) else {
             return false;
         };
@@ -63,16 +226,24 @@ pub(crate) fn can_grant_typed_task_reward(
         return false;
     }
     if reward.goods_type == 5 {
-        return typed_currency(reward.item_id).is_some_and(|currency| {
-            account
-                .resources
-                .amount(currency)
-                .get()
-                .checked_add(amount)
-                .is_some()
-        });
+        return typed_currency_amount(account, reward.item_id)
+            .and_then(|current| current.checked_add(amount))
+            .is_some();
     }
-    if matches!(reward.goods_type, 1 | 6) {
+    if matches!(reward.goods_type, 16 | 18) {
+        return reward.item_id > 0;
+    }
+    if matches!(reward.goods_type, 2 | 3) {
+        return reward.item_id > 0
+            && (0..amount).all(|_| {
+                if reward.goods_type == 2 {
+                    typed_next_equip_id(account).is_some()
+                } else {
+                    typed_next_hero_id(account).is_some()
+                }
+            });
+    }
+    if reward.goods_type > 0 {
         let Ok(template_id) = blueoath_domain::TemplateId::new(reward.item_id as u64) else {
             return false;
         };
@@ -92,7 +263,7 @@ pub(crate) fn can_grant_typed_task_rewards(
     account: &blueoath_domain::AccountState,
     rewards: &[ShopReward],
 ) -> bool {
-    let mut currencies = std::collections::BTreeMap::<blueoath_domain::CurrencyKind, u64>::new();
+    let mut currencies = std::collections::BTreeMap::<i32, u64>::new();
     let mut items = std::collections::BTreeMap::<blueoath_domain::TemplateId, u64>::new();
     for reward in rewards {
         let Ok(amount) = u64::try_from(reward.num) else {
@@ -102,19 +273,26 @@ pub(crate) fn can_grant_typed_task_rewards(
             return false;
         }
         if reward.goods_type == 5 {
-            let Some(currency) = typed_currency(reward.item_id) else {
+            let Some(current) = typed_currency_amount(account, reward.item_id) else {
                 return false;
             };
-            let current = account.resources.amount(currency).get();
-            let extra = currencies.get(&currency).copied().unwrap_or_default();
+            let extra = currencies.get(&reward.item_id).copied().unwrap_or_default();
             let Some(next) = current
                 .checked_add(extra)
                 .and_then(|value| value.checked_add(amount))
             else {
                 return false;
             };
-            currencies.insert(currency, next.saturating_sub(current));
-        } else if matches!(reward.goods_type, 1 | 6) {
+            currencies.insert(reward.item_id, next.saturating_sub(current));
+        } else if matches!(reward.goods_type, 16 | 18) {
+            if reward.item_id <= 0 {
+                return false;
+            }
+        } else if matches!(reward.goods_type, 2 | 3) {
+            if !can_grant_typed_task_reward(account, reward) {
+                return false;
+            }
+        } else if reward.goods_type > 0 {
             let Ok(template_id) = blueoath_domain::TemplateId::new(reward.item_id as u64) else {
                 return false;
             };

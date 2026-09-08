@@ -1,7 +1,9 @@
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
-use crate::features::copy::mopup_state::{draw_copy_drop_with_seed, next_battle_drop_seed};
+use crate::features::copy::mopup_state::{
+    draw_copy_drop_with_seed, draw_draw_count, next_battle_drop_seed,
+};
 
 #[cfg(test)]
 pub(crate) fn handle_typed(
@@ -9,7 +11,17 @@ pub(crate) fn handle_typed(
     method: &str,
     request_args: &[u8],
 ) -> HandlerResult {
-    handle_typed_with_catalog(account, method, request_args, None, 1.0)
+    let mut effects = ResponseEffects::default();
+    handle_typed_with_catalog(
+        account,
+        method,
+        request_args,
+        None,
+        None,
+        1.0,
+        1.0,
+        &mut effects,
+    )
 }
 
 pub(crate) fn handle_typed_copy_star_reward(
@@ -133,12 +145,121 @@ pub(crate) fn handle_typed_copy_star_reward(
     HandlerResult::Reply(Response::raw(method, encode_task_reward_list(&pending)))
 }
 
+fn draw_typed_battle_drop_rewards(
+    catalog: &BattleCatalog,
+    copy_id: i32,
+    multiplier: f64,
+    grade: i32,
+) -> Vec<ShopReward> {
+    let mut rewards = Vec::new();
+    let mut draw_index = 0u64;
+    let seed = next_battle_drop_seed();
+    let settle_multiplier = multiplier * battle_evaluation_multipliers(Some(catalog), grade).1;
+    let other_multiplier = multiplier * battle_other_drop_multiplier(Some(catalog), grade);
+    for drop_id in catalog.copy_drop_ids.get(&copy_id).into_iter().flatten() {
+        let draws = draw_draw_count(
+            settle_multiplier,
+            mix_build_draw_roll(seed.wrapping_add(draw_index)),
+        );
+        draw_index = draw_index.wrapping_add(1);
+        for _ in 0..draws {
+            let roll_seed = seed.wrapping_add(draw_index);
+            draw_index = draw_index.wrapping_add(1);
+            if let Some(mut reward) = draw_copy_drop_with_seed(catalog, *drop_id, 0, roll_seed) {
+                catalog.drop_quantities.apply(
+                    copy_id,
+                    &mut reward,
+                    roll_seed.wrapping_add(0xD1B5_4A32_D192_ED03),
+                );
+                rewards.push(reward);
+            }
+        }
+    }
+    for fleet_id in battle_session_fleet_ids(copy_id, Some(catalog)) {
+        for drop_id in catalog.fleet_drop_ids.get(&fleet_id).into_iter().flatten() {
+            if let Some(mut reward) =
+                draw_copy_drop_with_seed(catalog, *drop_id, 0, seed.wrapping_add(draw_index))
+            {
+                draw_index = draw_index.wrapping_add(1);
+                catalog
+                    .drop_quantities
+                    .apply(copy_id, &mut reward, seed.wrapping_add(draw_index));
+                rewards.push(reward);
+            }
+        }
+        for drop_id in catalog
+            .fleet_other_drop_ids
+            .get(&fleet_id)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(mut reward) =
+                draw_copy_drop_with_seed(catalog, *drop_id, 0, seed.wrapping_add(draw_index))
+            {
+                draw_index = draw_index.wrapping_add(1);
+                catalog
+                    .drop_quantities
+                    .apply(copy_id, &mut reward, seed.wrapping_add(draw_index));
+                if draw_draw_count(
+                    other_multiplier,
+                    mix_build_draw_roll(seed.wrapping_add(draw_index)),
+                ) > 0
+                {
+                    rewards.push(reward);
+                }
+                draw_index = draw_index.wrapping_add(1);
+            }
+        }
+        for drop_id in catalog
+            .fleet_settle_drop_ids
+            .get(&fleet_id)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(mut reward) =
+                draw_copy_drop_with_seed(catalog, *drop_id, 0, seed.wrapping_add(draw_index))
+            {
+                draw_index = draw_index.wrapping_add(1);
+                catalog
+                    .drop_quantities
+                    .apply(copy_id, &mut reward, seed.wrapping_add(draw_index));
+                if draw_draw_count(
+                    settle_multiplier,
+                    mix_build_draw_roll(seed.wrapping_add(draw_index)),
+                ) > 0
+                {
+                    rewards.push(reward);
+                }
+                draw_index = draw_index.wrapping_add(1);
+            }
+        }
+    }
+    if let Some((count, guaranteed)) = catalog.copy_must_drop_rewards.get(&copy_id) {
+        for _ in 0..*count {
+            rewards.extend(
+                guaranteed
+                    .iter()
+                    .map(|(goods_type, item_id, num)| ShopReward {
+                        goods_type: *goods_type,
+                        item_id: *item_id,
+                        num: *num,
+                        instance_id: 0,
+                    }),
+            );
+        }
+    }
+    rewards
+}
+
 pub(crate) fn handle_typed_with_catalog(
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
     battle_catalog: Option<&BattleCatalog>,
+    fashion_catalog: Option<&FashionList>,
+    drop_multiplier: f64,
     ship_stat_multiplier: f64,
+    effects: &mut ResponseEffects,
 ) -> HandlerResult {
     match method {
         "copy.StartBase" | "copy.PvpStartBase" => {
@@ -248,6 +369,37 @@ pub(crate) fn handle_typed_with_catalog(
             let result = battle_pass_result_from_request(&request);
             save_typed_battle_hero_hp(account, &result.heroes, &hero_ids);
             let grade = if result.grade > 0 { result.grade } else { 3 };
+            let first_pass_expected = !account.battle.passed_copies.contains(&copy_id);
+            let mut rewards = Vec::new();
+            if grade < 9 && first_pass_expected {
+                rewards.extend(
+                    battle_catalog
+                        .and_then(|catalog| catalog.copy_first_rewards.get(&(copy_id.get() as i32)))
+                        .into_iter()
+                        .flatten()
+                        .map(|(goods_type, item_id, num)| ShopReward {
+                            goods_type: *goods_type,
+                            item_id: *item_id,
+                            num: *num,
+                            instance_id: 0,
+                        }),
+                );
+            }
+            if grade < 9 {
+                if let Some(catalog) = battle_catalog {
+                    rewards.extend(draw_typed_battle_drop_rewards(
+                        catalog,
+                        copy_id.get() as i32,
+                        drop_multiplier,
+                        grade,
+                    ));
+                }
+            }
+            if !can_grant_typed_task_rewards(account, &rewards) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "battle reward cannot be granted",
+                ));
+            }
             let remaining_fleet_ids = account
                 .battle
                 .active
@@ -316,6 +468,31 @@ pub(crate) fn handle_typed_with_catalog(
             .map_err(|_| GameError::InvalidState("battle settlement is invalid"));
             match first_pass {
                 Ok(first_pass) => {
+                    for reward in &mut rewards {
+                        let _ =
+                            grant_typed_task_reward_with_fashion(account, reward, fashion_catalog);
+                    }
+                    if !rewards.is_empty() {
+                        effects.push_post(Response::raw(
+                            "bag.UpdateBagData",
+                            BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+                        ));
+                        effects.push_post(Response::raw(
+                            "hero.UpdateHeroBagData",
+                            HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+                        ));
+                        effects.push_post(Response::raw(
+                            "equip.UpdateEquipBagData",
+                            EquipListCodec::encode(&equip_list_from_typed_account(account)),
+                        ));
+                        effects.push_post(Response::raw(
+                            "fashion.updateData",
+                            FashionListCodec::encode(&fashion_list_from_typed_account(
+                                account,
+                                fashion_catalog,
+                            )),
+                        ));
+                    }
                     if grade < 9 {
                         account
                             .battle
@@ -340,7 +517,7 @@ pub(crate) fn handle_typed_with_catalog(
                             first_pass,
                             grade,
                             result.battle_time,
-                            &[],
+                            &rewards,
                         ),
                     ))
                 }
@@ -385,9 +562,44 @@ pub(crate) fn handle_typed_with_catalog(
                 ));
             }
             if first_pass {
-                for reward in &rewards {
-                    let _ = grant_typed_task_reward(account, reward);
+                let mut rewards = rewards;
+                for reward in &mut rewards {
+                    let _ = grant_typed_task_reward_with_fashion(account, reward, fashion_catalog);
                 }
+                effects.push_post(Response::raw(
+                    "bag.UpdateBagData",
+                    BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+                ));
+                let hero_ids = account
+                    .fleet
+                    .fleets
+                    .values()
+                    .next()
+                    .map(|fleet| fleet.members.clone())
+                    .unwrap_or_default();
+                account
+                    .battle
+                    .records
+                    .push(blueoath_domain::CopyRecordState {
+                        copy_id: copy_id_typed,
+                        hero_ids,
+                        pass_time: u64::try_from(request.battle_time.max(1)).unwrap_or(1),
+                        secret_id: 0,
+                        strategy_id: 0,
+                        power: 0,
+                        record_time: u64::from(current_unix_seconds()),
+                        ex_buffs: Vec::new(),
+                    });
+                return HandlerResult::Reply(Response::raw(
+                    method,
+                    battle_pass_payload_with_rewards(
+                        copy_id,
+                        first_pass,
+                        3,
+                        request.battle_time,
+                        &rewards,
+                    ),
+                ));
             }
             let hero_ids = account
                 .fleet
@@ -411,13 +623,7 @@ pub(crate) fn handle_typed_with_catalog(
                 });
             HandlerResult::Reply(Response::raw(
                 method,
-                battle_pass_payload_with_rewards(
-                    copy_id,
-                    first_pass,
-                    3,
-                    request.battle_time,
-                    if first_pass { &rewards } else { &[] },
-                ),
+                battle_pass_payload_with_rewards(copy_id, first_pass, 3, request.battle_time, &[]),
             ))
         }
         "copy.GetRecord" => {

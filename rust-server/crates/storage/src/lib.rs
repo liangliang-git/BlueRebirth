@@ -2322,7 +2322,7 @@ impl ProfileStore {
             ),
         ] {
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, 'guildBox', ?2, ?3, ?4)",
                 params![
@@ -3112,7 +3112,7 @@ impl ProfileStore {
         for (key, value) in &account.activities.progress {
             let (activity_id, progress_kind) = key.split_once('\u{1f}').unwrap_or((key, "value"));
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
@@ -3126,7 +3126,7 @@ impl ProfileStore {
         }
         for (root, active) in &account.talents.active {
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, 'talent', ?2, ?3, ?4)",
                 params![
@@ -3140,7 +3140,7 @@ impl ProfileStore {
         for hero in account.dock.heroes.values() {
             for (skill_id, level) in &hero.pskills {
                 transaction.execute(
-                    "INSERT INTO activity_progress(
+                    "INSERT OR REPLACE INTO activity_progress(
                         profile_id, activity_id, progress_kind, value, updated_at
                      ) VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
@@ -3161,7 +3161,7 @@ impl ProfileStore {
                 ("end", progress.end_time),
             ] {
                 transaction.execute(
-                    "INSERT INTO activity_progress(
+                    "INSERT OR REPLACE INTO activity_progress(
                         profile_id, activity_id, progress_kind, value, updated_at
                      ) VALUES (?1, 'study', ?2, ?3, ?4)",
                     params![
@@ -3189,7 +3189,7 @@ impl ProfileStore {
         );
         for (progress_kind, value) in adventure_progress {
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, 'adventure', ?2, ?3, ?4)",
                 params![
@@ -3241,7 +3241,7 @@ impl ProfileStore {
         );
         for (progress_kind, value) in ship_task_progress {
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, 'shipTask', ?2, ?3, ?4)",
                 params![
@@ -3254,7 +3254,7 @@ impl ProfileStore {
         }
         for (id, count) in &account.exchange_times {
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, 'exchange', ?2, ?3, ?4)",
                 params![
@@ -3278,7 +3278,7 @@ impl ProfileStore {
         );
         for (progress_kind, value) in food_progress {
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, 'foodCompose', ?2, ?3, ?4)",
                 params![
@@ -3309,7 +3309,7 @@ impl ProfileStore {
         ));
         for (progress_kind, value) in world_event_progress {
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, 'worldEvent', ?2, ?3, ?4)",
                 params![
@@ -3350,7 +3350,7 @@ impl ProfileStore {
             );
             for (progress_kind, value) in pass_progress {
                 transaction.execute(
-                    "INSERT INTO activity_progress(
+                    "INSERT OR REPLACE INTO activity_progress(
                         profile_id, activity_id, progress_kind, value, updated_at
                      ) VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
@@ -3393,7 +3393,7 @@ impl ProfileStore {
         );
         for (progress_kind, value) in magazine_progress {
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, 'magazine', ?2, ?3, ?4)",
                 params![
@@ -3414,7 +3414,7 @@ impl ProfileStore {
                 ("chapter", entry.chapter_id),
             ] {
                 transaction.execute(
-                    "INSERT INTO activity_progress(
+                    "INSERT OR REPLACE INTO activity_progress(
                         profile_id, activity_id, progress_kind, value, updated_at
                      ) VALUES (?1, 'sweep', ?2, ?3, ?4)",
                     params![
@@ -3460,7 +3460,7 @@ impl ProfileStore {
         );
         for (progress_kind, value) in interaction_progress {
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, 'interactionItem', ?2, ?3, ?4)",
                 params![
@@ -3473,7 +3473,7 @@ impl ProfileStore {
         }
         for (pool_id, count) in &account.build_ship.draw_counts {
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, 'buildShip', ?2, ?3, ?4)",
                 params![
@@ -3491,7 +3491,7 @@ impl ProfileStore {
             for (pool_id, milestones) in claims {
                 for milestone in milestones {
                     transaction.execute(
-                        "INSERT INTO activity_progress(
+                        "INSERT OR REPLACE INTO activity_progress(
                             profile_id, activity_id, progress_kind, value, updated_at
                          ) VALUES (?1, 'buildShip', ?2, 1, ?3)",
                         params![
@@ -3526,7 +3526,7 @@ impl ProfileStore {
         );
         for (progress_kind, value) in sports_progress {
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, 'sportsMeet', ?2, ?3, ?4)",
                 params![
@@ -3555,7 +3555,7 @@ impl ProfileStore {
         }
         for (progress_kind, value) in bathroom_progress {
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, 'bathroom', ?2, ?3, ?4)",
                 params![
@@ -3579,7 +3579,7 @@ impl ProfileStore {
             ),
         ] {
             transaction.execute(
-                "INSERT INTO activity_progress(
+                "INSERT OR REPLACE INTO activity_progress(
                     profile_id, activity_id, progress_kind, value, updated_at
                  ) VALUES (?1, 'inviteScore', ?2, ?3, ?4)",
                 params![

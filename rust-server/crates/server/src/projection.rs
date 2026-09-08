@@ -163,6 +163,33 @@ pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountStat
         .ok()
         .filter(|value| *value != 0)
         .unwrap_or(now);
+    let hero_pskills = |hero: &blueoath_domain::HeroState| {
+        let stored = hero
+            .pskills
+            .iter()
+            .map(|(skill_id, level)| PSkillEntry {
+                pskill_id: u32::try_from(*skill_id).unwrap_or(u32::MAX),
+                pskill_exp: 0,
+                level: i32::try_from(*level).unwrap_or(i32::MAX),
+                replace: 0,
+            })
+            .collect::<Vec<_>>();
+        if !stored.is_empty() {
+            return stored;
+        }
+        HERO_SKILL_CATALOG
+            .get()
+            .and_then(|catalog| catalog.get(&i32::try_from(hero.template_id.get()).ok()?))
+            .into_iter()
+            .flatten()
+            .map(|skill_id| PSkillEntry {
+                pskill_id: u32::try_from(*skill_id).unwrap_or(u32::MAX),
+                pskill_exp: 0,
+                level: 1,
+                replace: 0,
+            })
+            .collect()
+    };
     let heroes = account
         .dock
         .heroes
@@ -211,16 +238,7 @@ pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountStat
                         .unwrap_or(0)
                 })
                 .collect(),
-            pskills: hero
-                .pskills
-                .iter()
-                .map(|(skill_id, level)| PSkillEntry {
-                    pskill_id: u32::try_from(*skill_id).unwrap_or(u32::MAX),
-                    pskill_exp: 0,
-                    level: i32::try_from(*level).unwrap_or(i32::MAX),
-                    replace: 0,
-                })
-                .collect(),
+            pskills: hero_pskills(hero),
             combination_info: HeroCombinationInfo {
                 com_lv: i32::try_from(
                     account

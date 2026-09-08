@@ -1278,6 +1278,8 @@ pub(super) struct ShipStatCatalog {
 }
 
 pub(super) static SHIP_STAT_CATALOG: OnceLock<ShipStatCatalog> = OnceLock::new();
+pub(super) static HERO_SKILL_CATALOG: OnceLock<std::collections::BTreeMap<i32, Vec<i32>>> =
+    OnceLock::new();
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct RandomFactorEntry {

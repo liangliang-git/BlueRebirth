@@ -8,10 +8,18 @@ pub(crate) fn handle_typed(
     method: &str,
     request_args: &[u8],
     task_catalog: Option<&TaskCatalog>,
+    fashion_catalog: Option<&FashionList>,
     effects: &mut ResponseEffects,
 ) -> HandlerResult {
     if method == "task.TaskAllReward" {
-        return handle_all_rewards(account, state, request_args, task_catalog, effects);
+        return handle_all_rewards(
+            account,
+            state,
+            request_args,
+            task_catalog,
+            fashion_catalog,
+            effects,
+        );
     }
     if !matches!(
         method,
@@ -61,25 +69,14 @@ pub(crate) fn handle_typed(
             instance_id: 0,
         });
     }
-    if rewards.is_empty()
-        || rewards.iter().any(|reward| {
-            reward.goods_type == 16
-                || (reward.goods_type != 5 && !matches!(reward.goods_type, 1 | 6))
-        })
-    {
+    if rewards.is_empty() || !can_grant_typed_task_rewards(account, &rewards) {
         return HandlerResult::Error(GameError::InvalidState("typed task reward is unsupported"));
     }
-    if rewards
-        .iter()
-        .any(|reward| !can_grant_typed_task_reward(account, reward))
-    {
-        return HandlerResult::Error(GameError::InvalidState(
-            "typed task reward cannot be granted",
-        ));
-    }
-    for reward in &rewards {
-        // Preflight above makes this infallible for supported reward kinds.
-        let _ = grant_typed_task_reward(account, reward);
+    let has_hero_reward = rewards.iter().any(|reward| reward.goods_type == 3);
+    let has_equip_reward = rewards.iter().any(|reward| reward.goods_type == 2);
+    let has_fashion_reward = rewards.iter().any(|reward| reward.goods_type == 18);
+    for reward in &mut rewards {
+        let _ = grant_typed_task_reward_with_fashion(account, reward, fashion_catalog);
     }
     complete_typed_task(account, request.task_id);
 
@@ -91,6 +88,24 @@ pub(crate) fn handle_typed(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_typed_account(account)),
     ));
+    if has_hero_reward {
+        effects.push_post(Response::raw(
+            "hero.UpdateHeroBagData",
+            HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+        ));
+    }
+    if has_equip_reward {
+        effects.push_post(Response::raw(
+            "equip.UpdateEquipBagData",
+            EquipListCodec::encode(&equip_list_from_typed_account(account)),
+        ));
+    }
+    if has_fashion_reward {
+        effects.push_post(Response::raw(
+            "fashion.updateData",
+            FashionListCodec::encode(&fashion_list_from_typed_account(account, fashion_catalog)),
+        ));
+    }
     effects.push_post(Response::raw(
         "user.UpdateUserInfo",
         UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
@@ -106,6 +121,7 @@ fn handle_all_rewards(
     state: &ServerState,
     request_args: &[u8],
     task_catalog: Option<&TaskCatalog>,
+    fashion_catalog: Option<&FashionList>,
     effects: &mut ResponseEffects,
 ) -> HandlerResult {
     let Ok(request) = TaskAllRewardRequest::decode(request_args) else {
@@ -140,12 +156,7 @@ fn handle_all_rewards(
                 instance_id: 0,
             });
         }
-        if rewards.is_empty()
-            || rewards.iter().any(|reward| {
-                reward.goods_type == 16
-                    || (reward.goods_type != 5 && !matches!(reward.goods_type, 1 | 6))
-            })
-        {
+        if rewards.is_empty() || !can_grant_typed_task_rewards(account, &rewards) {
             continue;
         }
         claims.push((task_id, rewards));
@@ -159,9 +170,11 @@ fn handle_all_rewards(
             "typed task rewards cannot be granted",
         ));
     }
-    for (task_id, rewards) in &claims {
-        for reward in rewards {
-            let _ = grant_typed_task_reward(account, reward);
+    let mut response_rewards = Vec::new();
+    for (task_id, rewards) in &mut claims {
+        for reward in rewards.iter_mut() {
+            let _ = grant_typed_task_reward_with_fashion(account, reward, fashion_catalog);
+            response_rewards.push(*reward);
         }
         complete_typed_task(account, *task_id);
     }
@@ -173,13 +186,34 @@ fn handle_all_rewards(
         "bag.UpdateBagData",
         BagInfoCodec::encode(&bag_info_from_typed_account(account)),
     ));
+    if response_rewards.iter().any(|reward| reward.goods_type == 3) {
+        effects.push_post(Response::raw(
+            "hero.UpdateHeroBagData",
+            HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+        ));
+    }
+    if response_rewards.iter().any(|reward| reward.goods_type == 2) {
+        effects.push_post(Response::raw(
+            "equip.UpdateEquipBagData",
+            EquipListCodec::encode(&equip_list_from_typed_account(account)),
+        ));
+    }
+    if response_rewards
+        .iter()
+        .any(|reward| reward.goods_type == 18)
+    {
+        effects.push_post(Response::raw(
+            "fashion.updateData",
+            FashionListCodec::encode(&fashion_list_from_typed_account(account, fashion_catalog)),
+        ));
+    }
     effects.push_post(Response::raw(
         "user.UpdateUserInfo",
         UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
     ));
     HandlerResult::Reply(Response::raw(
         "task.TaskAllReward",
-        encode_task_reward_list(&all_rewards),
+        encode_task_reward_list(&response_rewards),
     ))
 }
 
@@ -212,6 +246,7 @@ mod tests {
             "task.TaskReward",
             &[0x08, 101, 0x10, 1],
             Some(&catalog),
+            None,
             &mut effects,
         );
         assert!(matches!(result, HandlerResult::Reply(_)));

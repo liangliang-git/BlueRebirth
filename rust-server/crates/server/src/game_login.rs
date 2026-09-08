@@ -1450,6 +1450,7 @@ where
                         request.method.as_str(),
                         request_args,
                         task_catalog,
+                        fashion_catalog,
                         &mut feature_effects,
                     )
                 }
@@ -1603,13 +1604,17 @@ where
             || request.method == "copyinfo.GetCopyInfo" =>
         {
             let mut typed_handled = false;
+            let mut battle_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
                 let result = battle_handler::handle_typed_with_catalog(
                     typed,
                     request.method.as_str(),
                     request_args,
                     battle_catalog,
+                    fashion_catalog,
+                    state.drop_multiplier,
                     state.ship_stat_multiplier,
+                    &mut battle_effects,
                 );
                 if matches!(result, HandlerResult::Reply(_) | HandlerResult::Error(_)) {
                     typed_handled = true;
@@ -1624,6 +1629,12 @@ where
                     "battle request requires typed account",
                 ))
             };
+            apply_response_effects(
+                battle_effects,
+                &mut pre_pushes,
+                &mut post_pushes,
+                &mut handler_error,
+            );
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
@@ -1639,6 +1650,15 @@ where
                             current_unix_seconds(),
                         ),
                     );
+                    append_method_push(
+                        &mut post_pushes,
+                        "user.UpdateUserInfo",
+                        UserInfoCodec::encode(&user_info_from_typed_account(state, typed)),
+                    );
+                }
+            }
+            if typed_handled && request.method == "copy.PassBase" {
+                if let Some(typed) = typed_account.as_deref() {
                     append_method_push(
                         &mut post_pushes,
                         "user.UpdateUserInfo",
