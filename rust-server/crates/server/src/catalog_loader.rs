@@ -195,7 +195,24 @@ fn config_testship_reward(value: &Value) -> TestShipRewardConfig {
 }
 
 pub(super) fn config_dir(catalog_path: &Path) -> PathBuf {
-    catalog_path.to_path_buf()
+    if catalog_path
+        .file_name()
+        .is_some_and(|name| name == "server-config")
+    {
+        return catalog_path.to_path_buf();
+    }
+    let Some(parent) = catalog_path.parent() else {
+        return catalog_path.to_path_buf();
+    };
+    let prepared = parent.join("server-config");
+    if prepared.join("manifest.json").is_file()
+        && prepared.join("config_chapter.json").is_file()
+        && prepared.join("config_shop.json").is_file()
+    {
+        prepared
+    } else {
+        catalog_path.to_path_buf()
+    }
 }
 
 pub(super) fn load_chapter_catalog(catalog_path: Option<&PathBuf>) -> ChapterCatalog {
@@ -3154,6 +3171,25 @@ fn battle_challenge_enemy_aliases(
 #[cfg(test)]
 mod validation_tests {
     use super::*;
+
+    #[test]
+    fn config_dir_prefers_prepared_server_catalog_when_manifest_exists() {
+        let root = std::env::temp_dir().join(format!(
+            "blueoath-catalog-dir-test-{}",
+            std::process::id()
+        ));
+        let source = root.join("config");
+        let prepared = root.join("server-config");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&prepared).unwrap();
+        std::fs::write(prepared.join("manifest.json"), b"{}").unwrap();
+        std::fs::write(prepared.join("config_chapter.json"), b"{}").unwrap();
+        std::fs::write(prepared.join("config_shop.json"), b"{}").unwrap();
+
+        assert_eq!(config_dir(&source), prepared);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn bundled_catalogs_pass_startup_reference_validation() {

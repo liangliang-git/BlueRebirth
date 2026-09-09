@@ -16,7 +16,7 @@ $destination = if ($OutputRoot) {
     [System.IO.Path]::GetFullPath((Join-Path (Get-Location).Path $OutputRoot))
   }
 } else {
-  Join-Path $repoRoot 'rust-server\catalog\config'
+  Join-Path $repoRoot 'rust-server\catalog\server-config'
 }
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 

@@ -15,7 +15,7 @@ Rust server is the canonical local server. Current slice provides:
   pushes and request refreshes. `user.UserLogin` sends the C#-ordered
   minimum bootstrap sequence (`user.UpdateUserInfo`, `guide.GuideInfo`, four `copy.GetCopy` snapshots,
   `dailycopy.UpdateDailyCopyData`) before its response. All runtime catalogs are loaded from
-  server-owned `catalog/config/*.json` files; installed client files are never read.
+  server-owned catalog JSON files; installed client files are never read.
   Server-local `catalog/data/shops/shop-*.json` files are preferred
   for `shop.BuyGoods` and `shop.QualityBuyGoods`, with `gm-goods.json` as fallback;
   handbook behaviour and story tables populate illustration
@@ -132,15 +132,18 @@ cargo run --manifest-path .\rust-server\Cargo.toml -p blueoath-server -- --port=
 ```
 
 The exporter converts all configuration tables currently referenced by Rust loaders
-from XOR/SQLite to `config_*.json`, plus server-owned runtime JSON files. The loader
-reads JSON only; legacy `.db` files are ignored. Keep generated catalog files with
-deployment; re-export when client configuration changes. JSON export also
-runs the field audit/pruner: typed tables keep only fields read by Rust, while raw
+from XOR/SQLite to `config_*.json`, plus server-owned runtime JSON files. The
+loader reads JSON only; legacy `.db` files are ignored. The default output is
+`catalog/server-config/`, which contains only loader-referenced tables; use
+`tools/prepare-rust-server-config.py` to build it from an existing JSON snapshot.
+Re-export when client configuration changes. JSON export also runs the field
+audit/pruner: typed tables keep only fields read by Rust, while raw
 gameplay/forward-compatible tables stay intact. Run it manually after editing JSON:
 
 ```powershell
 python .\tools\prune-rust-catalog-json.py .\rust-server\catalog\config
 python .\tools\prune-rust-catalog-json.py --apply .\rust-server\catalog\config
+python .\tools\prepare-rust-server-config.py --source .\rust-server\catalog\config
 ```
 
 Inject an installed client without copying it into this repository:
