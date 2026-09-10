@@ -66,7 +66,7 @@ pub(crate) fn handle_typed(
     let payload = DailyCopyCodec::encode_with_progress(
         &catalog.daily_chapters,
         &catalog.daily_groups,
-        &daily_copy_progress_from_typed_account(account, now),
+        &daily_copy_progress_from_typed_account(account, catalog, now),
         &[],
         &[],
     );

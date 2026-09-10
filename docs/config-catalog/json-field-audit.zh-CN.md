@@ -1,4 +1,4 @@
-# 服务端 JSON 字段审计
+# 服务端配置字段审计
 
 服务端配置读取入口为 `rust-server/crates/server/src/catalog_loader.rs`。
 `tools/prune-rust-catalog-json.py` 按该 loader 的实际字段访问建立白名单：
@@ -7,21 +7,21 @@
 - raw/动态配置表：完整保留，避免活动规则、接口透传和未来字段被误删；
 - 未映射新表：默认保留并输出审计警告，不静默删除。
 
-当前日服目录状态：
+当前目录状态：
 
-- 100 个 `config_*.json`；
-- 83,675 行；
-- 本地目录、部署目录均为 JSON-only，`config_*.db` 数量为 0；
-- 两目录 JSON SHA-256 完全一致；
-- 本轮删除 3,963,942 个冗余字段实例，双目录合计约 92.4 MB；
-- raw 表未裁剪，nested array 未裁剪。
+- `catalog.db` 包含 87 个配置数据表，每个表使用 `id` 加上 `value` 下的顶层键作为字段；
+- 标量按 SQLite 类型保存，数组和对象在对应字段中保存为 JSON 文本；
+- 如果配置值自身包含 `id`，该字段导出为 `value_id`，避免与行主键冲突；
+- `catalog_columns` 保存原始键名、字段类型和字段顺序，便于程序恢复 JSON；
+- 掉落数量、服务器商城商品/价格、邮件模板已并入同一个数据库；
+- 服务端启动时只读数据库，并将目录加载到内存 typed catalog。
 
 复查或重新导出后执行：
 
 ```powershell
-python .\tools\prune-rust-catalog-json.py .\rust-server\catalog\config
-python .\tools\prune-rust-catalog-json.py --apply .\rust-server\catalog\config
+python .\tools\build-catalog-db.py
 ```
 
-`tools/export-rust-catalog.ps1 -ConfigFormat json` 已自动执行 `--apply`。新增
-`config_*.db` 表若未进入 loader 白名单，会保持原字段并提示 `UNMAPPED TABLES`。
+`tools/export-rust-catalog.ps1 -ConfigFormat json` 会先生成 JSON 源，再自动构建
+`catalog.db`。新增客户端配置表会自动进入独立数据表；服务端 loader 未引用的表仍可
+保留，后续可在导入校验中清理。

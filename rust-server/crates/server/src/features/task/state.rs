@@ -160,8 +160,9 @@ pub(crate) fn grant_typed_task_reward_with_fashion(
                     exp: 0,
                     mood: blueoath_domain::HERO_MOOD_INITIAL,
                     affection: 500_000,
-                    hp: 10_000_000_000,
+                    hp: ship_initial_hp_for_template(template_id.get()),
                     locked: false,
+                    created_utc: String::new(),
                     equip_slots: vec![None; 6],
                     pskills: std::collections::BTreeMap::new(),
                 },
@@ -1005,6 +1006,7 @@ pub(crate) fn task_info_payload_from_typed_account(
     output
 }
 
+/// 商店奖励
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ShopReward {
     pub(crate) goods_type: i32,

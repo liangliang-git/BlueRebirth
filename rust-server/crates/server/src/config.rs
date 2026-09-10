@@ -379,22 +379,22 @@ impl Default for ServerConfig {
 }
 
 fn default_data_root() -> PathBuf {
-    bundled_catalog_root()
-        .map(|root| root.join("data"))
+    bundled_server_root()
+        .map(|root| root.join("saves"))
         .unwrap_or_else(|| {
             std::env::current_exe()
                 .ok()
                 .and_then(|path| path.parent().map(PathBuf::from))
-                .map(|path| path.join("data"))
-                .unwrap_or_else(|| PathBuf::from("data"))
+                .map(|path| path.join("saves"))
+                .unwrap_or_else(|| PathBuf::from("saves"))
         })
 }
 
 fn default_catalog_path() -> Option<PathBuf> {
-    bundled_catalog_root().map(|root| root.join("config"))
+    bundled_server_root()
 }
 
-fn bundled_catalog_root() -> Option<PathBuf> {
+fn bundled_server_root() -> Option<PathBuf> {
     let mut bases = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
@@ -414,22 +414,9 @@ fn bundled_catalog_root() -> Option<PathBuf> {
             cursor = base.parent();
         }
     }
-    bases.into_iter().find_map(|base| {
-        [
-            base.join("catalog"),
-            base.join("rust-server").join("catalog"),
-        ]
+    bases
         .into_iter()
-        .find(|root| {
-            let config = root.join("config");
-            let data = root.join("data");
-            config.is_dir()
-                && data.is_dir()
-                && config.join("config_chapter.json").is_file()
-                && config.join("config_shop.json").is_file()
-                && data.join("gm-goods.json").is_file()
-        })
-    })
+        .find(|base| base.join("server_config.db").is_file())
 }
 
 impl ServerConfig {

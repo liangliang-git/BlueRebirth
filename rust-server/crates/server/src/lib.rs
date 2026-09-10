@@ -31,6 +31,7 @@ use tokio::net::{TcpListener, TcpStream, UdpSocket};
 mod account_state;
 mod bootstrap;
 mod catalog;
+mod catalog_db;
 mod catalog_loader;
 pub mod common;
 mod config;

@@ -7,7 +7,6 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 
-const HP_COEFFICIENT: i64 = 10_000_000_000;
 const OATH_RING_TEMPLATE: i32 = 10_180;
 
 fn consume_typed_item(
@@ -545,7 +544,16 @@ pub(crate) fn handle_typed(
         else {
             return HandlerResult::Error(GameError::NotFound("hero"));
         };
-        if hero.hp >= HP_COEFFICIENT as u64 {
+        let max_hp = ship_max_hp_for_typed_hero(
+            hero,
+            &account.activities.progress,
+            &account.dock.equipments,
+            SHIP_STAT_CATALOG.get(),
+            EQUIP_CATALOG.get(),
+            SHIP_REMOULD_CATALOG.get(),
+            state.ship_stat_multiplier,
+        );
+        if hero.hp >= max_hp {
             continue;
         }
         let template_id = i32::try_from(hero.template_id.get()).unwrap_or_default();
@@ -572,7 +580,18 @@ pub(crate) fn handle_typed(
             .heroes
             .values()
             .find(|hero| hero.id.get() == *hero_id)
-            .is_some_and(|hero| hero.hp < HP_COEFFICIENT as u64)
+            .is_some_and(|hero| {
+                hero.hp
+                    < ship_max_hp_for_typed_hero(
+                        hero,
+                        &account.activities.progress,
+                        &account.dock.equipments,
+                        SHIP_STAT_CATALOG.get(),
+                        EQUIP_CATALOG.get(),
+                        SHIP_REMOULD_CATALOG.get(),
+                        state.ship_stat_multiplier,
+                    )
+            })
     });
     if total_cost > 0
         && account
@@ -592,7 +611,15 @@ pub(crate) fn handle_typed(
                 .values_mut()
                 .find(|hero| hero.id.get() == hero_id)
             {
-                hero.hp = HP_COEFFICIENT as u64;
+                hero.hp = ship_max_hp_for_typed_hero(
+                    hero,
+                    &account.activities.progress,
+                    &account.dock.equipments,
+                    SHIP_STAT_CATALOG.get(),
+                    EQUIP_CATALOG.get(),
+                    SHIP_REMOULD_CATALOG.get(),
+                    state.ship_stat_multiplier,
+                );
             }
         }
         effects.push_pre(Response::raw(
@@ -879,7 +906,10 @@ fn handle_typed_combination(
 }
 
 fn typed_treasure_reward_supported(reward: &ShopReward) -> bool {
-    reward.num > 0 && matches!(reward.goods_type, 1 | 2 | 3 | 5 | 6 | 18) && reward.item_id > 0
+    // Goods type 4 is a nested drop pool, resolved before this check. Other
+    // positive types use the same inventory/currency semantics as task/shop
+    // rewards, including material types 11/15/24.
+    reward.num > 0 && reward.goods_type > 0 && reward.goods_type != 4 && reward.item_id > 0
 }
 
 fn typed_next_hero_id(account: &blueoath_domain::AccountState) -> Option<blueoath_domain::HeroId> {
@@ -917,13 +947,8 @@ fn grant_typed_treasure_reward(
     reward: &mut ShopReward,
 ) -> bool {
     if reward.goods_type == 5 {
-        let Some(currency) = typed_currency_kind(reward.item_id) else {
-            return false;
-        };
-        return account
-            .resources
-            .credit(currency, u64::try_from(reward.num).unwrap_or_default())
-            .is_ok();
+        return can_grant_typed_task_reward(account, reward)
+            && grant_typed_task_reward(account, reward);
     }
     if matches!(reward.goods_type, 1 | 6) {
         return can_grant_typed_task_reward(account, reward)
@@ -964,8 +989,9 @@ fn grant_typed_treasure_reward(
                     exp: 0,
                     mood: 100,
                     affection: 500_000,
-                    hp: 10_000_000_000,
+                    hp: ship_initial_hp_for_template(template_id.get()),
                     locked: false,
+                    created_utc: String::new(),
                     equip_slots: vec![None; 6],
                     pskills: std::collections::BTreeMap::new(),
                 },
@@ -1001,7 +1027,7 @@ fn grant_typed_treasure_reward(
         reward.instance_id = i32::try_from(last_id.unwrap_or_default()).unwrap_or(i32::MAX);
         return true;
     }
-    false
+    can_grant_typed_task_reward(account, reward) && grant_typed_task_reward(account, reward)
 }
 
 fn handle_typed_treasure(
@@ -1050,12 +1076,24 @@ fn handle_typed_treasure(
     if treasure_id <= 0 || !(1..=99).contains(&open_num) {
         return HandlerResult::Error(GameError::InvalidRequest("treasure id or count is invalid"));
     }
-    let Some(drop_id) = drop_id else {
-        return HandlerResult::Error(GameError::CatalogUnavailable);
+    let drop_id = if selected_option.is_some() {
+        0
+    } else {
+        let Some(drop_id) = drop_id else {
+            return HandlerResult::Error(GameError::CatalogUnavailable);
+        };
+        drop_id
     };
     let Some(treasure_template) = blueoath_domain::TemplateId::new(treasure_id as u64).ok() else {
         return HandlerResult::Error(GameError::InvalidRequest("treasure id is invalid"));
     };
+    let consumed_all = account
+        .inventory
+        .items
+        .get(&treasure_template)
+        .copied()
+        .unwrap_or_default()
+        == open_num as u64;
     if account
         .inventory
         .items
@@ -1069,30 +1107,65 @@ fn handle_typed_treasure(
     let catalog = BUILD_SHIP_CATALOG.get_or_init(BuildShipCatalog::default);
     let mut pending = Vec::new();
     for index in 0..open_num {
-        let reward = selected_option.or_else(|| {
-            draw_build_drop_reward_with_roll(
-                catalog,
-                drop_id,
-                mix_build_draw_roll(
-                    u64::from(current_unix_millis())
-                        ^ BUILD_DRAW_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-                        ^ u64::try_from(index).unwrap_or_default(),
-                ),
-            )
-        });
-        let Some((goods_type, item_id, num)) = reward else {
-            return HandlerResult::Error(GameError::InvalidState("treasure drop pool is invalid"));
-        };
-        let reward = ShopReward {
-            goods_type,
-            item_id,
-            num,
-            instance_id: 0,
-        };
-        if !typed_treasure_reward_supported(&reward) {
-            return HandlerResult::Error(GameError::InvalidState("treasure reward is unsupported"));
+        let roll = mix_build_draw_roll(
+            u64::from(current_unix_millis())
+                ^ BUILD_DRAW_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+                ^ u64::try_from(index).unwrap_or_default(),
+        );
+        if let Some((goods_type, item_id, num)) = selected_option {
+            let reward = ShopReward {
+                goods_type,
+                item_id,
+                num,
+                instance_id: 0,
+            };
+            if !typed_treasure_reward_supported(&reward) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "treasure reward is unsupported",
+                ));
+            }
+            pending.push(reward);
+        } else if method == "bag.GetSelectTreasureInfo" {
+            let Some((goods_type, item_id, num)) =
+                draw_treasure_random_leaf(catalog, drop_id, roll, 0)
+            else {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "selected treasure drop pool is invalid",
+                ));
+            };
+            let reward = ShopReward {
+                goods_type,
+                item_id,
+                num,
+                instance_id: 0,
+            };
+            if !typed_treasure_reward_supported(&reward) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "treasure reward is unsupported",
+                ));
+            }
+            pending.push(reward);
+        } else {
+            let Some(rewards) = draw_treasure_rewards_with_roll(catalog, drop_id, roll) else {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "treasure drop pool is invalid",
+                ));
+            };
+            for (goods_type, item_id, num) in rewards {
+                let reward = ShopReward {
+                    goods_type,
+                    item_id,
+                    num,
+                    instance_id: 0,
+                };
+                if !typed_treasure_reward_supported(&reward) {
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "treasure reward is unsupported",
+                    ));
+                }
+                pending.push(reward);
+            }
         }
-        pending.push(reward);
     }
     let snapshot = account.clone();
     if !consume_typed_item(account, treasure_id, open_num as u64) {
@@ -1106,13 +1179,24 @@ fn handle_typed_treasure(
             ));
         }
     }
+    let removed_treasure_ids = if consumed_all {
+        vec![treasure_id]
+    } else {
+        Vec::new()
+    };
     effects.push_pre(Response::raw(
         "hero.UpdateHeroBagData",
         HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
     ));
-    effects.push_pre(Response::raw(
+    // Treasure page can restore its local bag cache while handling the
+    // treasure callback. Send final bag snapshot after callback so granted
+    // materials win over that stale client state.
+    effects.push_post(Response::raw(
         "bag.UpdateBagData",
-        BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+        BagInfoCodec::encode(&bag_info_from_typed_account_with_tombstones(
+            account,
+            &removed_treasure_ids,
+        )),
     ));
     effects.push_pre(Response::raw(
         "equip.UpdateEquipBagData",

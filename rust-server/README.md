@@ -15,12 +15,10 @@ Rust server is the canonical local server. Current slice provides:
   pushes and request refreshes. `user.UserLogin` sends the C#-ordered
   minimum bootstrap sequence (`user.UpdateUserInfo`, `guide.GuideInfo`, four `copy.GetCopy` snapshots,
   `dailycopy.UpdateDailyCopyData`) before its response. All runtime catalogs are loaded from
-  server-owned catalog JSON files; installed client files are never read.
-  Server-local `catalog/data/shops/shop-*.json` files are preferred
-  for `shop.BuyGoods` and `shop.QualityBuyGoods`, with `gm-goods.json` as fallback;
+  server-owned `server_config.db`; installed client files are never read.
+  Server-owned shop, mail, drop, and reward data are loaded from `server_config.db`;
   handbook behaviour and story tables populate illustration
-  bootstrap fields; server-local `gm-mails.json` drives repeatable `mail.GetMailList` and
-  `mail.FetchItem`/`mail.FetchAllItems` rewards. Mutations use a serialized candidate-state → SQLite-save → in-memory-commit
+  bootstrap fields. Mutations use a serialized candidate-state → SQLite-save → in-memory-commit
   path.
 - `blueoath-domain`: typed profile/hero/equipment/fleet IDs, non-negative resource ledger,
   domain errors, and database-independent `AccountRepository` transaction contract.
@@ -40,7 +38,7 @@ Server feature code is organized under `crates/server/src/features/`: `user`, `h
 `battle`, `copy`, `building`, `progression`, `task`, `tower`, `shop`, `activity`, `social`, and
 `cooperation`. Each migrated boundary keeps service orchestration separate from typed state;
 `game_login.rs` is only the protocol dispatcher and module wiring. JSON account fixtures remain
-test-only, while catalog JSON is parsed at startup into validated catalog models.
+test-only, while `server_config.db` is parsed at startup into validated catalog models.
 
 Run checks:
 
@@ -57,9 +55,9 @@ Run server:
 cargo run --manifest-path .\rust-server\Cargo.toml -p blueoath-server -- --port=0 --profile-id=local-player
 # Optional: set `--game-login-port=<port>`; otherwise Rust binds a free local port.
 # Set `--kcp-game-login-port=<port>` to expose the same login protocol over KCP/UDP.
-# If `catalog/config` and `catalog/data` exist beside the binary (or in the
-# repository's `rust-server/catalog`), they are loaded automatically. Explicit
-# `--catalog-path`/`--data` override these bundled paths.
+# If `server_config.db` exists beside the binary, `saves` beside the binary is
+# used for account data. Explicit `--catalog-path`/`--data` override these
+# bundled paths.
 ```
 
 启动参数可放在仓库根目录 `server.json`，命令行参数优先覆盖文件值：
@@ -97,7 +95,7 @@ cargo run --manifest-path .\rust-server\Cargo.toml -p blueoath-server -- --port=
 
 出击、扫荡共用掉落规则：`dropMultiplier: 10` 表示每个关卡掉落池独立抽取 10 次；2.5 表示抽 2 次，再以 50% 概率多抽一次；0 禁用随机掉落。首通奖励独立发放，不重复乘倍率。扫荡每次均发放关卡配置的指挥官、参战舰船经验，分别应用两种经验倍率；背包外舰船不获得经验。
 
-`catalog/battle-drop-quantities.json` 是服务端自定义数量平衡表，启动读取，可单独编辑后重启服务端。它补充原配置中数量为 1 的常用材料（10182、10185、60000）和金币（5:1）；原配置明确给出的较大数量、舰船和装备实例数量保持原配置。`defaultRewards` 覆盖其他关卡，`copies` 覆盖指定关卡 ID。键为 `物品类型:配置ID`，值为 `[最小数量,最大数量]`，每次抽取独立随机数量。这是单机端平衡配置，不代表原服掉率。
+服务端掉落数量平衡、商城、邮件和奖励数据统一存储于 `server_config.db`，启动时读取。掉落倍率、首通奖励和关卡覆盖规则由数据库中的服务端配置控制。这是单机端平衡配置，不代表原服掉率。
 
 | 海域章节 | 每次抽中的常用材料数量 | 每次抽中的金币数量 |
 | --- | --- | --- |
@@ -119,10 +117,10 @@ For the Japanese client at `C:\Users\zhanl\Desktop\日服\blueoath`, use fixed l
 ```powershell
 cargo run --manifest-path .\rust-server\Cargo.toml -p blueoath-server -- `
   --port=7080 --game-login-port=7201 --profile-id=local-player `
-  --catalog-path='.\rust-server\catalog\config'
+  --catalog-path='.\rust-server' --data='.\rust-server\saves'
 ```
 
-Create server-local JSON catalog snapshot (export step may inspect a game install; runtime does not):
+Create server-local catalog database (export step may inspect a game install; runtime does not):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\export-rust-catalog.ps1 `
@@ -132,13 +130,13 @@ cargo run --manifest-path .\rust-server\Cargo.toml -p blueoath-server -- --port=
 ```
 
 The exporter converts all configuration tables currently referenced by Rust loaders
-from XOR/SQLite to `config_*.json`, plus server-owned runtime JSON files. The
-loader reads JSON only; legacy `.db` files are ignored. The default output is
-`catalog/server-config/`, which contains only loader-referenced tables; use
-`tools/prepare-rust-server-config.py` to build it from an existing JSON snapshot.
-Re-export when client configuration changes. JSON export also runs the field
-audit/pruner: typed tables keep only fields read by Rust, while raw
-gameplay/forward-compatible tables stay intact. Run it manually after editing JSON:
+from XOR/SQLite to `config_*.json`, then builds server-owned `server_config.db`.
+The server opens that database read-only and never reads client DB files or catalog JSON
+during runtime.
+The default output is `catalog/server-config/`, which is the import source only;
+use `tools/prepare-rust-server-config.py` to rebuild it from an existing JSON snapshot.
+Re-export when client configuration changes. JSON export still runs field audit/pruning
+before database generation.
 
 ```powershell
 python .\tools\prune-rust-catalog-json.py .\rust-server\catalog\config

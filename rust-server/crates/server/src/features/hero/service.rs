@@ -98,6 +98,55 @@ fn set_hero_progress(
         .insert(format!("compat:hero:{hero_id}:{}", field.into()), value);
 }
 
+fn typed_hero_max_hp(
+    account: &blueoath_domain::AccountState,
+    hero: &blueoath_domain::HeroState,
+) -> u64 {
+    ship_max_hp_for_typed_hero(
+        hero,
+        &account.activities.progress,
+        &account.dock.equipments,
+        SHIP_STAT_CATALOG.get(),
+        EQUIP_CATALOG.get(),
+        SHIP_REMOULD_CATALOG.get(),
+        SHIP_STAT_MULTIPLIER.get().copied().unwrap_or(1.0),
+    )
+}
+
+fn hp_after_level_up(current_hp: u64, old_max_hp: u64, new_max_hp: u64) -> u64 {
+    if current_hp >= old_max_hp {
+        new_max_hp
+    } else {
+        current_hp.min(new_max_hp)
+    }
+}
+
+fn refresh_typed_hero_hp_after_level_up(
+    account: &mut blueoath_domain::AccountState,
+    hero_id: blueoath_domain::HeroId,
+    old_level: u32,
+    new_level: u32,
+) {
+    if new_level <= old_level {
+        return;
+    }
+
+    let Some(current_hero) = account.dock.heroes.get(&hero_id) else {
+        return;
+    };
+    let mut old_hero = current_hero.clone();
+    old_hero.level = old_level;
+    let old_max_hp = typed_hero_max_hp(account, &old_hero);
+    let mut leveled_hero = current_hero.clone();
+    leveled_hero.level = new_level;
+    let new_max_hp = typed_hero_max_hp(account, &leveled_hero);
+    let new_hp = hp_after_level_up(current_hero.hp, old_max_hp, new_max_hp);
+
+    if let Some(hero) = account.dock.heroes.get_mut(&hero_id) {
+        hero.hp = new_hp;
+    }
+}
+
 fn typed_currency_kind(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
     Some(match item_id {
         1 => blueoath_domain::CurrencyKind::Gold,
@@ -994,6 +1043,73 @@ fn handle_remould(
     HandlerResult::PushOnly
 }
 
+fn apply_typed_hero_equip(
+    account: &mut blueoath_domain::AccountState,
+    hero_id: u64,
+    slot: u64,
+    equip_id: u64,
+    equip_type: u64,
+) -> Result<bool, &'static str> {
+    if equip_type != 1 || hero_id == 0 || !(1..=6).contains(&slot) {
+        return Err("hero equipment request is invalid");
+    }
+    let hero_id = blueoath_domain::HeroId::new(hero_id).map_err(|_| "hero id is invalid")?;
+    let slot_index = usize::try_from(slot - 1).map_err(|_| "equipment slot is invalid")?;
+    let Some(hero) = account.dock.heroes.get(&hero_id) else {
+        return Err("hero was not found");
+    };
+    let old_equip_id = hero.equip_slots.get(slot_index).copied().flatten();
+    let new_equip_id = if equip_id == 0 {
+        None
+    } else {
+        Some(blueoath_domain::EquipId::new(equip_id).map_err(|_| "equipment id is invalid")?)
+    };
+    if new_equip_id == old_equip_id {
+        return Ok(false);
+    }
+    if let Some(new_equip_id) = new_equip_id {
+        let Some(equipment) = account.dock.equipments.get(&new_equip_id) else {
+            return Err("equipment was not found");
+        };
+        if equipment.hero_id.is_some_and(|owner| owner != hero_id)
+            || account.dock.heroes.values().any(|candidate| {
+                candidate.id != hero_id
+                    && candidate
+                        .equip_slots
+                        .iter()
+                        .flatten()
+                        .any(|id| *id == new_equip_id)
+            })
+        {
+            return Err("equipment belongs to another hero");
+        }
+    }
+    if let Some(old_equip_id) = old_equip_id {
+        if let Some(equipment) = account.dock.equipments.get_mut(&old_equip_id) {
+            equipment.hero_id = None;
+        }
+    }
+    if let Some(new_equip_id) = new_equip_id {
+        if let Some(equipment) = account.dock.equipments.get_mut(&new_equip_id) {
+            equipment.hero_id = Some(hero_id);
+        }
+        if let Some(hero) = account.dock.heroes.get_mut(&hero_id) {
+            for equipped in &mut hero.equip_slots {
+                if *equipped == Some(new_equip_id) {
+                    *equipped = None;
+                }
+            }
+        }
+    }
+    if let Some(hero) = account.dock.heroes.get_mut(&hero_id) {
+        if hero.equip_slots.len() <= slot_index {
+            hero.equip_slots.resize(slot_index + 1, None);
+        }
+        hero.equip_slots[slot_index] = new_equip_id;
+    }
+    Ok(true)
+}
+
 pub(crate) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
     method: &str,
@@ -1226,6 +1342,68 @@ pub(crate) fn handle_typed(
             ));
             HandlerResult::Reply(Response::raw(method, encode_retire_hero_response(&rewards)))
         }
+        "hero.AutoEquip" => {
+            let Ok(request) = HeroAutoEquipRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "auto equipment request is invalid",
+                ));
+            };
+            let mut candidate = account.clone();
+            for unit in &request.units {
+                for equip in &unit.equips {
+                    if let Err(error) = apply_typed_hero_equip(
+                        &mut candidate,
+                        unit.hero_id,
+                        equip.index.saturating_add(1),
+                        equip.equip_id,
+                        request.equip_type,
+                    ) {
+                        return HandlerResult::Error(GameError::InvalidRequest(error));
+                    }
+                }
+            }
+            *account = candidate;
+            effects.push_pre(Response::raw(
+                "hero.UpdateHeroBagData",
+                HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+            ));
+            effects.push_pre(Response::raw(
+                "equip.UpdateEquipBagData",
+                EquipListCodec::encode(&equip_list_from_typed_account(account)),
+            ));
+            HandlerResult::PushOnly
+        }
+        "hero.AutoUnEquip" => {
+            let Ok(request) = HeroAutoUnEquipRequest::decode(request_args) else {
+                return HandlerResult::Error(GameError::InvalidRequest(
+                    "auto unequipment request is invalid",
+                ));
+            };
+            let mut candidate = account.clone();
+            for hero_id in &request.hero_ids {
+                for slot in 1..=6 {
+                    if let Err(error) = apply_typed_hero_equip(
+                        &mut candidate,
+                        *hero_id,
+                        slot,
+                        0,
+                        request.equip_type,
+                    ) {
+                        return HandlerResult::Error(GameError::InvalidRequest(error));
+                    }
+                }
+            }
+            *account = candidate;
+            effects.push_pre(Response::raw(
+                "hero.UpdateHeroBagData",
+                HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+            ));
+            effects.push_pre(Response::raw(
+                "equip.UpdateEquipBagData",
+                EquipListCodec::encode(&equip_list_from_typed_account(account)),
+            ));
+            HandlerResult::PushOnly
+        }
         "hero.ChangeEquip" => {
             let Ok(request) = HeroChangeEquipRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
@@ -1382,7 +1560,8 @@ pub(crate) fn handle_typed(
             let mut level = level;
             let mut exp = exp.min(u64::from(i32::MAX as u32));
             let mut remaining = u64::try_from(boosted).unwrap_or_default();
-            while level < 200 {
+            let max_level = u32::try_from(hero_level_catalog.max_level()).unwrap_or(100);
+            while level < max_level {
                 let need = hero_level_catalog
                     .exp_needed
                     .get(&i32::try_from(level).unwrap_or(i32::MAX))
@@ -1398,13 +1577,25 @@ pub(crate) fn handle_typed(
                 exp = 0;
                 level = level.saturating_add(1);
             }
-            exp = exp
-                .saturating_add(remaining)
-                .min(u64::from(i32::MAX as u32));
+            if level >= max_level {
+                level = max_level;
+                exp = 0;
+            } else {
+                exp = exp
+                    .saturating_add(remaining)
+                    .min(u64::from(i32::MAX as u32));
+            }
+            let old_level = account
+                .dock
+                .heroes
+                .get(&hero_id)
+                .map(|hero| hero.level)
+                .unwrap_or(level);
             if let Some(hero) = account.dock.heroes.get_mut(&hero_id) {
                 hero.level = level;
                 hero.exp = exp;
             }
+            refresh_typed_hero_hp_after_level_up(account, hero_id, old_level, level);
             advance_typed_task_event(account, task_catalog, 10, 1);
             effects.push_pre(Response::raw(
                 "hero.UpdateHeroBagData",
@@ -1495,6 +1686,7 @@ mod tests {
                 affection: 11,
                 hp: 12,
                 locked: true,
+                created_utc: String::new(),
                 equip_slots: Vec::new(),
                 pskills: std::collections::BTreeMap::new(),
             },
@@ -1580,6 +1772,7 @@ mod tests {
         let mut catalog = HeroLevelCatalog::default();
         catalog.exp_per_item.insert(10_182, 600);
         catalog.exp_needed.insert(1, 500);
+        catalog.max_level = 2;
         let mut item = Vec::new();
         append_varint_field(&mut item, 2, 10_182);
         append_varint_field(&mut item, 3, 1);
@@ -1611,7 +1804,16 @@ mod tests {
         assert!(matches!(result, HandlerResult::Reply(_)));
         assert_eq!(account.inventory.items.get(&item_id), Some(&(before - 1)));
         assert_eq!(account.dock.heroes.values().next().unwrap().level, 2);
+        assert_eq!(account.dock.heroes.values().next().unwrap().exp, 0);
         assert_eq!(effects.into_parts().0.len(), 3);
+    }
+
+    #[test]
+    fn hp_after_level_up_refreshes_full_or_overcapped_hp_only() {
+        assert_eq!(hp_after_level_up(4_435, 4_435, 4_561), 4_561);
+        assert_eq!(hp_after_level_up(4_466, 4_435, 4_561), 4_561);
+        assert_eq!(hp_after_level_up(2_000, 4_435, 4_561), 2_000);
+        assert_eq!(hp_after_level_up(5_000, 4_435, 4_561), 4_561);
     }
 
     #[test]
@@ -2008,6 +2210,80 @@ mod tests {
                 .hero_id,
             Some(blueoath_domain::HeroId::new(1).unwrap())
         );
+        assert_eq!(effects.into_parts().0.len(), 2);
+    }
+
+    #[test]
+    fn typed_auto_equip_applies_nested_slot_changes_and_pushes_state() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("hero-auto-equip-typed").unwrap(),
+            "Captain",
+        );
+        let equip_id = blueoath_domain::EquipId::new(3).unwrap();
+        account.dock.equipments.insert(
+            equip_id,
+            blueoath_domain::EquipmentState {
+                id: equip_id,
+                template_id: blueoath_domain::TemplateId::new(30_301).unwrap(),
+                enhance_level: 0,
+                star: 0,
+                enhance_exp: 0,
+                hero_id: None,
+            },
+        );
+        let mut equip = Vec::new();
+        append_varint_field(&mut equip, 1, 1);
+        append_varint_field(&mut equip, 2, equip_id.get());
+        let mut unit = Vec::new();
+        append_varint_field(&mut unit, 1, 1);
+        append_bytes_field(&mut unit, 2, &equip);
+        let mut args = Vec::new();
+        append_bytes_field(&mut args, 1, &unit);
+        append_varint_field(&mut args, 2, 1);
+        let mut effects = ResponseEffects::default();
+
+        let result = handle_typed(
+            &mut account,
+            "hero.AutoEquip",
+            &args,
+            &mut effects,
+            HeroTypedCatalogs::empty(),
+        );
+
+        assert!(matches!(result, HandlerResult::PushOnly));
+        let hero = &account.dock.heroes[&blueoath_domain::HeroId::new(1).unwrap()];
+        assert_eq!(hero.equip_slots[1], Some(equip_id));
+        assert_eq!(account.dock.equipments[&equip_id].hero_id, Some(hero.id));
+        assert_eq!(effects.into_parts().0.len(), 2);
+    }
+
+    #[test]
+    fn typed_auto_unequip_clears_all_slots_and_equipment_owners() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("hero-auto-unequip-typed").unwrap(),
+            "Captain",
+        );
+        let mut args = Vec::new();
+        append_varint_field(&mut args, 1, 1);
+        append_varint_field(&mut args, 2, 1);
+        let mut effects = ResponseEffects::default();
+
+        let result = handle_typed(
+            &mut account,
+            "hero.AutoUnEquip",
+            &args,
+            &mut effects,
+            HeroTypedCatalogs::empty(),
+        );
+
+        assert!(matches!(result, HandlerResult::PushOnly));
+        let hero = &account.dock.heroes[&blueoath_domain::HeroId::new(1).unwrap()];
+        assert!(hero.equip_slots.iter().all(Option::is_none));
+        assert!(account
+            .dock
+            .equipments
+            .values()
+            .all(|equipment| equipment.hero_id.is_none()));
         assert_eq!(effects.into_parts().0.len(), 2);
     }
 }

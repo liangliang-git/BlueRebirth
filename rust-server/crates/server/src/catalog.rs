@@ -1,25 +1,29 @@
 #![allow(dead_code)]
 
 use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub(super) static SUPPORT_CATALOG: std::sync::OnceLock<SupportCatalog> = std::sync::OnceLock::new();
+pub(super) static EQUIP_CATALOG: std::sync::OnceLock<EquipCatalog> = std::sync::OnceLock::new();
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct EquipCatalog {
-    pub(super) skills_by_template: std::collections::BTreeMap<i32, Vec<(i32, i32)>>,
-    pub(super) quality_by_template: std::collections::BTreeMap<i32, i32>,
-    pub(super) type_by_template: std::collections::BTreeMap<i32, i32>,
-    pub(super) enhance_max_by_template: std::collections::BTreeMap<i32, i32>,
-    pub(super) star_max_by_template: std::collections::BTreeMap<i32, i32>,
-    pub(super) enhance_materials: std::collections::BTreeMap<i32, (i32, Option<(i32, i32)>)>,
-    pub(super) enhance_level_exp: std::collections::BTreeMap<i32, i32>,
-    pub(super) enhance_level_ur: std::collections::BTreeMap<i32, Vec<(i32, i32, i32)>>,
-    pub(super) levelbreak_rules: std::collections::BTreeMap<i32, EquipLevelbreakRule>,
-    pub(super) renovate_rules: std::collections::BTreeMap<i32, EquipRenovateRule>,
-    pub(super) dismantle_rewards_by_template: std::collections::BTreeMap<i32, Vec<(i32, i32, i32)>>,
-    pub(super) activity_equip_by_template: std::collections::BTreeSet<i32>,
-    pub(super) activity_reward_by_template: std::collections::BTreeMap<i32, i32>,
-    pub(super) no_resolve_templates: std::collections::BTreeSet<i32>,
+    pub(super) prop_by_template: BTreeMap<i32, Vec<(i32, i64)>>,
+    pub(super) enhance_prop_by_template: BTreeMap<i32, Vec<(i32, i64)>>,
+    pub(super) skills_by_template: BTreeMap<i32, Vec<(i32, i32)>>,
+    pub(super) quality_by_template: BTreeMap<i32, i32>,
+    pub(super) type_by_template: BTreeMap<i32, i32>,
+    pub(super) enhance_max_by_template: BTreeMap<i32, i32>,
+    pub(super) star_max_by_template: BTreeMap<i32, i32>,
+    pub(super) enhance_materials: BTreeMap<i32, (i32, Option<(i32, i32)>)>,
+    pub(super) enhance_level_exp: BTreeMap<i32, i32>,
+    pub(super) enhance_level_ur: BTreeMap<i32, Vec<(i32, i32, i32)>>,
+    pub(super) levelbreak_rules: BTreeMap<i32, EquipLevelbreakRule>,
+    pub(super) renovate_rules: BTreeMap<i32, EquipRenovateRule>,
+    pub(super) dismantle_rewards_by_template: BTreeMap<i32, Vec<(i32, i32, i32)>>,
+    pub(super) activity_equip_by_template: BTreeSet<i32>,
+    pub(super) activity_reward_by_template: BTreeMap<i32, i32>,
+    pub(super) no_resolve_templates: BTreeSet<i32>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -35,11 +39,13 @@ pub(super) struct EquipRenovateRule {
     pub(super) need_level: i32,
 }
 
+/// 英雄拆解目录
 #[derive(Debug, Clone, Default)]
 pub(super) struct HeroBreakdownCatalog {
-    pub(super) rewards_by_template: std::collections::BTreeMap<i32, Vec<(i32, i32, i32)>>,
+    pub(super) rewards_by_template: BTreeMap<i32, Vec<(i32, i32, i32)>>,
 }
 
+/// 组合规则
 #[derive(Debug, Clone, Default)]
 pub(super) struct CombinationRule {
     pub(super) level_end: i32,
@@ -49,22 +55,24 @@ pub(super) struct CombinationRule {
     pub(super) break_costs: Vec<(i32, i32, i32)>,
 }
 
+/// 组合目录
 #[derive(Debug, Clone, Default)]
 pub(super) struct CombinationCatalog {
-    pub(super) open_sf_ids: std::collections::BTreeSet<i32>,
-    pub(super) rules_by_id: std::collections::BTreeMap<i32, CombinationRule>,
+    pub(super) open_sf_ids: BTreeSet<i32>,
+    pub(super) rules_by_id: BTreeMap<i32, CombinationRule>,
 }
 
+/// 建造目录
 #[derive(Debug, Clone, Default)]
 pub(super) struct BuildingCatalog {
-    pub(super) capacities: std::collections::BTreeMap<i32, usize>,
+    pub(super) capacities: BTreeMap<i32, usize>,
     #[cfg(test)]
-    pub(super) building_configs: std::collections::BTreeMap<i32, Value>,
+    pub(super) building_configs: BTreeMap<i32, Value>,
     #[cfg(test)]
-    pub(super) recipe_configs: std::collections::BTreeMap<i32, Value>,
-    pub(super) typed_building_configs: std::collections::BTreeMap<i32, BuildingConfig>,
-    pub(super) typed_recipe_configs: std::collections::BTreeMap<i32, RecipeConfig>,
-    pub(super) resource_time_seconds: std::collections::BTreeMap<i32, i32>,
+    pub(super) recipe_configs: BTreeMap<i32, Value>,
+    pub(super) typed_building_configs: BTreeMap<i32, BuildingConfig>,
+    pub(super) typed_recipe_configs: BTreeMap<i32, RecipeConfig>,
+    pub(super) resource_time_seconds: BTreeMap<i32, i32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -96,10 +104,11 @@ pub(super) struct ChapterCatalog {
     pub(super) equip_new_test: Vec<i32>,
     pub(super) tower_chapter_id: i32,
     pub(super) daily_chapters: Vec<(i32, i32)>,
+    pub(super) daily_level_ids_by_chapter: BTreeMap<i32, Vec<i32>>,
     pub(super) daily_groups: Vec<i32>,
     pub(super) memories: Vec<(i32, i32)>,
-    pub(super) star_rewards_by_chapter: std::collections::BTreeMap<i32, ChapterStarRewards>,
-    pub(super) mini_game_ids: std::collections::BTreeSet<i32>,
+    pub(super) star_rewards_by_chapter: BTreeMap<i32, ChapterStarRewards>,
+    pub(super) mini_game_ids: BTreeSet<i32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -174,6 +183,13 @@ impl ChapterCatalog {
         self
     }
 
+    pub(super) fn with_tower_chapter_id(mut self, chapter_id: i32) -> Self {
+        if chapter_id > 0 {
+            self.tower_chapter_id = chapter_id;
+        }
+        self
+    }
+
     pub(super) fn from_rows(rows: impl IntoIterator<Item = (i32, Value)>) -> Self {
         let mut catalog = Self::default();
         let mut sea_chapters = Vec::<(i32, Vec<i32>)>::new();
@@ -213,17 +229,20 @@ impl ChapterCatalog {
                     33 => catalog.mubar.extend(levels),
                     10 => catalog.goods_copy.extend(levels),
                     24 => {
-                        if chapter_id == 30_001 || catalog.tower_chapter_id == 0 {
-                            catalog.tower_chapter_id = chapter_id;
-                        }
                         catalog.tower.extend(levels);
                     }
                     34 => catalog.equip_new_test.extend(levels),
                     9 => {
-                        catalog.daily.extend(levels);
-                        catalog.daily.extend(json_i32_array(&value, "treaty_copy"));
+                        let mut daily_level_ids = levels;
+                        daily_level_ids.extend(json_i32_array(&value, "treaty_copy"));
+                        daily_level_ids.sort_unstable();
+                        daily_level_ids.dedup();
+                        catalog.daily.extend(daily_level_ids.iter().copied());
                         let group_id = json_i32(&value, "dailygroup_id").unwrap_or_default();
                         catalog.daily_chapters.push((chapter_id, group_id));
+                        catalog
+                            .daily_level_ids_by_chapter
+                            .insert(chapter_id, daily_level_ids);
                         if group_id > 0 {
                             catalog.daily_groups.push(group_id);
                         }
@@ -279,6 +298,7 @@ impl ChapterCatalog {
             equip_new_test: Vec::new(),
             tower_chapter_id: 30001,
             daily_chapters: vec![(1, 1)],
+            daily_level_ids_by_chapter: [(1, vec![1])].into_iter().collect(),
             daily_groups: vec![1],
             memories: Vec::new(),
             star_rewards_by_chapter: Default::default(),
@@ -471,7 +491,7 @@ impl GameCatalogs {
         {
             return Err("task catalog contains non-positive reward id".to_owned());
         }
-        let mut task_keys = std::collections::BTreeSet::new();
+        let mut task_keys = BTreeSet::new();
         for definition in &self.tasks.definitions {
             if definition.id <= 0
                 || definition.task_type <= 0
@@ -578,7 +598,7 @@ pub(super) struct TalentNode {
 #[derive(Clone, Debug, Default)]
 pub(super) struct TalentCatalog {
     pub(super) roots: Vec<i32>,
-    pub(super) nodes: std::collections::BTreeMap<i32, TalentNode>,
+    pub(super) nodes: BTreeMap<i32, TalentNode>,
 }
 
 pub(super) static TALENT_CATALOG: std::sync::OnceLock<TalentCatalog> = std::sync::OnceLock::new();
@@ -587,13 +607,15 @@ pub(super) fn current_talent_catalog() -> TalentCatalog {
     TALENT_CATALOG.get().cloned().unwrap_or_default()
 }
 
+/// 商店目录
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShopCatalog {
-    pub(super) goods_by_shop: std::collections::BTreeMap<i32, Vec<i32>>,
-    pub(super) goods_by_id: std::collections::BTreeMap<i32, ShopGood>,
-    pub(super) costs_by_good_id: std::collections::BTreeMap<i32, Vec<ShopCost>>,
+    pub(super) goods_by_shop: BTreeMap<i32, Vec<i32>>,
+    pub(super) goods_by_id: BTreeMap<i32, ShopGood>,
+    pub(super) costs_by_good_id: BTreeMap<i32, Vec<ShopCost>>,
 }
 
+/// 支援舰队物品
 #[derive(Clone, Debug, Default)]
 pub(super) struct SupportFleetItem {
     pub(super) duration_seconds: i64,
@@ -606,12 +628,14 @@ pub(super) struct SupportFleetItem {
     pub(super) fast_consumption: Option<(i32, i32, i32)>,
 }
 
+/// 支援目录
 #[derive(Clone, Debug, Default)]
 pub(super) struct SupportCatalog {
-    pub(super) items: std::collections::BTreeMap<i32, SupportFleetItem>,
-    pub(super) drop_rewards: std::collections::BTreeMap<i32, Vec<(i32, i32, i32)>>,
+    pub(super) items: BTreeMap<i32, SupportFleetItem>,
+    pub(super) drop_rewards: BTreeMap<i32, Vec<(i32, i32, i32)>>,
 }
 
+/// 商品礼包
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShopGood {
     pub(super) shop_id: i32,
@@ -621,6 +645,7 @@ pub(super) struct ShopGood {
     pub(super) costs: Vec<ShopCost>,
 }
 
+/// 商品消费
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShopCost {
     pub(super) goods_type: i32,
@@ -628,14 +653,13 @@ pub(super) struct ShopCost {
     pub(super) amount: i64,
 }
 
+/// 充值目录
 #[derive(Clone, Debug, Default)]
 pub(super) struct RechargeCatalog {
-    pub(super) rewards_by_recharge_id: std::collections::BTreeMap<i32, Vec<ShopReward>>,
+    pub(super) rewards_by_recharge_id: BTreeMap<i32, Vec<ShopReward>>,
 }
 
-/// Config rows used by JP-only services that are not part of core fleet combat.
-/// Keeping raw rows preserves version-specific fields while handlers validate the
-/// fields they consume against the client protobuf descriptors.
+/// 战斗通行证等级配置
 #[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub(super) struct BattlePassLevelConfig {
@@ -643,11 +667,13 @@ pub(super) struct BattlePassLevelConfig {
     pub(super) pay_level_reward: i32,
 }
 
+/// 战斗通行证任务配置
 #[derive(Clone, Debug, Default)]
 pub(super) struct BattlePassTaskConfig {
     pub(super) experience: i32,
 }
 
+/// 战斗通行证参数配置
 #[derive(Clone, Debug, Default)]
 pub(super) struct BattlePassParamConfig {
     pub(super) buy_level_price: Option<(i32, i32)>,
@@ -660,12 +686,14 @@ pub(super) struct ExchangeConfig {
     pub(super) item_reward: Vec<(i32, i32, i32)>,
 }
 
+/// 食谱配置
 #[derive(Clone, Debug, Default)]
 pub(super) struct FoodRecipeConfig {
     pub(super) material: Vec<(i32, i32, i32)>,
     pub(super) reward_id: i32,
 }
 
+/// 删除条目
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct DropEntry {
     pub(super) goods_type: i32,
@@ -675,11 +703,13 @@ pub(super) struct DropEntry {
     pub(super) rate: i64,
 }
 
+/// 删除物品配置
 #[derive(Clone, Debug, Default)]
 pub(super) struct DropItemConfig {
     pub(super) entries: Vec<DropEntry>,
 }
 
+///PaperCut公式配置
 #[derive(Clone, Debug, Default)]
 pub(super) struct PaperCutFormulaConfig {
     pub(super) id: i32,
@@ -687,11 +717,13 @@ pub(super) struct PaperCutFormulaConfig {
     pub(super) drop_id: i32,
 }
 
+/// 周年纪念视频配置
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct AnniversaryVideoConfig {
     pub(super) reward_id: i32,
 }
 
+/// 杂志信息配置
 #[derive(Clone, Debug, Default)]
 pub(super) struct MagazineInfoConfig {
     pub(super) rewards: Vec<i32>,
@@ -703,6 +735,7 @@ pub(super) struct InteractionItemConfig {
     pub(super) drop_id: i32,
 }
 
+/// 参数配置
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct ParameterConfig {
     pub(super) value: i32,
@@ -715,12 +748,14 @@ pub(super) struct InteractionFigureConfig {
     pub(super) original_ship_required: i32,
 }
 
+/// 活动提取配置
 #[derive(Clone, Debug, Default)]
 pub(super) struct ActivityExtractConfig {
     pub(super) cost: Option<(i32, i32, i32)>,
     pub(super) rewards: Vec<(i32, i32)>,
 }
 
+/// 活动配置
 #[derive(Clone, Debug, Default)]
 pub(super) struct ActivityConfig {
     pub(super) id: i32,
@@ -735,27 +770,32 @@ pub(super) struct ActivityConfig {
     pub(super) p14: Option<(i32, i32, i32)>,
 }
 
+/// 世界事件配置
 #[derive(Clone, Debug, Default)]
 pub(super) struct WorldEventConfig {
     pub(super) server_stage_rewards: Vec<(i32, i32)>,
 }
 
+/// 情人节礼物配置
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct ValentineGiftConfig {
     pub(super) ship_fleet_id: i32,
     pub(super) attach_reward: i32,
 }
 
+/// 测试舰船奖励配置
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct TestShipRewardConfig {
     pub(super) reward_id: i32,
 }
 
+/// 公会箱子评分配置
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct GuildBoxScoreConfig {
     pub(super) reward_id: i32,
 }
 
+/// 公会战争奖励配置
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct GuildWarRewardConfig {
     pub(super) base_id: i32,
@@ -763,39 +803,41 @@ pub(super) struct GuildWarRewardConfig {
     pub(super) reward_id: i32,
 }
 
+/// 运动会奖励配置
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct SportsMeetAwardConfig {
     pub(super) score: i32,
     pub(super) reward_id: i32,
 }
 
+/// 游戏配置目录
 #[derive(Clone, Debug, Default)]
 pub(super) struct GameplayCatalog {
-    pub(super) rewards_by_id: std::collections::BTreeMap<i32, Vec<ShopReward>>,
-    pub(super) battlepass_levels: std::collections::BTreeMap<i32, BattlePassLevelConfig>,
-    pub(super) battlepass_tasks: std::collections::BTreeMap<i32, BattlePassTaskConfig>,
-    pub(super) battlepass_activity_levels: std::collections::BTreeMap<i32, BattlePassLevelConfig>,
-    pub(super) battlepass_activity_tasks: std::collections::BTreeMap<i32, BattlePassTaskConfig>,
+    pub(super) rewards_by_id: BTreeMap<i32, Vec<ShopReward>>,
+    pub(super) battlepass_levels: BTreeMap<i32, BattlePassLevelConfig>,
+    pub(super) battlepass_tasks: BTreeMap<i32, BattlePassTaskConfig>,
+    pub(super) battlepass_activity_levels: BTreeMap<i32, BattlePassLevelConfig>,
+    pub(super) battlepass_activity_tasks: BTreeMap<i32, BattlePassTaskConfig>,
     pub(super) battlepass_param: Option<BattlePassParamConfig>,
     pub(super) battlepass_activity_param: Option<BattlePassParamConfig>,
-    pub(super) activity: std::collections::BTreeMap<i32, ActivityConfig>,
-    pub(super) parameters: std::collections::BTreeMap<i32, ParameterConfig>,
-    pub(super) activity_extract: std::collections::BTreeMap<i32, ActivityExtractConfig>,
-    pub(super) activity_extract_ur: std::collections::BTreeMap<i32, ActivityExtractConfig>,
-    pub(super) anniversary_videos: std::collections::BTreeMap<i32, AnniversaryVideoConfig>,
-    pub(super) paper_cut_formulas: std::collections::BTreeMap<i32, PaperCutFormulaConfig>,
-    pub(super) drop_items: std::collections::BTreeMap<i32, DropItemConfig>,
-    pub(super) exchanges: std::collections::BTreeMap<i32, ExchangeConfig>,
-    pub(super) food_recipes: std::collections::BTreeMap<i32, FoodRecipeConfig>,
-    pub(super) testship_rewards: std::collections::BTreeMap<i32, TestShipRewardConfig>,
-    pub(super) world_events: std::collections::BTreeMap<i32, WorldEventConfig>,
-    pub(super) guild_war_rewards: std::collections::BTreeMap<i32, GuildWarRewardConfig>,
-    pub(super) magazine_info: std::collections::BTreeMap<i32, MagazineInfoConfig>,
-    pub(super) interaction_items: std::collections::BTreeMap<i32, InteractionItemConfig>,
-    pub(super) interaction_figures: std::collections::BTreeMap<i32, InteractionFigureConfig>,
-    pub(super) guild_box_scores: std::collections::BTreeMap<i32, GuildBoxScoreConfig>,
-    pub(super) valentine_gifts: std::collections::BTreeMap<i32, ValentineGiftConfig>,
-    pub(super) sportsmeet_awards: std::collections::BTreeMap<i32, SportsMeetAwardConfig>,
+    pub(super) activity: BTreeMap<i32, ActivityConfig>,
+    pub(super) parameters: BTreeMap<i32, ParameterConfig>,
+    pub(super) activity_extract: BTreeMap<i32, ActivityExtractConfig>,
+    pub(super) activity_extract_ur: BTreeMap<i32, ActivityExtractConfig>,
+    pub(super) anniversary_videos: BTreeMap<i32, AnniversaryVideoConfig>,
+    pub(super) paper_cut_formulas: BTreeMap<i32, PaperCutFormulaConfig>,
+    pub(super) drop_items: BTreeMap<i32, DropItemConfig>,
+    pub(super) exchanges: BTreeMap<i32, ExchangeConfig>,
+    pub(super) food_recipes: BTreeMap<i32, FoodRecipeConfig>,
+    pub(super) testship_rewards: BTreeMap<i32, TestShipRewardConfig>,
+    pub(super) world_events: BTreeMap<i32, WorldEventConfig>,
+    pub(super) guild_war_rewards: BTreeMap<i32, GuildWarRewardConfig>,
+    pub(super) magazine_info: BTreeMap<i32, MagazineInfoConfig>,
+    pub(super) interaction_items: BTreeMap<i32, InteractionItemConfig>,
+    pub(super) interaction_figures: BTreeMap<i32, InteractionFigureConfig>,
+    pub(super) guild_box_scores: BTreeMap<i32, GuildBoxScoreConfig>,
+    pub(super) valentine_gifts: BTreeMap<i32, ValentineGiftConfig>,
+    pub(super) sportsmeet_awards: BTreeMap<i32, SportsMeetAwardConfig>,
 }
 
 impl GameplayCatalog {
@@ -926,6 +968,7 @@ impl GameplayCatalog {
 
 pub(super) const MAX_SHOP_BUY_NUM: i32 = 99;
 
+/// 邮件模板
 #[derive(Clone, Debug, Default)]
 pub(super) struct MailTemplate {
     pub(super) mid: u64,
@@ -936,26 +979,45 @@ pub(super) struct MailTemplate {
     pub(super) content: String,
 }
 
+/// 英雄等级目录
 #[derive(Clone, Debug, Default)]
 pub(super) struct HeroLevelCatalog {
-    pub(super) exp_per_item: std::collections::BTreeMap<i32, i32>,
-    pub(super) exp_needed: std::collections::BTreeMap<i32, i32>,
+    pub(super) exp_per_item: BTreeMap<i32, i32>,
+    pub(super) exp_needed: BTreeMap<i32, i32>,
+    pub(super) max_level: i32,
 }
 
+impl HeroLevelCatalog {
+    pub(super) fn max_level(&self) -> i32 {
+        if self.max_level > 0 {
+            return self.max_level;
+        }
+        self.exp_needed
+            .keys()
+            .copied()
+            .max()
+            .unwrap_or_default()
+            .max(100)
+    }
+}
+
+/// 舰船强化目录
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShipIntensifyCatalog {
-    pub(super) need_power_by_template: std::collections::BTreeMap<i32, (i32, Vec<(i32, i64)>)>,
-    pub(super) provide_power_by_template: std::collections::BTreeMap<i32, Vec<(i32, i64)>>,
-    pub(super) max_power_by_template: std::collections::BTreeMap<i32, Vec<(i32, i64)>>,
+    pub(super) need_power_by_template: BTreeMap<i32, (i32, Vec<(i32, i64)>)>,
+    pub(super) provide_power_by_template: BTreeMap<i32, Vec<(i32, i64)>>,
+    pub(super) max_power_by_template: BTreeMap<i32, Vec<(i32, i64)>>,
     pub(super) same_type_ratio: i64,
     pub(super) diamond_cost_per_hero: i64,
 }
 
+/// 舰船拆解目录
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShipBreakCatalog {
-    pub(super) by_template: std::collections::BTreeMap<i32, ShipBreakConfig>,
+    pub(super) by_template: BTreeMap<i32, ShipBreakConfig>,
 }
 
+/// 舰船拆解配置
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShipBreakConfig {
     pub(super) min_level: i32,
@@ -997,7 +1059,7 @@ impl ShipBreakCatalog {
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShipAdvanceCatalog {
     /// 下一次 AdvLv -> config_ship_advance row。
-    pub(super) by_level: std::collections::BTreeMap<i32, ShipAdvanceConfig>,
+    pub(super) by_level: BTreeMap<i32, ShipAdvanceConfig>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -1021,9 +1083,9 @@ impl ShipAdvanceCatalog {
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShipRemouldCatalog {
     /// sf_id -> config_ship_info row。
-    pub(super) ship_info_by_sf_id: std::collections::BTreeMap<i32, ShipInfoRemouldConfig>,
-    pub(super) templates: std::collections::BTreeMap<i32, ShipRemouldTemplateConfig>,
-    pub(super) effects: std::collections::BTreeMap<i32, ShipRemouldEffectConfig>,
+    pub(super) ship_info_by_sf_id: BTreeMap<i32, ShipInfoRemouldConfig>,
+    pub(super) templates: BTreeMap<i32, ShipRemouldTemplateConfig>,
+    pub(super) effects: BTreeMap<i32, ShipRemouldEffectConfig>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1081,13 +1143,28 @@ impl ShipRemouldCatalog {
 #[derive(Clone, Debug, Default)]
 pub(super) struct CommanderLevelCatalog {
     /// Commander level -> experience required to reach next level.
-    pub(super) exp_needed: std::collections::BTreeMap<i32, i32>,
+    pub(super) exp_needed: BTreeMap<i32, i32>,
+    pub(super) max_level: i32,
+}
+
+impl CommanderLevelCatalog {
+    pub(super) fn max_level(&self) -> i32 {
+        if self.max_level > 0 {
+            return self.max_level;
+        }
+        self.exp_needed
+            .keys()
+            .copied()
+            .max()
+            .unwrap_or_default()
+            .max(100)
+    }
 }
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct HeroSkillUpgradeCatalog {
     /// PSkill/group id -> cost rows for level 1->2, 2->3, ... .
-    pub(super) costs_by_skill: std::collections::BTreeMap<i32, Vec<SkillUpgradeCosts>>,
+    pub(super) costs_by_skill: BTreeMap<i32, Vec<SkillUpgradeCosts>>,
 }
 
 pub(super) type SkillUpgradeCosts = Vec<(i32, i32, i32)>;
@@ -1113,33 +1190,35 @@ pub(super) struct BattleEnemy {
     pub(super) torpedo_defense: i32,
 }
 
+/// 战斗目录
 #[derive(Clone, Debug, Default)]
 pub(super) struct BattleCatalog {
-    pub(super) copies: std::collections::HashMap<i32, BattleCopy>,
-    pub(super) daily_group_by_copy: std::collections::HashMap<i32, i32>,
+    pub(super) copies: HashMap<i32, BattleCopy>,
+    pub(super) daily_group_by_copy: HashMap<i32, i32>,
     pub(super) search_3d: std::collections::HashSet<i32>,
-    pub(super) fleet_enemies: std::collections::HashMap<i32, Vec<i32>>,
+    pub(super) fleet_enemies: HashMap<i32, Vec<i32>>,
     /// config_fleet.is_last_fleet; required to keep non-final fleets on wire.
-    pub(super) fleet_is_last: std::collections::HashMap<i32, bool>,
+    pub(super) fleet_is_last: HashMap<i32, bool>,
     /// Parent fleet -> config_fleet.copy_attacheds fleet IDs.
-    pub(super) attached_fleet_ids: std::collections::HashMap<i32, Vec<i32>>,
-    pub(super) enemies: std::collections::HashMap<i32, BattleEnemy>,
-    pub(super) random_factors: std::collections::HashMap<i32, Vec<RandomFactorEntry>>,
-    pub(super) copy_drop_ids: std::collections::HashMap<i32, Vec<i32>>,
-    pub(super) fleet_drop_ids: std::collections::HashMap<i32, Vec<i32>>,
-    pub(super) fleet_other_drop_ids: std::collections::HashMap<i32, Vec<i32>>,
-    pub(super) fleet_settle_drop_ids: std::collections::HashMap<i32, Vec<i32>>,
-    pub(super) copy_first_rewards: std::collections::HashMap<i32, Vec<(i32, i32, i32)>>,
-    pub(super) copy_must_drop_rewards: std::collections::HashMap<i32, BattleMustDropReward>,
-    pub(super) copy_rank_drop_ids: std::collections::HashMap<i32, i32>,
-    pub(super) rank_drop_rewards: std::collections::HashMap<i32, Vec<BattleRewardRank>>,
-    pub(super) drop_pools: std::collections::HashMap<i32, Vec<BuildDropEntry>>,
-    pub(super) fleet_rewards: std::collections::HashMap<i32, BattleFleetReward>,
-    pub(super) evaluation_by_grade: std::collections::HashMap<i32, BattleEvaluationRule>,
+    pub(super) attached_fleet_ids: HashMap<i32, Vec<i32>>,
+    pub(super) enemies: HashMap<i32, BattleEnemy>,
+    pub(super) random_factors: HashMap<i32, Vec<RandomFactorEntry>>,
+    pub(super) copy_drop_ids: HashMap<i32, Vec<i32>>,
+    pub(super) fleet_drop_ids: HashMap<i32, Vec<i32>>,
+    pub(super) fleet_other_drop_ids: HashMap<i32, Vec<i32>>,
+    pub(super) fleet_settle_drop_ids: HashMap<i32, Vec<i32>>,
+    pub(super) copy_first_rewards: HashMap<i32, Vec<(i32, i32, i32)>>,
+    pub(super) copy_must_drop_rewards: HashMap<i32, BattleMustDropReward>,
+    pub(super) copy_rank_drop_ids: HashMap<i32, i32>,
+    pub(super) rank_drop_rewards: HashMap<i32, Vec<BattleRewardRank>>,
+    pub(super) copy_drop_pools: HashMap<i32, BattleCopyDropPool>,
+    pub(super) drop_pools: HashMap<i32, BattleDropPool>,
+    pub(super) fleet_rewards: HashMap<i32, BattleFleetReward>,
+    pub(super) evaluation_by_grade: HashMap<i32, BattleEvaluationRule>,
     pub(super) task_disabled_copies: std::collections::HashSet<i32>,
-    pub(super) settlement_by_copy: std::collections::HashMap<i32, BattleSettlementRule>,
-    pub(super) supply_cost_by_copy: std::collections::HashMap<i32, (i64, i64)>,
-    pub(super) ship_supply_cost: std::collections::HashMap<i32, i64>,
+    pub(super) settlement_by_copy: HashMap<i32, BattleSettlementRule>,
+    pub(super) supply_cost_by_copy: HashMap<i32, (i64, i64)>,
+    pub(super) ship_supply_cost: HashMap<i32, i64>,
     pub(super) drop_quantities: BattleDropQuantities,
 }
 
@@ -1213,12 +1292,36 @@ type BattleRewardTuple = (i32, i32, i32);
 type BattleMustDropReward = (i32, Vec<BattleRewardTuple>);
 type BattleRewardRank = (i32, i32, i32);
 
+/// 关卡展示掉落分类。
+///
+/// `type=3` 的必掉/奖励项只在首次通关发放；`type=2` 是每次通关必掉；其余类型按
+/// `show_num` 从该分类候选中抽取。
+#[derive(Clone, Debug, Default)]
+pub(super) struct BattleCopyDropPool {
+    pub(super) first_clear_entries: Vec<BuildDropEntry>,
+    pub(super) guaranteed_entries: Vec<BuildDropEntry>,
+    pub(super) random_entries: Vec<BuildDropEntry>,
+    pub(super) random_count: i32,
+}
+
+/// 战斗实际掉落池。
+///
+/// `drop` 和 `drop_alone` 是两个独立抽取池，各自按配置次数抽取。
+#[derive(Clone, Debug, Default)]
+pub(super) struct BattleDropPool {
+    pub(super) random_entries: Vec<BuildDropEntry>,
+    pub(super) random_count: i32,
+    pub(super) separate_entries: Vec<BuildDropEntry>,
+    pub(super) separate_count: i32,
+}
+
+/// 战斗掉落数量
 #[derive(Clone, Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct BattleDropQuantities {
-    pub(super) default_rewards: std::collections::HashMap<String, [i32; 2]>,
+    pub(super) default_rewards: HashMap<String, [i32; 2]>,
     #[serde(default)]
-    pub(super) copies: std::collections::HashMap<i32, std::collections::HashMap<String, [i32; 2]>>,
+    pub(super) copies: HashMap<i32, HashMap<String, [i32; 2]>>,
 }
 
 impl BattleDropQuantities {
@@ -1240,12 +1343,14 @@ impl BattleDropQuantities {
     }
 }
 
+/// 战斗舰队奖励
 #[derive(Clone, Debug, Default)]
 pub(super) struct BattleFleetReward {
     pub(super) ship_exp: i32,
     pub(super) commander_exp: i32,
 }
 
+/// 战斗评估规则
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct BattleEvaluationRule {
     pub(super) exp_ratio: i32,
@@ -1253,6 +1358,7 @@ pub(super) struct BattleEvaluationRule {
     pub(super) other_drop_ratio: i32,
 }
 
+/// 战斗结算规则
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct BattleSettlementRule {
     pub(super) affection_add: i32,
@@ -1263,6 +1369,7 @@ pub(super) struct BattleSettlementRule {
     pub(super) mood_shipwrecks_reduce: i32,
 }
 
+/// 舰船状态
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShipStat {
     pub(super) fixed_money: i64,
@@ -1276,10 +1383,16 @@ pub(super) struct ShipStat {
     pub(super) torpedo_attack_levelup: i64,
     pub(super) torpedo_defense: i64,
     pub(super) torpedo_defense_levelup: i64,
+    pub(super) to_air_attack: i64,
+    pub(super) to_air_attack_levelup: i64,
+    pub(super) to_torpedo_attack: i64,
+    pub(super) to_torpedo_attack_levelup: i64,
     pub(super) ship_bomb_attack: i64,
     pub(super) ship_bomb_attack_levelup: i64,
     pub(super) ship_torpedo_attack: i64,
     pub(super) ship_torpedo_attack_levelup: i64,
+    pub(super) ship_air_control: i64,
+    pub(super) ship_air_control_levelup: i64,
     pub(super) carry_plane_count: i64,
     pub(super) hit: i64,
     pub(super) dodge: i64,
@@ -1287,14 +1400,15 @@ pub(super) struct ShipStat {
     pub(super) anti_crit: i64,
 }
 
+/// 舰船状态目录
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShipStatCatalog {
-    pub(super) by_template: std::collections::BTreeMap<i32, ShipStat>,
+    pub(super) by_template: BTreeMap<i32, ShipStat>,
 }
 
 pub(super) static SHIP_STAT_CATALOG: OnceLock<ShipStatCatalog> = OnceLock::new();
-pub(super) static HERO_SKILL_CATALOG: OnceLock<std::collections::BTreeMap<i32, Vec<i32>>> =
-    OnceLock::new();
+pub(super) static SHIP_STAT_MULTIPLIER: OnceLock<f64> = OnceLock::new();
+pub(super) static HERO_SKILL_CATALOG: OnceLock<BTreeMap<i32, Vec<i32>>> = OnceLock::new();
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct RandomFactorEntry {
@@ -1325,8 +1439,8 @@ pub(super) struct TaskDefinition {
 #[derive(Clone, Debug, Default)]
 pub(super) struct TaskCatalog {
     pub(super) definitions: Vec<TaskDefinition>,
-    pub(super) rewards_by_id: std::collections::BTreeMap<i32, Vec<(i32, i32, i32)>>,
-    pub(super) teaching_rewards_by_id: std::collections::BTreeMap<i32, i32>,
+    pub(super) rewards_by_id: BTreeMap<i32, Vec<(i32, i32, i32)>>,
+    pub(super) teaching_rewards_by_id: BTreeMap<i32, i32>,
 }
 
 impl TaskCatalog {
@@ -1335,7 +1449,7 @@ impl TaskCatalog {
             .definitions
             .iter()
             .map(|definition| (definition.task_type, definition.id))
-            .collect::<std::collections::BTreeSet<_>>();
+            .collect::<BTreeSet<_>>();
         for definition in &self.definitions {
             if definition.reward_id > 0 && !self.rewards_by_id.contains_key(&definition.reward_id) {
                 return Err(format!(
@@ -1373,23 +1487,36 @@ impl TaskCatalog {
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct AffectionCatalog {
-    pub(super) exp_by_item: std::collections::BTreeMap<i32, i32>,
+    pub(super) exp_by_item: BTreeMap<i32, i32>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct BuildShipCatalog {
-    pub(super) pools: std::collections::HashMap<i32, Vec<BuildDropEntry>>,
-    pub(super) extract_to_drop: std::collections::HashMap<i32, i32>,
-    pub(super) extract_type_by_pool: std::collections::HashMap<i32, i32>,
-    pub(super) box_drop_by_pool_count: std::collections::HashMap<(i32, i32), i32>,
-    pub(super) reward_by_pool_count: std::collections::HashMap<(i32, i32), (i32, i32, i32)>,
-    pub(super) expend_by_pool: std::collections::HashMap<i32, Vec<(i32, i32, i32)>>,
-    pub(super) ten_expend_by_pool: std::collections::HashMap<i32, Vec<(i32, i32, i32)>>,
-    pub(super) ship_defaults: std::collections::HashMap<i32, Vec<i32>>,
-    pub(super) ship_build_time: std::collections::HashMap<i32, i32>,
-    pub(super) ship_quality: std::collections::HashMap<i32, i32>,
-    pub(super) treasure_drop_by_item: std::collections::HashMap<i32, i32>,
-    pub(super) selected_treasure_by_item: std::collections::HashMap<i32, SelectedTreasure>,
+    pub(super) pools: HashMap<i32, Vec<BuildDropEntry>>,
+    pub(super) treasure_drop_pools: HashMap<i32, TreasureDropPool>,
+    pub(super) extract_to_drop: HashMap<i32, i32>,
+    pub(super) extract_type_by_pool: HashMap<i32, i32>,
+    pub(super) box_drop_by_pool_count: HashMap<(i32, i32), i32>,
+    pub(super) reward_by_pool_count: HashMap<(i32, i32), (i32, i32, i32)>,
+    pub(super) expend_by_pool: HashMap<i32, Vec<(i32, i32, i32)>>,
+    pub(super) ten_expend_by_pool: HashMap<i32, Vec<(i32, i32, i32)>>,
+    pub(super) ship_defaults: HashMap<i32, Vec<i32>>,
+    pub(super) ship_build_time: HashMap<i32, i32>,
+    pub(super) ship_quality: HashMap<i32, i32>,
+    pub(super) treasure_drop_by_item: HashMap<i32, i32>,
+    pub(super) selected_treasure_by_item: HashMap<i32, SelectedTreasure>,
+}
+
+/// 礼盒掉落语义与建造/战斗掉落语义分开保存。
+///
+/// `drop` 是随机池，按 `random_count` 抽取；`drop_alone` 是全取池，
+/// 按 `guaranteed_count` 次完整发放。不能把两者合并后再抽一次。
+#[derive(Clone, Debug, Default)]
+pub(super) struct TreasureDropPool {
+    pub(super) random_entries: Vec<BuildDropEntry>,
+    pub(super) guaranteed_entries: Vec<BuildDropEntry>,
+    pub(super) random_count: i32,
+    pub(super) guaranteed_count: i32,
 }
 
 #[derive(Clone, Debug, Default)]

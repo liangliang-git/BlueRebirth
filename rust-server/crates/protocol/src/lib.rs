@@ -2799,10 +2799,23 @@ pub struct TreasureOpenRequest {
 impl Decode for TreasureOpenRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
+        // Client protobuf uses different layouts:
+        // normal treasure: treasureId=1, treasureNum=2
+        // selected treasure: treasureId=1, position=2, num=3
+        let field_two = optional_i32(&fields, 2, "treasure request has duplicate field 2")?;
+        let field_three = optional_i32(&fields, 3, "treasure request has duplicate count")?;
         Ok(Self {
             treasure_id: optional_i32(&fields, 1, "treasure request has duplicate id")?,
-            position: optional_i32(&fields, 2, "treasure request has duplicate position")?,
-            count: optional_i32(&fields, 3, "treasure request has duplicate count")?,
+            position: if fields.contains_key(&3) {
+                field_two
+            } else {
+                0
+            },
+            count: if fields.contains_key(&3) {
+                field_three
+            } else {
+                field_two
+            },
         })
     }
 }
@@ -2822,6 +2835,135 @@ impl Decode for HeroChangeEquipRequest {
             slot,
             equip_id,
             equip_type: equip_type.max(1),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeroAutoEquipEntry {
+    /// THeroEquip.Index is EquipIndex.P1..P6, encoded as 0..5.
+    pub index: u64,
+    pub equip_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroAutoEquipUnit {
+    pub hero_id: u64,
+    pub equips: Vec<HeroAutoEquipEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroAutoEquipRequest {
+    pub units: Vec<HeroAutoEquipUnit>,
+    pub equip_type: u64,
+}
+
+impl Decode for HeroAutoEquipRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let mut reader = PbReader::new(payload);
+        let mut units = Vec::new();
+        let mut equip_type = 0;
+        while let Some((field, wire)) = reader.next_field()? {
+            match (field, wire) {
+                (1, 2) => {
+                    if units.len() >= 55 {
+                        return Err(ProtocolError::Invalid("auto equipment has too many heroes"));
+                    }
+                    units.push(decode_auto_equip_unit(reader.read_bytes()?)?);
+                }
+                (2, 0) => {
+                    if equip_type != 0 {
+                        return Err(ProtocolError::Invalid(
+                            "auto equipment has duplicate equipment type",
+                        ));
+                    }
+                    equip_type = reader.read_varint()?;
+                }
+                (_, wire) => reader.skip(wire)?,
+            }
+        }
+        if units.is_empty() || equip_type == 0 {
+            return Err(ProtocolError::Invalid("auto equipment request is invalid"));
+        }
+        Ok(Self { units, equip_type })
+    }
+}
+
+fn decode_auto_equip_unit(payload: &[u8]) -> Result<HeroAutoEquipUnit, ProtocolError> {
+    let mut reader = PbReader::new(payload);
+    let mut hero_id = None;
+    let mut equips = Vec::new();
+    while let Some((field, wire)) = reader.next_field()? {
+        match (field, wire) {
+            (1, 0) => {
+                if hero_id.is_some() {
+                    return Err(ProtocolError::Invalid(
+                        "auto equipment has duplicate hero id",
+                    ));
+                }
+                hero_id = Some(reader.read_varint()?);
+            }
+            (2, 2) => {
+                if equips.len() >= 6 {
+                    return Err(ProtocolError::Invalid("auto equipment has too many slots"));
+                }
+                equips.push(decode_auto_equip_entry(reader.read_bytes()?)?);
+            }
+            (_, wire) => reader.skip(wire)?,
+        }
+    }
+    let hero_id = hero_id.ok_or(ProtocolError::Invalid("auto equipment is missing hero id"))?;
+    if hero_id == 0 || equips.is_empty() {
+        return Err(ProtocolError::Invalid("auto equipment unit is invalid"));
+    }
+    if equips
+        .iter()
+        .map(|equip| equip.index)
+        .collect::<BTreeSet<_>>()
+        .len()
+        != equips.len()
+    {
+        return Err(ProtocolError::Invalid(
+            "auto equipment slots are duplicated",
+        ));
+    }
+    Ok(HeroAutoEquipUnit { hero_id, equips })
+}
+
+fn decode_auto_equip_entry(payload: &[u8]) -> Result<HeroAutoEquipEntry, ProtocolError> {
+    let fields = decode_varint_fields(payload)?;
+    let index = optional_u64(&fields, 1, "auto equipment has duplicate slot")?;
+    let equip_id = optional_u64(&fields, 2, "auto equipment has duplicate equipment id")?;
+    if index > 5 || equip_id == 0 {
+        return Err(ProtocolError::Invalid("auto equipment entry is invalid"));
+    }
+    Ok(HeroAutoEquipEntry { index, equip_id })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroAutoUnEquipRequest {
+    pub hero_ids: Vec<u64>,
+    pub equip_type: u64,
+}
+
+impl Decode for HeroAutoUnEquipRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        let hero_ids = fields.get(&1).cloned().unwrap_or_default();
+        let equip_type = optional_u64(&fields, 2, "auto unequipment has duplicate type")?;
+        if hero_ids.is_empty()
+            || hero_ids.len() > 55
+            || hero_ids.contains(&0)
+            || equip_type == 0
+            || hero_ids.iter().collect::<BTreeSet<_>>().len() != hero_ids.len()
+        {
+            return Err(ProtocolError::Invalid(
+                "auto unequipment request is invalid",
+            ));
+        }
+        Ok(Self {
+            hero_ids,
+            equip_type,
         })
     }
 }
@@ -3812,18 +3954,13 @@ impl GuideInfoCodec {
         let mut output = Vec::new();
         write_varint_field(&mut output, 1, 0);
         write_varint_field(&mut output, 2, 0);
-        // Skip login/startup tutorial stages. Keep feature-unlock stages
-        // incomplete so their guides can still play when unlocked later.
-        const INITIAL_DONE_STAGES: [&str; 6] =
-            ["10000", "100000", "1000000", "99995", "99998", "99992"];
-        let done_stages = format!(
-            "{{{}}}",
-            INITIAL_DONE_STAGES
-                .iter()
-                .map(|id| format!("[\"{id}\"]=1"))
-                .collect::<Vec<_>>()
-                .join(",")
-        );
+        // Skip login/startup tutorial stages and the broken 2A defense-ring
+        // guide. The latter leaves the client input-locked at stage 1200000.
+        const INITIAL_DONE_STAGES: [&str; 7] = [
+            "10000", "100000", "1000000", "99995", "99998", "99992", "1200000",
+        ];
+        let done_stages =
+            merge_done_stages(settings.get("GUIDE_DONE_STAGES"), &INITIAL_DONE_STAGES);
         let mut progress = std::collections::BTreeMap::from([
             ("GUIDE_DONE_STAGES".to_owned(), done_stages),
             ("GUIDE_DOING_STAGE".to_owned(), String::new()),
@@ -3831,7 +3968,14 @@ impl GuideInfoCodec {
         progress.extend(
             settings
                 .iter()
-                .filter(|(key, _)| !key.starts_with("__"))
+                // GUIDE_DOING_STAGE is transient client state. Replaying it
+                // on login reopens abandoned tutorial and can lock input on
+                // copy pages. Completed stages remain persistent.
+                .filter(|(key, _)| {
+                    !key.starts_with("__")
+                        && key.as_str() != "GUIDE_DOING_STAGE"
+                        && key.as_str() != "GUIDE_DONE_STAGES"
+                })
                 .map(|(key, value)| (key.clone(), value.clone())),
         );
         for (key, value) in progress {
@@ -3843,6 +3987,32 @@ impl GuideInfoCodec {
         write_bytes(&mut output, 4, &[0x08, 0x00, 0x10, 0x00]);
         output
     }
+}
+
+fn merge_done_stages(persisted: Option<&String>, required: &[&str]) -> String {
+    let mut value = persisted
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| value.starts_with('{') && value.ends_with('}'))
+        .unwrap_or("{}")
+        .to_owned();
+
+    for stage_id in required {
+        let marker = format!("[\"{stage_id}\"]");
+        if value.contains(&marker) {
+            continue;
+        }
+        let close = value
+            .rfind('}')
+            .expect("validated Lua map must have closing brace");
+        let separator = if value[..close].ends_with('{') {
+            ""
+        } else {
+            ","
+        };
+        value.insert_str(close, &format!("{separator}{marker}=1"));
+    }
+    value
 }
 
 pub struct CopyInfoCodec;
@@ -4439,52 +4609,25 @@ impl HeroBagCodec {
         }
         write_varint_field(&mut output, 2, value.template_id as u32 as u64);
 
-        let normal_states = value
+        // THeroGrid.Equips is repeated THeroEquip. Each entry contains
+        // EquipIndex (P1..P6, encoded as 0..5) and EquipId. It is not a
+        // grouped message with equipment type and nested slot messages.
+        let normal_slots = value
             .equip_groups
             .iter()
             .find(|group| group.equip_type == 1)
             .map(|group| group.slots.as_slice())
             .unwrap_or(&[]);
-        let mut equip_groups = value.equip_groups.clone();
-        if !equip_groups.iter().any(|group| group.equip_type == 1) {
-            equip_groups.insert(
-                0,
-                HeroEquipGroup {
-                    equip_type: 1,
-                    slots: (0..6)
-                        .map(|index| HeroEquipSlot {
-                            equip_id: value.equip_slots.get(index).copied().unwrap_or_default(),
-                            state: 0,
-                        })
-                        .collect(),
-                },
-            );
-        }
-        for group in equip_groups {
-            let mut equips_by_type = Vec::new();
-            write_varint_field(&mut equips_by_type, 1, group.equip_type as u32 as u64);
-            for index in 0..6 {
-                let slot = group
-                    .slots
-                    .get(index)
-                    .cloned()
-                    .unwrap_or_else(|| HeroEquipSlot {
-                        equip_id: if group.equip_type == 1 {
-                            value.equip_slots.get(index).copied().unwrap_or_default()
-                        } else {
-                            0
-                        },
-                        state: normal_states
-                            .get(index)
-                            .map(|slot| slot.state)
-                            .unwrap_or_default(),
-                    });
-                let mut equip = Vec::new();
-                write_varint_field(&mut equip, 1, u64::from(slot.equip_id));
-                write_varint_field(&mut equip, 2, slot.state as u32 as u64);
-                write_bytes(&mut equips_by_type, 2, &equip);
-            }
-            write_bytes(&mut output, 3, &equips_by_type);
+        for index in 0..6 {
+            let equip_id = normal_slots
+                .get(index)
+                .map(|slot| slot.equip_id)
+                .or_else(|| value.equip_slots.get(index).copied())
+                .unwrap_or_default();
+            let mut equip = Vec::new();
+            write_varint_field(&mut equip, 1, index as u64);
+            write_varint_field(&mut equip, 2, u64::from(equip_id));
+            write_bytes(&mut output, 3, &equip);
         }
 
         if value.level != 0 {
@@ -5467,7 +5610,10 @@ fn write_varint(output: &mut Vec<u8>, mut value: u64) {
 
 #[cfg(test)]
 mod request_decode_tests {
-    use super::{CopyMiniGamePassRequest, CopyStarRewardRequest, Decode, SupportCompleteRequest};
+    use super::{
+        CopyMiniGamePassRequest, CopyStarRewardRequest, Decode, HeroAutoEquipRequest,
+        HeroAutoUnEquipRequest, SupportCompleteRequest, TreasureOpenRequest,
+    };
 
     fn varint_field(field: u32, value: u64) -> Vec<u8> {
         let mut payload = Vec::new();
@@ -5496,5 +5642,52 @@ mod request_decode_tests {
         let mut payload = varint_field(1, 0);
         payload.extend(varint_field(2, 1));
         assert!(SupportCompleteRequest::decode(&payload).is_err());
+    }
+
+    #[test]
+    fn auto_equip_decodes_nested_units_and_zero_based_slot_enum() {
+        let equip = varint_field(2, 321);
+        let mut unit = varint_field(1, 7);
+        super::write_bytes(&mut unit, 2, &equip);
+        let mut payload = Vec::new();
+        super::write_bytes(&mut payload, 1, &unit);
+        payload.extend(varint_field(2, 1));
+
+        let request = HeroAutoEquipRequest::decode(&payload).expect("valid auto equip request");
+        assert_eq!(request.equip_type, 1);
+        assert_eq!(request.units[0].hero_id, 7);
+        assert_eq!(request.units[0].equips[0].index, 0);
+        assert_eq!(request.units[0].equips[0].equip_id, 321);
+    }
+
+    #[test]
+    fn auto_unequip_decodes_repeated_hero_ids() {
+        let mut payload = varint_field(1, 7);
+        payload.extend(varint_field(1, 8));
+        payload.extend(varint_field(2, 1));
+
+        let request =
+            HeroAutoUnEquipRequest::decode(&payload).expect("valid auto unequipment request");
+        assert_eq!(request.hero_ids, vec![7, 8]);
+        assert_eq!(request.equip_type, 1);
+    }
+
+    #[test]
+    fn treasure_request_decodes_normal_and_selected_layouts() {
+        let mut normal = varint_field(1, 16001);
+        normal.extend(varint_field(2, 1));
+        let request = TreasureOpenRequest::decode(&normal).expect("valid normal treasure request");
+        assert_eq!(request.treasure_id, 16001);
+        assert_eq!(request.position, 0);
+        assert_eq!(request.count, 1);
+
+        let mut selected = varint_field(1, 80520);
+        selected.extend(varint_field(2, 3));
+        selected.extend(varint_field(3, 1));
+        let request =
+            TreasureOpenRequest::decode(&selected).expect("valid selected treasure request");
+        assert_eq!(request.treasure_id, 80520);
+        assert_eq!(request.position, 3);
+        assert_eq!(request.count, 1);
     }
 }

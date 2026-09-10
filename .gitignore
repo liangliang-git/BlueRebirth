@@ -47,3 +47,13 @@ __pycache__/
 /.dotnet-home/
 /.nuget-packages/
 /.codex-nuget.config
+rust-server/migrations/0035_ship_template_runtime.sql
+rust-server/migrations/0036_ship_template_import_meta.sql
+rust-server/migrations/0037_ship_template_fixed_money.sql
+rust-server/migrations/0038_merge_hero_slot_columns.sql
+rust-server/migrations/0039_backfill_hero_slot_columns.sql
+rust-server/migrations/0040_drop_merged_hero_slot_tables.sql
+rust-server/migrations/0041_drop_hero_skill_slot_columns.sql
+rust-server/migrations/0042_merge_heroes_into_hero_runtime.sql
+rust-server/migrations/0043_merge_fleet_member_tables.sql
+rust-server/migrations/0044_merge_legacy_sea_progress.sql

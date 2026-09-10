@@ -3,11 +3,12 @@ use blueoath_domain::{
     CharacterState, ChatBarrageState, ChatMessageState, ConstructionJobState,
     ConstructionProjectState, CopyId, CopyRecordState, CurrencyKind, EquipId, EquipmentState,
     FleetId, FleetRecord, GuildApplicationState, GuildBoxItemState, GuildMemberState, GuildState,
-    HeroId, HeroState, NewAccountFactory, PresetFleetState, ProfileId, ProfileState,
-    RepositoryError, TemplateId, TowerRewardState,
+    HeroComputedStats, HeroId, HeroState, NewAccountFactory, PresetFleetState, ProfileId,
+    ProfileState, RepositoryError, TemplateId, TowerRewardState,
 };
 use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -53,6 +54,37 @@ pub struct LocalShip {
     pub power: i32,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShipTemplateStats {
+    pub template_id: i32,
+    pub fixed_money: i64,
+    pub hp: i64,
+    pub hp_levelup: i64,
+    pub attack: i64,
+    pub attack_levelup: i64,
+    pub defense: i64,
+    pub defense_levelup: i64,
+    pub torpedo_attack: i64,
+    pub torpedo_attack_levelup: i64,
+    pub torpedo_defense: i64,
+    pub torpedo_defense_levelup: i64,
+    pub to_air_attack: i64,
+    pub to_air_attack_levelup: i64,
+    pub to_torpedo_attack: i64,
+    pub to_torpedo_attack_levelup: i64,
+    pub ship_bomb_attack: i64,
+    pub ship_bomb_attack_levelup: i64,
+    pub ship_torpedo_attack: i64,
+    pub ship_torpedo_attack_levelup: i64,
+    pub ship_air_control: i64,
+    pub ship_air_control_levelup: i64,
+    pub carry_plane_count: i64,
+    pub hit: i64,
+    pub dodge: i64,
+    pub crit: i64,
+    pub anti_crit: i64,
+}
+
 /// SQLite persistence compatible with the C# `profiles` table.
 #[derive(Debug, Clone)]
 pub struct ProfileStore {
@@ -68,6 +100,242 @@ impl ProfileStore {
         let connection = store.connection()?;
         run_migrations(&connection)?;
         Ok(store)
+    }
+
+    /// Import static ship rows into global database state. Runtime reads use this table after
+    /// import, so request handling no longer depends on client DB files.
+    pub fn sync_ship_templates_from_json(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<usize, StorageError> {
+        let bytes = fs::read(path)?;
+        let source_hash = ship_template_hash(&bytes);
+        let connection = self.connection()?;
+        let existing_hash = connection
+            .query_row(
+                "SELECT source_hash FROM ship_template_import_meta WHERE id = 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if existing_hash.as_deref() == Some(source_hash.as_str()) {
+            return Ok(0);
+        }
+        let document: Value = serde_json::from_slice(&bytes)?;
+        let rows = document
+            .get("rows")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                StorageError::InvalidTypedAccount("ship template rows missing".to_owned())
+            })?;
+        let mut connection = connection;
+        let transaction = connection.transaction()?;
+        let mut imported = 0_usize;
+        for row in rows {
+            let Some(value) = row.get("value") else {
+                continue;
+            };
+            let Some(template_id) = json_i64(row.get("id")) else {
+                continue;
+            };
+            if template_id <= 0 || !value.is_object() {
+                continue;
+            }
+            transaction.execute(
+                "INSERT INTO ship_template(
+                    template_id, sm_id, ship_info_id, st_id, ship_class, ship_type2,
+                    ship_levelup_max, hp, hp_levelup, attack, attack_levelup, defense,
+                    defense_levelup, torpedo_attack, torpedo_attack_levelup, torpedo_defense,
+                    torpedo_defense_levelup, to_air_attack, to_air_attack_levelup,
+                    to_torpedo_attack, to_torpedo_attack_levelup, ship_bomb_attack,
+                    ship_bomb_attack_levelup, ship_torpedo_attack, ship_torpedo_attack_levelup,
+                    ship_air_control, ship_air_control_levelup, antisubmarine,
+                    antisubmarine_levelup, submarine, submarine_levelup, plane_health,
+                    plane_health_levelup, carry_plane_count, hit, dodge, crit, anti_crit, speed,
+                    speed_show, view_range, raw_json, imported_utc
+                 ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                    ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
+                    ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41,
+                    ?42, ?43
+                 )
+                 ON CONFLICT(template_id) DO UPDATE SET
+                    sm_id = excluded.sm_id,
+                    ship_info_id = excluded.ship_info_id,
+                    st_id = excluded.st_id,
+                    ship_class = excluded.ship_class,
+                    ship_type2 = excluded.ship_type2,
+                    ship_levelup_max = excluded.ship_levelup_max,
+                    hp = excluded.hp,
+                    hp_levelup = excluded.hp_levelup,
+                    attack = excluded.attack,
+                    attack_levelup = excluded.attack_levelup,
+                    defense = excluded.defense,
+                    defense_levelup = excluded.defense_levelup,
+                    torpedo_attack = excluded.torpedo_attack,
+                    torpedo_attack_levelup = excluded.torpedo_attack_levelup,
+                    torpedo_defense = excluded.torpedo_defense,
+                    torpedo_defense_levelup = excluded.torpedo_defense_levelup,
+                    to_air_attack = excluded.to_air_attack,
+                    to_air_attack_levelup = excluded.to_air_attack_levelup,
+                    to_torpedo_attack = excluded.to_torpedo_attack,
+                    to_torpedo_attack_levelup = excluded.to_torpedo_attack_levelup,
+                    ship_bomb_attack = excluded.ship_bomb_attack,
+                    ship_bomb_attack_levelup = excluded.ship_bomb_attack_levelup,
+                    ship_torpedo_attack = excluded.ship_torpedo_attack,
+                    ship_torpedo_attack_levelup = excluded.ship_torpedo_attack_levelup,
+                    ship_air_control = excluded.ship_air_control,
+                    ship_air_control_levelup = excluded.ship_air_control_levelup,
+                    antisubmarine = excluded.antisubmarine,
+                    antisubmarine_levelup = excluded.antisubmarine_levelup,
+                    submarine = excluded.submarine,
+                    submarine_levelup = excluded.submarine_levelup,
+                    plane_health = excluded.plane_health,
+                    plane_health_levelup = excluded.plane_health_levelup,
+                    carry_plane_count = excluded.carry_plane_count,
+                    hit = excluded.hit,
+                    dodge = excluded.dodge,
+                    crit = excluded.crit,
+                    anti_crit = excluded.anti_crit,
+                    speed = excluded.speed,
+                    speed_show = excluded.speed_show,
+                    view_range = excluded.view_range,
+                    raw_json = excluded.raw_json,
+                    imported_utc = excluded.imported_utc",
+                params![
+                    template_id,
+                    json_field_i64(value, &["sm_id"]),
+                    json_field_i64(value, &["ship_info_id"]),
+                    json_field_i64(value, &["st_id"]),
+                    json_field_i64(value, &["ship_class"]),
+                    json_field_i64(value, &["ship_type2"]),
+                    json_field_i64(value, &["ship_levelup_max", "shipLevelupMax"]),
+                    json_field_i64(value, &["hp"]),
+                    json_field_i64(value, &["hp_levelup"]),
+                    json_field_i64(value, &["attack"]),
+                    json_field_i64(value, &["attack_levelup"]),
+                    json_field_i64(value, &["defense"]),
+                    json_field_i64(value, &["defense_levelup"]),
+                    json_field_i64(value, &["torpedo_attack"]),
+                    json_field_i64(value, &["torpedo_attack_levelup"]),
+                    json_field_i64(value, &["torpedo_defense"]),
+                    json_field_i64(value, &["torpedo_defense_levelup"]),
+                    json_field_i64(value, &["to_air_attack"]),
+                    json_field_i64(value, &["to_air_attack_levelup"]),
+                    json_field_i64(value, &["to_torpedo_attack"]),
+                    json_field_i64(value, &["to_torpedo_attack_levelup"]),
+                    json_field_i64(value, &["ship_bomb_attack"]),
+                    json_field_i64(value, &["ship_bomb_attack_levelup"]),
+                    json_field_i64(value, &["ship_torpedo_attack"]),
+                    json_field_i64(value, &["ship_torpedo_attack_levelup"]),
+                    json_field_i64(value, &["ship_air_control"]),
+                    json_field_i64(value, &["ship_air_control_levelup"]),
+                    json_field_i64(value, &["antisubmarine"]),
+                    json_field_i64(value, &["antisubmarine_levelup"]),
+                    json_field_i64(value, &["submarine"]),
+                    json_field_i64(value, &["submarine_levelup"]),
+                    json_field_i64(value, &["plane_health"]),
+                    json_field_i64(value, &["plane_health_levelup"]),
+                    json_field_i64(value, &["carry_plane_count"]),
+                    json_field_i64(value, &["hit"]),
+                    json_field_i64(value, &["dodge"]),
+                    json_field_i64(value, &["crit"]),
+                    json_field_i64(value, &["anti_crit"]),
+                    json_field_i64(value, &["speed"]),
+                    json_field_i64(value, &["speed_show"]),
+                    json_field_i64(value, &["view_range"]),
+                    serde_json::to_string(value)?,
+                    timestamp(),
+                ],
+            )?;
+            transaction.execute(
+                "UPDATE ship_template SET fixed_money = ?2 WHERE template_id = ?1",
+                params![template_id, json_field_i64(value, &["fixed_money"])],
+            )?;
+            imported += 1;
+        }
+        transaction.execute(
+            "INSERT INTO ship_template_import_meta(id, source_hash, row_count, imported_utc)
+             VALUES (1, ?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET
+                source_hash = excluded.source_hash,
+                row_count = excluded.row_count,
+                imported_utc = excluded.imported_utc",
+            params![
+                source_hash,
+                typed_i64(imported, "ship template row count")?,
+                timestamp()
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(imported)
+    }
+
+    pub fn load_ship_template_rows(&self) -> Result<Vec<(i32, Value)>, StorageError> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare("SELECT template_id, raw_json FROM ship_template ORDER BY template_id")?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(|(template_id, raw_json)| {
+                let template_id = i32::try_from(template_id).map_err(|_| {
+                    StorageError::InvalidTypedAccount("ship template id exceeds i32".to_owned())
+                })?;
+                Ok((template_id, serde_json::from_str(&raw_json)?))
+            })
+            .collect()
+    }
+
+    pub fn load_ship_template_stats(&self) -> Result<Vec<ShipTemplateStats>, StorageError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT template_id, fixed_money, hp, hp_levelup, attack, attack_levelup,
+                    defense, defense_levelup, torpedo_attack, torpedo_attack_levelup,
+                    torpedo_defense, torpedo_defense_levelup, to_air_attack,
+                    to_air_attack_levelup, to_torpedo_attack, to_torpedo_attack_levelup,
+                    ship_bomb_attack, ship_bomb_attack_levelup, ship_torpedo_attack,
+                    ship_torpedo_attack_levelup, ship_air_control, ship_air_control_levelup,
+                    carry_plane_count, hit, dodge, crit, anti_crit
+             FROM ship_template ORDER BY template_id",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(ShipTemplateStats {
+                    template_id: row.get::<_, i64>(0)?.try_into().unwrap_or_default(),
+                    fixed_money: row.get(1)?,
+                    hp: row.get(2)?,
+                    hp_levelup: row.get(3)?,
+                    attack: row.get(4)?,
+                    attack_levelup: row.get(5)?,
+                    defense: row.get(6)?,
+                    defense_levelup: row.get(7)?,
+                    torpedo_attack: row.get(8)?,
+                    torpedo_attack_levelup: row.get(9)?,
+                    torpedo_defense: row.get(10)?,
+                    torpedo_defense_levelup: row.get(11)?,
+                    to_air_attack: row.get(12)?,
+                    to_air_attack_levelup: row.get(13)?,
+                    to_torpedo_attack: row.get(14)?,
+                    to_torpedo_attack_levelup: row.get(15)?,
+                    ship_bomb_attack: row.get(16)?,
+                    ship_bomb_attack_levelup: row.get(17)?,
+                    ship_torpedo_attack: row.get(18)?,
+                    ship_torpedo_attack_levelup: row.get(19)?,
+                    ship_air_control: row.get(20)?,
+                    ship_air_control_levelup: row.get(21)?,
+                    carry_plane_count: row.get(22)?,
+                    hit: row.get(23)?,
+                    dodge: row.get(24)?,
+                    crit: row.get(25)?,
+                    anti_crit: row.get(26)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>();
+        rows.map_err(StorageError::from)
     }
 
     pub fn load_local(&self, profile_id: &str) -> Result<Option<LocalProfile>, StorageError> {
@@ -233,55 +501,6 @@ impl ProfileStore {
         }
 
         let mut statement = connection.prepare(
-            "SELECT hero_id, template_id, fashioning, name, change_name_time, level, exp, mood, affection, hp, lock_state
-             FROM heroes WHERE profile_id = ?1 ORDER BY hero_id",
-        )?;
-        let heroes = statement
-            .query_map(params![profile_id.as_str()], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
-                    row.get::<_, i64>(7)?,
-                    row.get::<_, i64>(8)?,
-                    row.get::<_, i64>(9)?,
-                    row.get::<_, i64>(10)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        for row in heroes {
-            let id = positive_hero_id(row.0, "hero id")?;
-            let template_id = positive_template_id(row.1, "hero template id")?;
-            let fashioning = if row.2 == 0 {
-                u32::try_from(template_id.get().saturating_sub(1) / 10).unwrap_or(u32::MAX)
-            } else {
-                non_negative_u32(row.2, "hero fashioning")?
-            };
-            account.dock.heroes.insert(
-                id,
-                HeroState {
-                    id,
-                    template_id,
-                    fashioning,
-                    name: row.3,
-                    change_name_time: non_negative_u64(row.4, "hero change name time")?,
-                    level: positive_u32(row.5, "hero level")?,
-                    exp: non_negative_u64(row.6, "hero exp")?,
-                    mood: non_negative_u32(row.7, "hero mood")?,
-                    affection: non_negative_u64(row.8, "hero affection")?,
-                    hp: non_negative_u64(row.9, "hero hp")?,
-                    locked: row.10 != 0,
-                    equip_slots: Vec::new(),
-                    pskills: std::collections::BTreeMap::new(),
-                },
-            );
-        }
-
-        let mut statement = connection.prepare(
             "SELECT equip_id, template_id, enhance_level, star, enhance_exp, hero_id
              FROM equipments WHERE profile_id = ?1 ORDER BY equip_id",
         )?;
@@ -355,38 +574,6 @@ impl ProfileStore {
         }
 
         let mut statement = connection.prepare(
-            "SELECT hero_id, slot_index, equip_id
-             FROM hero_equip_slots WHERE profile_id = ?1 ORDER BY hero_id, slot_index",
-        )?;
-        let slots = statement
-            .query_map(params![profile_id.as_str()], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, Option<i64>>(2)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        for (hero_value, slot_value, equip_value) in slots {
-            let hero_id = positive_hero_id(hero_value, "equipment slot hero id")?;
-            let slot_index = usize::try_from(slot_value).map_err(|_| {
-                StorageError::InvalidTypedAccount("equipment slot index is invalid".to_owned())
-            })?;
-            let equip_id = equip_value
-                .map(|value| positive_equip_id(value, "equipment slot equipment id"))
-                .transpose()?;
-            let Some(hero) = account.dock.heroes.get_mut(&hero_id) else {
-                return Err(StorageError::InvalidTypedAccount(
-                    "equipment slot references missing hero".to_owned(),
-                ));
-            };
-            if hero.equip_slots.len() <= slot_index {
-                hero.equip_slots.resize(slot_index + 1, None);
-            }
-            hero.equip_slots[slot_index] = equip_id;
-        }
-
-        let mut statement = connection.prepare(
             "SELECT fleet_id, tactic_name, formation_id, tactic_id, tactic_type
              FROM fleets WHERE profile_id = ?1 ORDER BY fleet_id",
         )?;
@@ -416,8 +603,8 @@ impl ProfileStore {
             );
         }
         let mut statement = connection.prepare(
-            "SELECT fleet_id, position, hero_id
-             FROM fleet_members WHERE profile_id = ?1 ORDER BY fleet_id, position",
+            "SELECT fleet_id, member_kind, position, hero_id
+             FROM fleet_members WHERE profile_id = ?1 ORDER BY fleet_id, member_kind, position",
         )?;
         let members = statement
             .query_map(params![profile_id.as_str()], |row| {
@@ -425,48 +612,30 @@ impl ProfileStore {
                     row.get::<_, i64>(0)?,
                     row.get::<_, i64>(1)?,
                     row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         for row in members {
             let fleet_id = positive_fleet_id(row.0, "fleet member fleet id")?;
-            let hero_id = positive_hero_id(row.2, "fleet member hero id")?;
+            let hero_id = positive_hero_id(row.3, "fleet member hero id")?;
             if let Some(fleet) = account.fleet.fleets.get_mut(&fleet_id) {
-                let position = usize::try_from(row.1).map_err(|_| {
+                let position = usize::try_from(row.2).map_err(|_| {
                     StorageError::InvalidTypedAccount("fleet member position is invalid".to_owned())
                 })?;
-                if fleet.members.len() <= position {
-                    fleet.members.resize(position + 1, hero_id);
+                let members = match row.1 {
+                    0 => &mut fleet.members,
+                    1 => &mut fleet.ex_members,
+                    _ => {
+                        return Err(StorageError::InvalidTypedAccount(
+                            "fleet member kind is invalid".to_owned(),
+                        ));
+                    }
+                };
+                if members.len() <= position {
+                    members.resize(position + 1, hero_id);
                 }
-                fleet.members[position] = hero_id;
-            }
-        }
-        let mut statement = connection.prepare(
-            "SELECT fleet_id, position, hero_id
-             FROM fleet_ex_members WHERE profile_id = ?1 ORDER BY fleet_id, position",
-        )?;
-        let ex_members = statement
-            .query_map(params![profile_id.as_str()], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        for row in ex_members {
-            let fleet_id = positive_fleet_id(row.0, "fleet ex member fleet id")?;
-            let hero_id = positive_hero_id(row.2, "fleet ex member hero id")?;
-            if let Some(fleet) = account.fleet.fleets.get_mut(&fleet_id) {
-                let position = usize::try_from(row.1).map_err(|_| {
-                    StorageError::InvalidTypedAccount(
-                        "fleet ex member position is invalid".to_owned(),
-                    )
-                })?;
-                if fleet.ex_members.len() <= position {
-                    fleet.ex_members.resize(position + 1, hero_id);
-                }
-                fleet.ex_members[position] = hero_id;
+                members[position] = hero_id;
             }
         }
 
@@ -2160,6 +2329,7 @@ impl ProfileStore {
                 account.guild_box.task_boxes.push(item);
             }
         }
+        load_hero_runtime_from_connection(connection, profile_id.as_str(), &mut account)?;
         account
             .validate()
             .map_err(|error| StorageError::InvalidTypedAccount(error.to_string()))?;
@@ -2514,25 +2684,132 @@ impl ProfileStore {
         }
 
         for hero in account.dock.heroes.values() {
+            let computed = account
+                .dock
+                .computed_stats
+                .get(&hero.id)
+                .cloned()
+                .unwrap_or_default();
+            let max_level = transaction
+                .query_row(
+                    "SELECT ship_levelup_max FROM ship_template WHERE template_id = ?1",
+                    params![typed_i64(
+                        hero.template_id.get(),
+                        "hero runtime template id"
+                    )?],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?
+                .unwrap_or_default();
+            let intensify_level = account
+                .activities
+                .progress
+                .iter()
+                .filter_map(|(key, value)| {
+                    let prefix = format!("compat:hero:{}:intensify:", hero.id.get());
+                    key.strip_prefix(&prefix)
+                        .and_then(|key| key.strip_suffix(":level"))
+                        .map(|_| *value)
+                })
+                .sum::<u64>();
+            let breakthrough_level = account
+                .activities
+                .progress
+                .get(&format!("compat:hero:{}:advLv", hero.id.get()))
+                .copied()
+                .unwrap_or_default();
+            let remould_level = account
+                .activities
+                .progress
+                .get(&format!("compat:hero:{}:remould:level", hero.id.get()))
+                .copied()
+                .unwrap_or_default();
+            let resonance_level = account
+                .activities
+                .progress
+                .get(&format!("compat:hero:{}:combination:grade", hero.id.get()))
+                .copied()
+                .unwrap_or_default();
+            let equip_slots = (0..6)
+                .map(|index| {
+                    hero.equip_slots
+                        .get(index)
+                        .copied()
+                        .flatten()
+                        .map(|id| typed_i64(id.get(), "hero runtime equipment slot id"))
+                        .transpose()
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             transaction.execute(
-                "INSERT INTO heroes(
-                profile_id, hero_id, template_id, fashioning, name, change_name_time,
-                    level, exp, mood, affection, hp, lock_state, created_utc
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                "INSERT INTO hero_runtime(
+                    profile_id, hero_id, template_id, fashioning, name, change_name_time,
+                    level, exp, mood, affection, current_hp, lock_state, max_level,
+                    intensify_level, breakthrough_level, remould_level, resonance_level,
+                    computed_max_hp, computed_scout_num, computed_attack, computed_defense,
+                    computed_torpedo_attack, computed_torpedo_defense, computed_to_air_attack,
+                    computed_to_torpedo_attack, computed_ship_bomb_attack,
+                    computed_ship_torpedo_attack, computed_ship_air_control, computed_crit,
+                    computed_anti_crit, computed_hit, computed_dodge, computed_attributes_json,
+                    updated_utc, equip_slot_1, equip_slot_2, equip_slot_3, equip_slot_4,
+                    equip_slot_5, equip_slot_6, skill_levels_json, created_utc
+                 ) VALUES (
+                     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                     ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
+                     ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42
+                  )",
                 params![
                     profile.id.as_str(),
-                    typed_i64(hero.id.get(), "hero id")?,
-                    typed_i64(hero.template_id.get(), "hero template id")?,
-                    typed_i64(hero.fashioning, "hero fashioning")?,
+                    typed_i64(hero.id.get(), "hero runtime id")?,
+                    typed_i64(hero.template_id.get(), "hero runtime template id")?,
+                    typed_i64(hero.fashioning, "hero runtime fashioning")?,
                     hero.name,
-                    typed_i64(hero.change_name_time, "hero change name time")?,
-                    typed_i64(hero.level, "hero level")?,
-                    typed_i64(hero.exp, "hero exp")?,
-                    typed_i64(hero.mood, "hero mood")?,
-                    typed_i64(hero.affection, "hero affection")?,
-                    typed_i64(hero.hp, "hero hp")?,
+                    typed_i64(hero.change_name_time, "hero runtime name time")?,
+                    typed_i64(hero.level, "hero runtime level")?,
+                    typed_i64(hero.exp, "hero runtime exp")?,
+                    typed_i64(hero.mood, "hero runtime mood")?,
+                    typed_i64(hero.affection, "hero runtime affection")?,
+                    typed_i64(hero.hp, "hero runtime current hp")?,
                     i64::from(hero.locked),
+                    max_level,
+                    typed_i64(intensify_level, "hero runtime intensify level")?,
+                    typed_i64(breakthrough_level, "hero runtime breakthrough level")?,
+                    typed_i64(remould_level, "hero runtime remould level")?,
+                    typed_i64(resonance_level, "hero runtime resonance level")?,
+                    typed_i64(computed.max_hp, "hero computed max hp")?,
+                    typed_i64(computed.scout_num, "hero computed scout num")?,
+                    typed_i64(computed.attack, "hero computed attack")?,
+                    typed_i64(computed.defense, "hero computed defense")?,
+                    typed_i64(computed.torpedo_attack, "hero computed torpedo attack")?,
+                    typed_i64(computed.torpedo_defense, "hero computed torpedo defense")?,
+                    typed_i64(computed.to_air_attack, "hero computed air attack")?,
+                    typed_i64(
+                        computed.to_torpedo_attack,
+                        "hero computed torpedo air attack"
+                    )?,
+                    typed_i64(computed.ship_bomb_attack, "hero computed bomb attack")?,
+                    typed_i64(
+                        computed.ship_torpedo_attack,
+                        "hero computed ship torpedo attack"
+                    )?,
+                    typed_i64(computed.ship_air_control, "hero computed air control")?,
+                    typed_i64(computed.crit, "hero computed crit")?,
+                    typed_i64(computed.anti_crit, "hero computed anti crit")?,
+                    typed_i64(computed.hit, "hero computed hit")?,
+                    typed_i64(computed.dodge, "hero computed dodge")?,
+                    serde_json::to_string(&computed.extra_attributes)?,
                     timestamp(),
+                    equip_slots[0],
+                    equip_slots[1],
+                    equip_slots[2],
+                    equip_slots[3],
+                    equip_slots[4],
+                    equip_slots[5],
+                    serde_json::to_string(&hero.pskills)?,
+                    if hero.created_utc.is_empty() {
+                        timestamp()
+                    } else {
+                        hero.created_utc.clone()
+                    },
                 ],
             )?;
         }
@@ -2556,23 +2833,6 @@ impl ProfileStore {
                 ],
             )?;
         }
-        for hero in account.dock.heroes.values() {
-            for (slot_index, equip_id) in hero.equip_slots.iter().enumerate() {
-                transaction.execute(
-                    "INSERT INTO hero_equip_slots(
-                        profile_id, hero_id, slot_index, equip_id
-                     ) VALUES (?1, ?2, ?3, ?4)",
-                    params![
-                        profile.id.as_str(),
-                        typed_i64(hero.id.get(), "hero id")?,
-                        typed_i64(slot_index, "equipment slot")?,
-                        equip_id
-                            .map(|id| typed_i64(id.get(), "slot equipment id"))
-                            .transpose()?,
-                    ],
-                )?;
-            }
-        }
         for (fleet_id, fleet) in &account.fleet.fleets {
             transaction.execute(
                 "INSERT INTO fleets(
@@ -2587,29 +2847,20 @@ impl ProfileStore {
                     typed_i64(fleet.tactic_type, "tactic type")?,
                 ],
             )?;
-            for (position, hero_id) in fleet.members.iter().enumerate() {
-                transaction.execute(
-                    "INSERT INTO fleet_members(profile_id, fleet_id, position, hero_id)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![
-                        profile.id.as_str(),
-                        typed_i64(fleet_id.get(), "fleet id")?,
-                        typed_i64(position, "fleet member position")?,
-                        typed_i64(hero_id.get(), "fleet member hero id")?,
-                    ],
-                )?;
-            }
-            for (position, hero_id) in fleet.ex_members.iter().enumerate() {
-                transaction.execute(
-                    "INSERT INTO fleet_ex_members(profile_id, fleet_id, position, hero_id)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![
-                        profile.id.as_str(),
-                        typed_i64(fleet_id.get(), "fleet id")?,
-                        typed_i64(position, "fleet ex member position")?,
-                        typed_i64(hero_id.get(), "fleet ex member hero id")?,
-                    ],
-                )?;
+            for (member_kind, members) in [(0_i64, &fleet.members), (1_i64, &fleet.ex_members)] {
+                for (position, hero_id) in members.iter().enumerate() {
+                    transaction.execute(
+                        "INSERT INTO fleet_members(profile_id, fleet_id, member_kind, position, hero_id)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            profile.id.as_str(),
+                            typed_i64(fleet_id.get(), "fleet id")?,
+                            member_kind,
+                            typed_i64(position, "fleet member position")?,
+                            typed_i64(hero_id.get(), "fleet member hero id")?,
+                        ],
+                    )?;
+                }
             }
         }
         transaction.execute(
@@ -3725,6 +3976,134 @@ impl ProfileStore {
     }
 }
 
+fn load_hero_runtime_from_connection(
+    connection: &Connection,
+    profile_id: &str,
+    account: &mut AccountState,
+) -> Result<(), StorageError> {
+    let mut statement = connection.prepare(
+        "SELECT hero_id, template_id, fashioning, name, change_name_time, level, exp,
+                mood, affection, current_hp, lock_state, max_level,
+                computed_max_hp, computed_scout_num, computed_attack, computed_defense,
+                computed_torpedo_attack, computed_torpedo_defense, computed_to_air_attack,
+                computed_to_torpedo_attack, computed_ship_bomb_attack,
+                computed_ship_torpedo_attack, computed_ship_air_control, computed_crit,
+                computed_anti_crit, computed_hit, computed_dodge, computed_attributes_json,
+                equip_slot_1, equip_slot_2, equip_slot_3, equip_slot_4, equip_slot_5,
+                equip_slot_6, skill_levels_json, created_utc
+         FROM hero_runtime WHERE profile_id = ?1 ORDER BY hero_id",
+    )?;
+    for row in statement.query_map(params![profile_id], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, i64>(7)?,
+            row.get::<_, i64>(8)?,
+            row.get::<_, i64>(9)?,
+            row.get::<_, i64>(10)?,
+            row.get::<_, i64>(11)?,
+            row.get::<_, i64>(12)?,
+            row.get::<_, i64>(13)?,
+            row.get::<_, i64>(14)?,
+            row.get::<_, i64>(15)?,
+            row.get::<_, i64>(16)?,
+            row.get::<_, i64>(17)?,
+            row.get::<_, i64>(18)?,
+            row.get::<_, i64>(19)?,
+            row.get::<_, i64>(20)?,
+            row.get::<_, i64>(21)?,
+            row.get::<_, i64>(22)?,
+            row.get::<_, i64>(23)?,
+            row.get::<_, i64>(24)?,
+            row.get::<_, i64>(25)?,
+            row.get::<_, i64>(26)?,
+            row.get::<_, String>(27)?,
+            row.get::<_, Option<i64>>(28)?,
+            row.get::<_, Option<i64>>(29)?,
+            row.get::<_, Option<i64>>(30)?,
+            row.get::<_, Option<i64>>(31)?,
+            row.get::<_, Option<i64>>(32)?,
+            row.get::<_, Option<i64>>(33)?,
+            row.get::<_, String>(34)?,
+            row.get::<_, String>(35)?,
+        ))
+    })? {
+        let row = row?;
+        let hero_id = positive_hero_id(row.0, "hero runtime hero id")?;
+        let template_id = positive_template_id(row.1, "hero runtime template id")?;
+        let extra_attributes = serde_json::from_str(&row.27).map_err(|error| {
+            StorageError::InvalidTypedAccount(format!(
+                "hero runtime computed attributes are invalid: {error}"
+            ))
+        })?;
+        account.dock.computed_stats.insert(
+            hero_id,
+            HeroComputedStats {
+                max_hp: non_negative_u64(row.12, "hero runtime max hp")?,
+                scout_num: non_negative_u64(row.13, "hero runtime scout num")?,
+                attack: non_negative_u64(row.14, "hero runtime attack")?,
+                defense: non_negative_u64(row.15, "hero runtime defense")?,
+                torpedo_attack: non_negative_u64(row.16, "hero runtime torpedo attack")?,
+                torpedo_defense: non_negative_u64(row.17, "hero runtime torpedo defense")?,
+                to_air_attack: non_negative_u64(row.18, "hero runtime air attack")?,
+                to_torpedo_attack: non_negative_u64(row.19, "hero runtime torpedo air attack")?,
+                ship_bomb_attack: non_negative_u64(row.20, "hero runtime bomb attack")?,
+                ship_torpedo_attack: non_negative_u64(row.21, "hero runtime ship torpedo attack")?,
+                ship_air_control: non_negative_u64(row.22, "hero runtime air control")?,
+                crit: non_negative_u64(row.23, "hero runtime crit")?,
+                anti_crit: non_negative_u64(row.24, "hero runtime anti crit")?,
+                hit: non_negative_u64(row.25, "hero runtime hit")?,
+                dodge: non_negative_u64(row.26, "hero runtime dodge")?,
+                extra_attributes,
+            },
+        );
+        let mut equip_slots = [row.28, row.29, row.30, row.31, row.32, row.33]
+            .into_iter()
+            .map(|value| {
+                value
+                    .map(|value| positive_equip_id(value, "hero runtime equipment id"))
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        while equip_slots.last().is_some_and(Option::is_none) {
+            equip_slots.pop();
+        }
+        let skill_levels: std::collections::BTreeMap<u64, u32> = serde_json::from_str(&row.34)
+            .map_err(|error| {
+                StorageError::InvalidTypedAccount(format!("hero skill levels are invalid: {error}"))
+            })?;
+        account.dock.heroes.insert(
+            hero_id,
+            HeroState {
+                id: hero_id,
+                template_id,
+                fashioning: if row.2 == 0 {
+                    u32::try_from(template_id.get().saturating_sub(1) / 10).unwrap_or(u32::MAX)
+                } else {
+                    non_negative_u32(row.2, "hero runtime fashioning")?
+                },
+                name: row.3,
+                change_name_time: non_negative_u64(row.4, "hero runtime name time")?,
+                level: positive_u32(row.5, "hero runtime level")?,
+                exp: non_negative_u64(row.6, "hero runtime exp")?,
+                mood: non_negative_u32(row.7, "hero runtime mood")?,
+                affection: non_negative_u64(row.8, "hero runtime affection")?,
+                hp: non_negative_u64(row.9, "hero runtime current hp")?,
+                locked: row.10 != 0,
+                created_utc: row.35,
+                equip_slots,
+                pskills: skill_levels,
+            },
+        );
+    }
+    Ok(())
+}
+
 fn positive_u64(value: i64, field: &str) -> Result<u64, StorageError> {
     u64::try_from(value)
         .ok()
@@ -3764,7 +4143,6 @@ fn clear_normalized_account(
         "copy_progress",
         "copy_star_rewards",
         "sea_difficulty",
-        "sea_progress",
         "tower_progress",
         "activity_progress",
         "tasks",
@@ -3784,12 +4162,10 @@ fn clear_normalized_account(
         "supply_heroes",
         "support_entry_heroes",
         "support_entries",
-        "fleet_ex_members",
         "fleet_members",
         "fleets",
-        "hero_equip_slots",
         "equipments",
-        "heroes",
+        "hero_runtime",
         "fashion_entries",
         "inventory",
         "characters",
@@ -3924,6 +4300,16 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../../migrations/0032_account_revision_foreign_key.sql"),
     include_str!("../../../migrations/0033_hero_fashioning.sql"),
     include_str!("../../../migrations/0034_fleet_tactic_metadata.sql"),
+    include_str!("../../../migrations/0035_ship_template_runtime.sql"),
+    include_str!("../../../migrations/0036_ship_template_import_meta.sql"),
+    include_str!("../../../migrations/0037_ship_template_fixed_money.sql"),
+    include_str!("../../../migrations/0038_merge_hero_slot_columns.sql"),
+    include_str!("../../../migrations/0039_backfill_hero_slot_columns.sql"),
+    include_str!("../../../migrations/0040_drop_merged_hero_slot_tables.sql"),
+    include_str!("../../../migrations/0041_drop_hero_skill_slot_columns.sql"),
+    include_str!("../../../migrations/0042_merge_heroes_into_hero_runtime.sql"),
+    include_str!("../../../migrations/0043_merge_fleet_member_tables.sql"),
+    include_str!("../../../migrations/0044_merge_legacy_sea_progress.sql"),
 ];
 
 fn run_migrations(connection: &Connection) -> Result<(), StorageError> {
@@ -3958,4 +4344,23 @@ fn is_valid_profile_id(profile_id: &str) -> bool {
 
 fn timestamp() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::AutoSi, true)
+}
+
+fn json_i64(value: Option<&Value>) -> Option<i64> {
+    value.and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+}
+
+fn ship_template_hash(bytes: &[u8]) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3_u64);
+    }
+    format!("{hash:016x}")
+}
+
+fn json_field_i64(value: &Value, keys: &[&str]) -> i64 {
+    keys.iter()
+        .find_map(|key| json_i64(value.get(*key)))
+        .unwrap_or_default()
 }

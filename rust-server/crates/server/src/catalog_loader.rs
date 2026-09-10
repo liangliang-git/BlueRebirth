@@ -3,10 +3,33 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use super::*;
+use crate::catalog_db;
 
 fn read_config_rows(path: &Path) -> Vec<(i32, Value)> {
-    // Server catalogs are JSON-owned. The `.db` suffix at call sites is retained
-    // only as a legacy config key name; no SQLite/client file is opened.
+    let config_name = path.file_stem().and_then(|value| value.to_str());
+    let config_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let database_path = catalog_db::catalog_db_path(config_dir);
+    if database_path.is_file() {
+        let Some(config_name) = config_name else {
+            return Vec::new();
+        };
+        return match catalog_db::load_config_rows(&database_path, config_name) {
+            Ok(rows) => rows,
+            Err(error) => {
+                tracing::error!(
+                    path = %database_path.display(),
+                    config = config_name,
+                    %error,
+                    "cannot load server catalog table"
+                );
+                Vec::new()
+            }
+        };
+    }
+
+    // Development fallback for a source checkout before server_config.db is built.
+    // Runtime validates server_config.db before opening listeners, so deployed
+    // servers never use client/config JSON as a catalog source.
     let json_path = path.with_extension("json");
     let Ok(bytes) = std::fs::read(json_path) else {
         return Vec::new();
@@ -130,6 +153,23 @@ fn config_i32_pairs(value: &Value, key: &str) -> Vec<(i32, i32)> {
         .collect()
 }
 
+fn config_i64_pairs(value: &Value, key: &str) -> Vec<(i32, i64)> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let values = item.as_array()?;
+            Some((
+                i32::try_from(values.first()?.as_i64()?).ok()?,
+                values.get(1)?.as_i64()?,
+            ))
+        })
+        .filter(|(attr_id, _)| *attr_id > 0)
+        .collect()
+}
+
 fn config_i32_nested_array(value: &Value, key: &str) -> Vec<Vec<i32>> {
     value
         .get(key)
@@ -205,9 +245,7 @@ pub(super) fn config_dir(catalog_path: &Path) -> PathBuf {
         return catalog_path.to_path_buf();
     };
     let prepared = parent.join("server-config");
-    if prepared.join("manifest.json").is_file()
-        && prepared.join("config_chapter.json").is_file()
-        && prepared.join("config_shop.json").is_file()
+    if prepared.join("manifest.json").is_file() && catalog_db::catalog_db_path(&prepared).is_file()
     {
         prepared
     } else {
@@ -219,15 +257,26 @@ pub(super) fn load_chapter_catalog(catalog_path: Option<&PathBuf>) -> ChapterCat
     let Some(catalog_path) = catalog_path else {
         return ChapterCatalog::fallback();
     };
-    let rows = read_config_rows(&config_dir(catalog_path).join("config_chapter.db"));
+    let dir = config_dir(catalog_path);
+    let rows = read_config_rows(&dir.join("config_chapter.db"));
+    // The response ChapterId must identify a row in client config_chapter.
+    // Parameter 203 (30001) is the related tower-definition id, not the
+    // ChapterId accepted by TowerThemePage. The class_type=24 row carries the
+    // client-facing chapter id and its tower copy list.
+    let tower_first_chapter = rows
+        .iter()
+        .find_map(|(id, value)| {
+            (json_i32(&value, "class_type") == Some(24) && *id > 0).then_some(*id)
+        })
+        .unwrap_or(30_001);
     if rows.is_empty() {
-        ChapterCatalog::fallback().with_mini_game_rows(read_config_rows(
-            &config_dir(catalog_path).join("config_minigame_copy.db"),
-        ))
+        ChapterCatalog::fallback()
+            .with_mini_game_rows(read_config_rows(&dir.join("config_minigame_copy.db")))
+            .with_tower_chapter_id(tower_first_chapter)
     } else {
-        ChapterCatalog::from_rows(rows).with_mini_game_rows(read_config_rows(
-            &config_dir(catalog_path).join("config_minigame_copy.db"),
-        ))
+        ChapterCatalog::from_rows(rows)
+            .with_mini_game_rows(read_config_rows(&dir.join("config_minigame_copy.db")))
+            .with_tower_chapter_id(tower_first_chapter)
     }
 }
 
@@ -346,6 +395,8 @@ pub(super) fn load_equip_catalog(catalog_path: Option<&PathBuf>) -> EquipCatalog
         })
         .collect::<std::collections::BTreeMap<_, _>>();
     let mut skills_by_template = std::collections::BTreeMap::new();
+    let mut prop_by_template = std::collections::BTreeMap::new();
+    let mut enhance_prop_by_template = std::collections::BTreeMap::new();
     let mut quality_by_template = std::collections::BTreeMap::new();
     let mut type_by_template = std::collections::BTreeMap::new();
     let mut enhance_max_by_template = std::collections::BTreeMap::new();
@@ -366,6 +417,8 @@ pub(super) fn load_equip_catalog(catalog_path: Option<&PathBuf>) -> EquipCatalog
             .or_else(|| json_i32(&value, "star_max"))
             .unwrap_or_default();
         quality_by_template.insert(template_id, quality);
+        prop_by_template.insert(template_id, config_i64_pairs(&value, "equip_prop"));
+        enhance_prop_by_template.insert(template_id, config_i64_pairs(&value, "enhance_prop"));
         type_by_template.insert(template_id, equip_type);
         enhance_max_by_template.insert(template_id, enhance_max);
         star_max_by_template.insert(template_id, star_max);
@@ -542,6 +595,8 @@ pub(super) fn load_equip_catalog(catalog_path: Option<&PathBuf>) -> EquipCatalog
         })
         .collect();
     EquipCatalog {
+        prop_by_template,
+        enhance_prop_by_template,
         skills_by_template,
         quality_by_template,
         type_by_template,
@@ -636,7 +691,57 @@ pub(super) fn load_ship_stat_catalog(catalog_path: Option<&PathBuf>) -> ShipStat
     let Some(catalog_path) = catalog_path else {
         return ShipStatCatalog::default();
     };
-    let by_template = read_config_rows(&config_dir(catalog_path).join("config_ship_main.db"))
+    load_ship_stat_catalog_from_rows(read_config_rows(
+        &config_dir(catalog_path).join("config_ship_main.db"),
+    ))
+}
+
+pub(super) fn load_ship_stat_catalog_from_store(
+    store: &blueoath_storage::ProfileStore,
+) -> ShipStatCatalog {
+    let by_template = store
+        .load_ship_template_stats()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|stats| {
+            (
+                stats.template_id,
+                ShipStat {
+                    fixed_money: stats.fixed_money.max(0),
+                    hp: stats.hp,
+                    hp_levelup: stats.hp_levelup,
+                    attack: stats.attack,
+                    attack_levelup: stats.attack_levelup,
+                    defense: stats.defense,
+                    defense_levelup: stats.defense_levelup,
+                    torpedo_attack: stats.torpedo_attack,
+                    torpedo_attack_levelup: stats.torpedo_attack_levelup,
+                    torpedo_defense: stats.torpedo_defense,
+                    torpedo_defense_levelup: stats.torpedo_defense_levelup,
+                    to_air_attack: stats.to_air_attack,
+                    to_air_attack_levelup: stats.to_air_attack_levelup,
+                    to_torpedo_attack: stats.to_torpedo_attack,
+                    to_torpedo_attack_levelup: stats.to_torpedo_attack_levelup,
+                    ship_bomb_attack: stats.ship_bomb_attack,
+                    ship_bomb_attack_levelup: stats.ship_bomb_attack_levelup,
+                    ship_torpedo_attack: stats.ship_torpedo_attack,
+                    ship_torpedo_attack_levelup: stats.ship_torpedo_attack_levelup,
+                    ship_air_control: stats.ship_air_control,
+                    ship_air_control_levelup: stats.ship_air_control_levelup,
+                    carry_plane_count: stats.carry_plane_count,
+                    hit: stats.hit,
+                    dodge: stats.dodge,
+                    crit: stats.crit,
+                    anti_crit: stats.anti_crit,
+                },
+            )
+        })
+        .collect();
+    ShipStatCatalog { by_template }
+}
+
+fn load_ship_stat_catalog_from_rows(rows: Vec<(i32, Value)>) -> ShipStatCatalog {
+    let by_template = rows
         .into_iter()
         .filter_map(|(template_id, value)| {
             (template_id > 0).then_some((
@@ -655,12 +760,21 @@ pub(super) fn load_ship_stat_catalog(catalog_path: Option<&PathBuf>) -> ShipStat
                     torpedo_defense: json_i64(&value, "torpedo_defense").unwrap_or_default(),
                     torpedo_defense_levelup: json_i64(&value, "torpedo_defense_levelup")
                         .unwrap_or_default(),
+                    to_air_attack: json_i64(&value, "to_air_attack").unwrap_or_default(),
+                    to_air_attack_levelup: json_i64(&value, "to_air_attack_levelup")
+                        .unwrap_or_default(),
+                    to_torpedo_attack: json_i64(&value, "to_torpedo_attack").unwrap_or_default(),
+                    to_torpedo_attack_levelup: json_i64(&value, "to_torpedo_attack_levelup")
+                        .unwrap_or_default(),
                     ship_bomb_attack: json_i64(&value, "ship_bomb_attack").unwrap_or_default(),
                     ship_bomb_attack_levelup: json_i64(&value, "ship_bomb_attack_levelup")
                         .unwrap_or_default(),
                     ship_torpedo_attack: json_i64(&value, "ship_torpedo_attack")
                         .unwrap_or_default(),
                     ship_torpedo_attack_levelup: json_i64(&value, "ship_torpedo_attack_levelup")
+                        .unwrap_or_default(),
+                    ship_air_control: json_i64(&value, "ship_air_control").unwrap_or_default(),
+                    ship_air_control_levelup: json_i64(&value, "ship_air_control_levelup")
                         .unwrap_or_default(),
                     carry_plane_count: json_i64(&value, "carry_plane_count").unwrap_or_default(),
                     hit: json_i64(&value, "hit").unwrap_or_default(),
@@ -681,14 +795,13 @@ pub(super) fn scaled_ship_stat(value: i64, multiplier: f64) -> i64 {
         .clamp(0.0, i64::MAX as f64) as i64
 }
 
-#[cfg(test)]
 pub(super) fn ship_attributes_for_template(
     template_id: i32,
     level: i64,
     catalog: Option<&ShipStatCatalog>,
     multiplier: f64,
 ) -> std::collections::BTreeMap<i32, i64> {
-    ship_attributes_for_hero(None, template_id, level, catalog, multiplier)
+    ship_attributes_with_intensify(template_id, level, catalog, multiplier, |_| 0)
 }
 
 pub(super) fn ship_attributes_for_hero(
@@ -697,6 +810,171 @@ pub(super) fn ship_attributes_for_hero(
     level: i64,
     catalog: Option<&ShipStatCatalog>,
     multiplier: f64,
+) -> std::collections::BTreeMap<i32, i64> {
+    ship_attributes_with_intensify(template_id, level, catalog, multiplier, |attr_id| {
+        hero.and_then(|hero| hero_array(hero, "intensify"))
+            .into_iter()
+            .flatten()
+            .find(|attr| json_i32(attr, "attrType") == Some(attr_id))
+            .and_then(|attr| {
+                json_i64(attr, "intensifyLvl").or_else(|| json_i64(attr, "intensifyLevel"))
+            })
+            .unwrap_or_default()
+            .max(0)
+    })
+}
+
+pub(super) fn ship_attributes_for_typed_hero(
+    hero: &blueoath_domain::HeroState,
+    progress: &std::collections::BTreeMap<String, u64>,
+    equipments: &std::collections::BTreeMap<
+        blueoath_domain::EquipId,
+        blueoath_domain::EquipmentState,
+    >,
+    catalog: Option<&ShipStatCatalog>,
+    equip_catalog: Option<&EquipCatalog>,
+    remould_catalog: Option<&ShipRemouldCatalog>,
+    multiplier: f64,
+) -> std::collections::BTreeMap<i32, i64> {
+    let prefix = format!("compat:hero:{}:intensify:", hero.id.get());
+    let mut attributes = ship_attributes_with_intensify(
+        i32::try_from(hero.template_id.get()).unwrap_or_default(),
+        i64::try_from(hero.level).unwrap_or(i64::MAX),
+        catalog,
+        multiplier,
+        |attr_id| {
+            progress
+                .get(&format!("{prefix}{attr_id}:level"))
+                .and_then(|value| i64::try_from(*value).ok())
+                .unwrap_or_default()
+                .max(0)
+        },
+    );
+    add_typed_equipment_attributes(&mut attributes, hero, equipments, equip_catalog, multiplier);
+    add_typed_remould_attributes(&mut attributes, hero, progress, remould_catalog, multiplier);
+    attributes
+}
+
+fn add_typed_equipment_attributes(
+    attributes: &mut std::collections::BTreeMap<i32, i64>,
+    hero: &blueoath_domain::HeroState,
+    equipments: &std::collections::BTreeMap<
+        blueoath_domain::EquipId,
+        blueoath_domain::EquipmentState,
+    >,
+    equip_catalog: Option<&EquipCatalog>,
+    multiplier: f64,
+) {
+    let Some(equip_catalog) = equip_catalog else {
+        return;
+    };
+    for equip_id in hero.equip_slots.iter().flatten() {
+        let Some(equipment) = equipments.get(equip_id) else {
+            continue;
+        };
+        let template_id = i32::try_from(equipment.template_id.get()).unwrap_or_default();
+        let base_props = equip_catalog
+            .prop_by_template
+            .get(&template_id)
+            .into_iter()
+            .flatten();
+        let enhance_props = equip_catalog
+            .enhance_prop_by_template
+            .get(&template_id)
+            .into_iter()
+            .flatten()
+            .map(|(attr_id, value)| (*attr_id, *value))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for (attr_id, base_value) in base_props {
+            let enhance_value = enhance_props.get(attr_id).copied().unwrap_or_default();
+            let raw_value = base_value
+                .saturating_add(enhance_value.saturating_mul(i64::from(equipment.enhance_level)));
+            if let Some(current) = attributes.get_mut(attr_id) {
+                *current = current.saturating_add(scaled_ship_stat(raw_value, multiplier));
+            }
+        }
+    }
+}
+
+fn add_typed_remould_attributes(
+    attributes: &mut std::collections::BTreeMap<i32, i64>,
+    hero: &blueoath_domain::HeroState,
+    progress: &std::collections::BTreeMap<String, u64>,
+    remould_catalog: Option<&ShipRemouldCatalog>,
+    multiplier: f64,
+) {
+    let Some(remould_catalog) = remould_catalog else {
+        return;
+    };
+    let prefix = format!("compat:hero:{}:remould:effect:", hero.id.get());
+    for (effect_id, effect) in &remould_catalog.effects {
+        if progress
+            .get(&format!("{}{}", prefix, effect_id))
+            .copied()
+            .unwrap_or_default()
+            == 0
+        {
+            continue;
+        }
+        for values in &effect.remould_effect_type {
+            if values.first() != Some(&2) || values.len() < 3 {
+                continue;
+            }
+            let attr_id = values[1];
+            let value = values[2];
+            if let Some(current) = attributes.get_mut(&attr_id) {
+                *current = current.saturating_add(scaled_ship_stat(i64::from(value), multiplier));
+            }
+        }
+    }
+}
+
+pub(super) fn ship_max_hp_for_typed_hero(
+    hero: &blueoath_domain::HeroState,
+    progress: &std::collections::BTreeMap<String, u64>,
+    equipments: &std::collections::BTreeMap<
+        blueoath_domain::EquipId,
+        blueoath_domain::EquipmentState,
+    >,
+    catalog: Option<&ShipStatCatalog>,
+    equip_catalog: Option<&EquipCatalog>,
+    remould_catalog: Option<&ShipRemouldCatalog>,
+    multiplier: f64,
+) -> u64 {
+    ship_attributes_for_typed_hero(
+        hero,
+        progress,
+        equipments,
+        catalog,
+        equip_catalog,
+        remould_catalog,
+        multiplier,
+    )
+    .get(&1)
+    .copied()
+    .unwrap_or(1)
+    .max(1) as u64
+}
+
+pub(super) fn ship_initial_hp_for_template(template_id: u64) -> u64 {
+    ship_attributes_for_template(
+        i32::try_from(template_id).unwrap_or_default(),
+        1,
+        SHIP_STAT_CATALOG.get(),
+        SHIP_STAT_MULTIPLIER.get().copied().unwrap_or(1.0),
+    )
+    .get(&1)
+    .copied()
+    .unwrap_or(1)
+    .max(1) as u64
+}
+
+fn ship_attributes_with_intensify(
+    template_id: i32,
+    level: i64,
+    catalog: Option<&ShipStatCatalog>,
+    multiplier: f64,
+    intensify: impl Fn(i32) -> i64,
 ) -> std::collections::BTreeMap<i32, i64> {
     let stats = catalog
         .and_then(|catalog| catalog.by_template.get(&template_id))
@@ -710,19 +988,10 @@ pub(super) fn ship_attributes_for_hero(
             ..ShipStat::default()
         });
     let level_delta = level.saturating_sub(1).max(0);
-    let intensify = |attr_id: i32| {
-        hero.and_then(|hero| hero_array(hero, "intensify"))
-            .into_iter()
-            .flatten()
-            .find(|attr| json_i32(attr, "attrType") == Some(attr_id))
-            .and_then(|attr| {
-                json_i64(attr, "intensifyLvl").or_else(|| json_i64(attr, "intensifyLevel"))
-            })
-            .unwrap_or_default()
-            .max(0)
-    };
     let value = |attr_id: i32, base: i64, growth: i64| {
-        let leveled = base.saturating_add(growth.saturating_mul(level_delta));
+        // Client stores level-up growth on a 100-level scale. Keep integer
+        // truncation so template 20530211 at level 41 yields 4435 HP.
+        let leveled = base.saturating_add(growth.saturating_mul(level_delta) / 100);
         scaled_ship_stat(leveled.saturating_add(intensify(attr_id)), multiplier)
     };
     let scout_num = if stats.carry_plane_count > 0 {
@@ -744,6 +1013,14 @@ pub(super) fn ship_attributes_for_hero(
             value(11, stats.torpedo_defense, stats.torpedo_defense_levelup),
         ),
         (
+            12,
+            value(12, stats.to_air_attack, stats.to_air_attack_levelup),
+        ),
+        (
+            13,
+            value(13, stats.to_torpedo_attack, stats.to_torpedo_attack_levelup),
+        ),
+        (
             14,
             value(14, stats.ship_bomb_attack, stats.ship_bomb_attack_levelup),
         ),
@@ -754,6 +1031,10 @@ pub(super) fn ship_attributes_for_hero(
                 stats.ship_torpedo_attack,
                 stats.ship_torpedo_attack_levelup,
             ),
+        ),
+        (
+            16,
+            value(16, stats.ship_air_control, stats.ship_air_control_levelup),
         ),
         (
             17,
@@ -774,6 +1055,151 @@ pub(super) fn ship_attributes_for_hero(
     ]
     .into_iter()
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ship_hp_uses_level_growth() {
+        let mut catalog = ShipStatCatalog::default();
+        catalog.by_template.insert(
+            7,
+            ShipStat {
+                hp: 100,
+                hp_levelup: 2_000,
+                attack: 10,
+                ..ShipStat::default()
+            },
+        );
+
+        assert_eq!(
+            ship_attributes_for_template(7, 1, Some(&catalog), 1.0)[&1],
+            100
+        );
+        assert_eq!(
+            ship_attributes_for_template(7, 3, Some(&catalog), 1.0)[&1],
+            140
+        );
+    }
+
+    #[test]
+    fn typed_intensify_is_included_in_combat_attributes_and_max_hp() {
+        let mut catalog = ShipStatCatalog::default();
+        catalog.by_template.insert(
+            7,
+            ShipStat {
+                hp: 100,
+                hp_levelup: 20,
+                attack: 10,
+                ..ShipStat::default()
+            },
+        );
+        let hero = blueoath_domain::HeroState {
+            id: blueoath_domain::HeroId::new(1).unwrap(),
+            template_id: blueoath_domain::TemplateId::new(7).unwrap(),
+            fashioning: 0,
+            name: String::new(),
+            change_name_time: 0,
+            level: 3,
+            exp: 0,
+            mood: 100,
+            affection: 0,
+            hp: 100,
+            locked: false,
+            created_utc: String::new(),
+            equip_slots: vec![None; 6],
+            pskills: std::collections::BTreeMap::new(),
+        };
+        let mut progress = std::collections::BTreeMap::new();
+        progress.insert("compat:hero:1:intensify:1:level".to_owned(), 5);
+        progress.insert("compat:hero:1:intensify:8:level".to_owned(), 3);
+
+        let equipments = std::collections::BTreeMap::new();
+        let attrs = ship_attributes_for_typed_hero(
+            &hero,
+            &progress,
+            &equipments,
+            Some(&catalog),
+            None,
+            None,
+            1.0,
+        );
+        assert_eq!(attrs[&1], 105);
+        assert_eq!(attrs[&8], 13);
+        assert_eq!(
+            ship_max_hp_for_typed_hero(
+                &hero,
+                &progress,
+                &equipments,
+                Some(&catalog),
+                None,
+                None,
+                1.0,
+            ),
+            105
+        );
+    }
+
+    #[test]
+    fn equipped_stats_include_base_and_enhance_values() {
+        let mut ship_catalog = ShipStatCatalog::default();
+        ship_catalog.by_template.insert(
+            7,
+            ShipStat {
+                hp: 100,
+                attack: 10,
+                ..ShipStat::default()
+            },
+        );
+        let hero_id = blueoath_domain::HeroId::new(1).unwrap();
+        let equip_id = blueoath_domain::EquipId::new(1).unwrap();
+        let hero = blueoath_domain::HeroState {
+            id: hero_id,
+            template_id: blueoath_domain::TemplateId::new(7).unwrap(),
+            fashioning: 0,
+            name: String::new(),
+            change_name_time: 0,
+            level: 1,
+            exp: 0,
+            mood: 100,
+            affection: 0,
+            hp: 100,
+            locked: false,
+            created_utc: String::new(),
+            equip_slots: vec![Some(equip_id)],
+            pskills: std::collections::BTreeMap::new(),
+        };
+        let equipment = blueoath_domain::EquipmentState {
+            id: equip_id,
+            template_id: blueoath_domain::TemplateId::new(99).unwrap(),
+            enhance_level: 2,
+            star: 0,
+            enhance_exp: 0,
+            hero_id: Some(hero_id),
+        };
+        let equipments = [(equip_id, equipment)].into_iter().collect();
+        let mut equip_catalog = EquipCatalog::default();
+        equip_catalog
+            .prop_by_template
+            .insert(99, vec![(1, 10), (8, 5)]);
+        equip_catalog
+            .enhance_prop_by_template
+            .insert(99, vec![(1, 7), (8, 3)]);
+
+        let attrs = ship_attributes_for_typed_hero(
+            &hero,
+            &std::collections::BTreeMap::new(),
+            &equipments,
+            Some(&ship_catalog),
+            Some(&equip_catalog),
+            None,
+            1.0,
+        );
+        assert_eq!(attrs[&1], 124);
+        assert_eq!(attrs[&8], 21);
+    }
 }
 
 pub(super) fn load_talent_catalog(catalog_path: Option<&PathBuf>) -> TalentCatalog {
@@ -1071,6 +1497,45 @@ pub(super) fn load_server_shop_goods(catalog: &mut ShopCatalog, data_root: &Path
     // client shelf IDs when server inventory is available.
     catalog.goods_by_shop.clear();
     catalog.goods_by_id.clear();
+    let database_path = catalog_db::catalog_db_path(data_root.parent().unwrap_or(data_root));
+    if database_path.is_file() {
+        match catalog_db::load_server_shop_goods(&database_path) {
+            Ok(goods) => {
+                for good in goods {
+                    catalog
+                        .goods_by_shop
+                        .entry(good.shop_id)
+                        .or_default()
+                        .push(good.good_id);
+                    catalog.goods_by_id.insert(
+                        good.good_id,
+                        ShopGood {
+                            shop_id: good.shop_id,
+                            goods_type: good.goods_type,
+                            item_id: good.item_id,
+                            num: good.num,
+                            costs: good
+                                .costs
+                                .into_iter()
+                                .map(|cost| ShopCost {
+                                    goods_type: cost.goods_type,
+                                    item_id: cost.item_id,
+                                    amount: cost.amount,
+                                })
+                                .collect(),
+                        },
+                    );
+                }
+            }
+            Err(error) => tracing::error!(
+                path = %database_path.display(),
+                %error,
+                "cannot load server shop catalog"
+            ),
+        }
+        normalize_server_shop_goods(catalog);
+        return;
+    }
     if load_server_shop_pages(catalog, &data_root.join("shops")) {
         normalize_server_shop_goods(catalog);
         return;
@@ -1517,6 +1982,30 @@ pub(super) fn load_gameplay_catalog(catalog_path: Option<&PathBuf>) -> GameplayC
 }
 
 pub(super) fn load_server_mail_templates(data_root: &Path) -> Vec<MailTemplate> {
+    let database_path = catalog_db::catalog_db_path(data_root.parent().unwrap_or(data_root));
+    if database_path.is_file() {
+        return match catalog_db::load_server_mail_templates(&database_path) {
+            Ok(rows) => rows
+                .into_iter()
+                .map(|mail| MailTemplate {
+                    mid: mail.mid,
+                    goods_type: mail.goods_type,
+                    config_id: mail.config_id,
+                    num: mail.num.max(1),
+                    subject: mail.subject,
+                    content: mail.content,
+                })
+                .collect(),
+            Err(error) => {
+                tracing::error!(
+                    path = %database_path.display(),
+                    %error,
+                    "cannot load server mail catalog"
+                );
+                Vec::new()
+            }
+        };
+    }
     let path = data_root.join("gm-mails.json");
     let Ok(bytes) = std::fs::read(path) else {
         return Vec::new();
@@ -1559,7 +2048,9 @@ pub(super) fn load_hero_level_catalog(catalog_path: Option<&PathBuf>) -> HeroLev
             catalog.exp_per_item.insert(item_id, exp.max(0));
         }
     }
-    for (level, value) in read_config_rows(&dir.join("config_ship_levelup.db")) {
+    for (row_level, value) in read_config_rows(&dir.join("config_ship_levelup.db")) {
+        let level = json_i32(&value, "level").unwrap_or(row_level);
+        catalog.max_level = catalog.max_level.max(level.max(0));
         if let Some(exp) = json_i32(&value, "exp") {
             catalog.exp_needed.insert(level, exp.max(0));
         }
@@ -1820,6 +2311,7 @@ pub(super) fn load_commander_level_catalog(
         read_config_rows(&config_dir(catalog_path).join("config_player_levelup.db"))
     {
         let level = json_i32(&value, "level").unwrap_or(level);
+        catalog.max_level = catalog.max_level.max(level.max(0));
         let exp = json_i32(&value, "exp").unwrap_or_default();
         if level > 0 && exp > 0 {
             catalog.exp_needed.insert(level, exp);
@@ -2366,36 +2858,47 @@ pub(super) fn load_build_ship_catalog(catalog_path: Option<&PathBuf>) -> BuildSh
     }
     for (drop_id, value) in read_config_rows(&dir.join("config_drop_item.db")) {
         let mut entries = Vec::new();
-        let mut rows = Vec::new();
-        for key in ["drop", "drop_alone"] {
-            if let Some(values) = value.get(key).and_then(Value::as_array) {
-                rows.extend(values.iter());
-            }
-        }
-        for row in rows {
-            let Some(a) = row.as_array() else {
-                continue;
-            };
-            if a.len() < 5 {
-                continue;
-            }
-            let vals = a
-                .iter()
-                .take(5)
-                .filter_map(Value::as_i64)
-                .collect::<Vec<_>>();
-            if vals.len() == 5 {
-                entries.push((
-                    vals[0] as i32,
-                    vals[1] as i32,
-                    vals[2] as i32,
-                    vals[3] as i32,
-                    vals[4] as i32,
-                ));
-            }
-        }
+        let parse_entries = |key: &str| {
+            value
+                .get(key)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|row| {
+                    let a = row.as_array()?;
+                    if a.len() < 5 {
+                        return None;
+                    }
+                    let vals = a
+                        .iter()
+                        .take(5)
+                        .filter_map(Value::as_i64)
+                        .collect::<Vec<_>>();
+                    (vals.len() == 5).then_some((
+                        vals[0] as i32,
+                        vals[1] as i32,
+                        vals[2] as i32,
+                        vals[3] as i32,
+                        vals[4] as i32,
+                    ))
+                })
+                .collect::<Vec<_>>()
+        };
+        let random_entries = parse_entries("drop");
+        let guaranteed_entries = parse_entries("drop_alone");
+        entries.extend(random_entries.iter().copied());
+        entries.extend(guaranteed_entries.iter().copied());
         if !entries.is_empty() {
             catalog.pools.insert(drop_id, entries);
+            catalog.treasure_drop_pools.insert(
+                drop_id,
+                TreasureDropPool {
+                    random_entries,
+                    guaranteed_entries,
+                    random_count: json_i32(&value, "drop_count").unwrap_or_default(),
+                    guaranteed_count: json_i32(&value, "drop_alone_count").unwrap_or_default(),
+                },
+            );
         }
     }
     for (item_id, value) in read_config_rows(&dir.join("config_item_info.db")) {
@@ -2552,6 +3055,130 @@ pub(super) fn draw_build_drop_reward_with_roll(
     None
 }
 
+fn weighted_treasure_entry(entries: &[BuildDropEntry], roll: u64) -> Option<BuildDropEntry> {
+    let total: i64 = entries.iter().map(|entry| i64::from(entry.4.max(0))).sum();
+    if total <= 0 {
+        return None;
+    }
+    let mut offset = (roll % total as u64) as i64;
+    let mut picked = *entries.last()?;
+    for entry in entries {
+        offset -= i64::from(entry.4.max(0));
+        if offset < 0 {
+            picked = *entry;
+            break;
+        }
+    }
+    Some(picked)
+}
+
+pub(super) fn draw_treasure_random_leaf(
+    catalog: &BuildShipCatalog,
+    drop_id: i32,
+    roll: u64,
+    depth: u8,
+) -> Option<(i32, i32, i32)> {
+    if depth > 8 {
+        return None;
+    }
+    let pool = catalog.treasure_drop_pools.get(&drop_id)?;
+    // Nested pools normally use `drop`. Falling back to `drop_alone` keeps
+    // malformed/legacy nested boxes usable without changing top-level semantics.
+    let entries = if !pool.random_entries.is_empty() {
+        &pool.random_entries
+    } else if !pool.guaranteed_entries.is_empty() {
+        &pool.guaranteed_entries
+    } else {
+        return None;
+    };
+    let picked = weighted_treasure_entry(entries, roll)?;
+    if picked.0 == 4 {
+        return draw_treasure_random_leaf(
+            catalog,
+            picked.1,
+            mix_build_draw_roll(roll ^ u64::try_from(picked.1).unwrap_or_default()),
+            depth + 1,
+        );
+    }
+    Some((picked.0, picked.1, picked.2.max(1)))
+}
+
+fn append_treasure_guaranteed(
+    catalog: &BuildShipCatalog,
+    drop_id: i32,
+    roll: u64,
+    depth: u8,
+    rewards: &mut Vec<(i32, i32, i32)>,
+) -> bool {
+    if depth > 8 {
+        return false;
+    }
+    let Some(pool) = catalog.treasure_drop_pools.get(&drop_id) else {
+        return false;
+    };
+    if pool.guaranteed_entries.is_empty() {
+        return true;
+    }
+    let repeat = pool.guaranteed_count.max(1);
+    for repeat_index in 0..repeat {
+        for (entry_index, entry) in pool.guaranteed_entries.iter().enumerate() {
+            if entry.0 == 4 {
+                let nested_has_guaranteed = catalog
+                    .treasure_drop_pools
+                    .get(&entry.1)
+                    .is_some_and(|nested| !nested.guaranteed_entries.is_empty());
+                if nested_has_guaranteed {
+                    if !append_treasure_guaranteed(
+                        catalog,
+                        entry.1,
+                        mix_build_draw_roll(roll ^ u64::try_from(repeat_index).unwrap_or_default()),
+                        depth + 1,
+                        rewards,
+                    ) {
+                        return false;
+                    }
+                } else if let Some(reward) = draw_treasure_random_leaf(
+                    catalog,
+                    entry.1,
+                    mix_build_draw_roll(roll ^ u64::try_from(entry_index).unwrap_or_default()),
+                    depth + 1,
+                ) {
+                    rewards.push(reward);
+                } else {
+                    return false;
+                }
+            } else {
+                rewards.push((entry.0, entry.1, entry.2.max(1)));
+            }
+        }
+    }
+    true
+}
+
+/// Open normal treasure according to client config semantics:
+/// guaranteed `drop_alone` rewards plus `drop_count` random `drop` rolls.
+pub(super) fn draw_treasure_rewards_with_roll(
+    catalog: &BuildShipCatalog,
+    drop_id: i32,
+    roll: u64,
+) -> Option<Vec<(i32, i32, i32)>> {
+    let pool = catalog.treasure_drop_pools.get(&drop_id)?;
+    let mut rewards = Vec::new();
+    if !append_treasure_guaranteed(catalog, drop_id, roll, 0, &mut rewards) {
+        return None;
+    }
+    let random_count = if pool.random_entries.is_empty() {
+        0
+    } else {
+        pool.random_count.max(1)
+    };
+    for index in 0..random_count {
+        let draw_roll = mix_build_draw_roll(roll ^ u64::try_from(index).unwrap_or_default());
+        rewards.push(draw_treasure_random_leaf(catalog, drop_id, draw_roll, 0)?);
+    }
+    (!rewards.is_empty()).then_some(rewards)
+}
+
 pub(super) fn draw_build_ship_reward(pool_id: i32) -> Option<(i32, i32, i32)> {
     let catalog = BUILD_SHIP_CATALOG.get()?;
     // A ten-pull can execute within one millisecond. Blend a process-wide nonce
@@ -2635,33 +3262,19 @@ pub(super) fn load_battle_catalog(catalog_path: Option<&PathBuf>) -> BattleCatal
     };
     let dir = config_dir(catalog_path);
     let mut catalog = BattleCatalog::default();
-    // This file is server-owned balance data, independent of client assets.
-    let quantities_path = dir
-        .parent()
-        .unwrap_or(&dir)
-        .join("battle-drop-quantities.json");
-    let bundled_quantities = include_str!("../../../catalog/battle-drop-quantities.json");
-    let quantities = match std::fs::read_to_string(&quantities_path) {
-        Ok(value) => value,
-        Err(error) => {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!(
-                    path = %quantities_path.display(),
-                    %error,
-                    "cannot read drop quantities; using bundled values"
-                );
-            }
-            bundled_quantities.to_owned()
-        }
+    let database_path = catalog_db::catalog_db_path(&dir);
+    catalog.drop_quantities = if database_path.is_file() {
+        catalog_db::load_drop_quantities(&database_path).unwrap_or_else(|error| {
+            tracing::error!(
+                path = %database_path.display(),
+                %error,
+                "cannot load battle drop quantities"
+            );
+            BattleDropQuantities::default()
+        })
+    } else {
+        BattleDropQuantities::default()
     };
-    catalog.drop_quantities = serde_json::from_str(&quantities).unwrap_or_else(|error| {
-        tracing::warn!(
-            path = %quantities_path.display(),
-            %error,
-            "invalid drop quantities; using bundled values"
-        );
-        serde_json::from_str(bundled_quantities).unwrap_or_default()
-    });
     let copy_types = read_config_rows(&dir.join("config_chapter.db"))
         .into_iter()
         .flat_map(|(_, value)| {
@@ -2998,10 +3611,13 @@ pub(super) fn load_battle_catalog(catalog_path: Option<&PathBuf>) -> BattleCatal
         }
     }
     for (drop_id, value) in read_config_rows(&dir.join("config_drop_item.db")) {
-        let mut entries = Vec::new();
-        for key in ["drop", "drop_alone"] {
-            if let Some(rows) = value.get(key).and_then(Value::as_array) {
-                entries.extend(rows.iter().filter_map(|row| {
+        let parse_entries = |key: &str| {
+            value
+                .get(key)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|row| {
                     let row = row.as_array()?;
                     if row.len() < 5 {
                         return None;
@@ -3013,16 +3629,25 @@ pub(super) fn load_battle_catalog(catalog_path: Option<&PathBuf>) -> BattleCatal
                         i32::try_from(row[3].as_i64()?).ok()?,
                         i32::try_from(row[4].as_i64()?).ok()?,
                     ))
-                }));
-            }
-        }
-        if !entries.is_empty() {
-            catalog.drop_pools.insert(drop_id, entries);
+                })
+                .collect::<Vec<_>>()
+        };
+        let pool = BattleDropPool {
+            random_entries: parse_entries("drop"),
+            random_count: json_i32(&value, "drop_count").unwrap_or_default().max(0),
+            separate_entries: parse_entries("drop_alone"),
+            separate_count: json_i32(&value, "drop_alone_count")
+                .unwrap_or_default()
+                .max(0),
+        };
+        if !pool.random_entries.is_empty() || !pool.separate_entries.is_empty() {
+            catalog.drop_pools.insert(drop_id, pool);
         }
     }
-    // Battle copy display rows reference config_drop_info, whose item_info entries are the
-    // authoritative visible rewards. Keep config_drop_item pools above for nested pools used by
-    // those entries, then overlay direct drop-info IDs so mop-up can settle real rewards.
+    // Battle copy display rows reference config_drop_info. Keep explicit guaranteed rows as a
+    // complete reward set and draw configured count from other categories. Do not overlay these
+    // rows onto config_drop_item: IDs can collide with treasure pools, and tables have different
+    // namespaces/semantics.
     for (drop_id, value) in read_config_rows(&dir.join("config_drop_info.db")) {
         let Some(rows) = value.get("item_info").and_then(Value::as_array) else {
             continue;
@@ -3049,7 +3674,22 @@ pub(super) fn load_battle_catalog(catalog_path: Option<&PathBuf>) -> BattleCatal
             })
             .collect::<Vec<_>>();
         if !entries.is_empty() {
-            catalog.drop_pools.insert(drop_id, entries);
+            let mut pool = BattleCopyDropPool::default();
+            let drop_type = json_i32(&value, "type").unwrap_or_default();
+            let drop_rate = value
+                .get("drop_rate")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim();
+            if drop_type == 3 && matches!(drop_rate, "必ず" | "報酬") {
+                pool.first_clear_entries = entries;
+            } else if drop_type == 2 {
+                pool.guaranteed_entries = entries;
+            } else {
+                pool.random_entries = entries;
+                pool.random_count = json_i32(&value, "show_num").unwrap_or(1).max(1);
+            }
+            catalog.copy_drop_pools.insert(drop_id, pool);
         }
     }
     for (id, value) in read_config_rows(&dir.join("config_main_line_reward_arg.db")) {
@@ -3174,10 +3814,8 @@ mod validation_tests {
 
     #[test]
     fn config_dir_prefers_prepared_server_catalog_when_manifest_exists() {
-        let root = std::env::temp_dir().join(format!(
-            "blueoath-catalog-dir-test-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("blueoath-catalog-dir-test-{}", std::process::id()));
         let source = root.join("config");
         let prepared = root.join("server-config");
         std::fs::create_dir_all(&source).unwrap();
@@ -3185,6 +3823,7 @@ mod validation_tests {
         std::fs::write(prepared.join("manifest.json"), b"{}").unwrap();
         std::fs::write(prepared.join("config_chapter.json"), b"{}").unwrap();
         std::fs::write(prepared.join("config_shop.json"), b"{}").unwrap();
+        std::fs::write(root.join("server_config.db"), b"{}").unwrap();
 
         assert_eq!(config_dir(&source), prepared);
 
@@ -3193,8 +3832,8 @@ mod validation_tests {
 
     #[test]
     fn bundled_catalogs_pass_startup_reference_validation() {
-        let config_dir =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../catalog/config");
+        let config_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../catalog/server-config");
         assert!(
             config_dir.is_dir(),
             "missing bundled catalog: {}",
@@ -3202,6 +3841,7 @@ mod validation_tests {
         );
 
         let chapters = load_chapter_catalog(Some(&config_dir));
+        assert_eq!(chapters.tower_chapter_id, 100_001);
         let battle = load_battle_catalog(Some(&config_dir));
         let tasks = load_task_catalog(Some(&config_dir));
         let gameplay = load_gameplay_catalog(Some(&config_dir));
@@ -3217,5 +3857,47 @@ mod validation_tests {
         gameplay.validate_references().unwrap();
         build_ship.validate().unwrap();
         build_formula.validate().unwrap();
+
+        let weekly_supply = build_ship.treasure_drop_pools.get(&14_000).unwrap();
+        assert!(weekly_supply.random_entries.is_empty());
+        assert_eq!(weekly_supply.guaranteed_entries.len(), 2);
+
+        let daily_equipment = battle.copy_drop_pools.get(&20_0412).unwrap();
+        assert!(daily_equipment.first_clear_entries.is_empty());
+        assert!(daily_equipment.guaranteed_entries.is_empty());
+        assert_eq!(daily_equipment.random_entries.len(), 52);
+        assert_eq!(daily_equipment.random_count, 1);
+
+        let daily_box = battle.copy_drop_pools.get(&20_101).unwrap();
+        assert!(daily_box.first_clear_entries.is_empty());
+        assert!(daily_box.guaranteed_entries.is_empty());
+        assert_eq!(daily_box.random_entries.len(), 4);
+        assert_eq!(daily_box.random_count, 1);
+    }
+
+    #[test]
+    fn treasure_drop_preserves_all_guaranteed_rewards_and_random_count() {
+        let mut catalog = BuildShipCatalog::default();
+        catalog.treasure_drop_pools.insert(
+            14_000,
+            TreasureDropPool {
+                random_entries: vec![(1, 10_181, 1, 1, 10_000)],
+                guaranteed_entries: vec![(5, 5, 3_000, 3_000, 10_000), (1, 10_182, 1, 1, 10_000)],
+                random_count: 2,
+                guaranteed_count: 1,
+            },
+        );
+
+        let rewards = draw_treasure_rewards_with_roll(&catalog, 14_000, 123).unwrap();
+        assert_eq!(rewards.len(), 4);
+        assert!(rewards.contains(&(5, 5, 3_000)));
+        assert!(rewards.contains(&(1, 10_182, 1)));
+        assert_eq!(
+            rewards
+                .iter()
+                .filter(|reward| **reward == (1, 10_181, 1))
+                .count(),
+            2
+        );
     }
 }

@@ -1,8 +1,8 @@
 use blueoath_domain::{
     AccountRepository, AccountState, BattleSession, ChapterId, ChatBarrageState, ChatMessageState,
     CopyId, EquipId, EquipmentState, FleetId, FleetRecord, GuildApplicationState, GuildMemberState,
-    GuildState, HeroId, HeroState, NewAccountFactory, PresetFleetState, ProfileId, ProfileState,
-    TemplateId,
+    GuildState, HeroComputedStats, HeroId, HeroState, NewAccountFactory, PresetFleetState,
+    ProfileId, ProfileState, TemplateId,
 };
 use blueoath_storage::{LocalProfileState, LocalShip, ProfileStore, StorageError};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -324,7 +324,54 @@ fn migration_from_schema_v6_normalizes_local_runtime_and_character_fields() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 34);
+    assert_eq!(version, 44);
+    for table in [
+        "heroes",
+        "hero_equip_slots",
+        "hero_equipment",
+        "hero_skill",
+        "fleet_ex_members",
+        "sea_progress",
+    ] {
+        let table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_count, 0, "obsolete table remains: {table}");
+    }
+    for column in ["equip_slot_1", "equip_slot_6", "skill_levels_json"] {
+        let column_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('hero_runtime') WHERE name = ?1",
+                [column],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(column_count, 1, "missing hero_runtime column: {column}");
+    }
+    for column in [
+        "skill_slot_1",
+        "skill_slot_2",
+        "skill_slot_3",
+        "skill_slot_4",
+        "resonance_skill_slot_1",
+        "resonance_skill_slot_2",
+    ] {
+        let column_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('hero_runtime') WHERE name = ?1",
+                [column],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            column_count, 0,
+            "obsolete hero_runtime column remains: {column}"
+        );
+    }
     let accounts_table: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
@@ -494,6 +541,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
             affection: 4,
             hp: 80,
             locked: true,
+            created_utc: String::new(),
             equip_slots: vec![Some(equip_id)],
             pskills: [(41, 2)].into_iter().collect(),
         },
@@ -513,6 +561,7 @@ fn typed_repository_transaction_commits_domain_mutation() {
             affection: 0,
             hp: 80,
             locked: false,
+            created_utc: String::new(),
             equip_slots: Vec::new(),
             pskills: std::collections::BTreeMap::new(),
         },
@@ -964,5 +1013,75 @@ fn typed_loader_does_not_treat_profile_row_as_complete_account() {
         .load_typed_account(&ProfileId::new("profile-only").unwrap())
         .unwrap()
         .is_none());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn ship_template_import_and_hero_runtime_round_trip() {
+    let (store, root) = store();
+    let config_path = root.join("config_ship_main.json");
+    std::fs::write(
+        &config_path,
+        serde_json::json!({
+            "rows": [{
+                "id": 77,
+                "value": {
+                    "sm_id": 7701,
+                    "ship_info_id": 770,
+                    "hp": 100,
+                    "hp_levelup": 1200,
+                    "attack": 20
+                }
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    assert_eq!(
+        store.sync_ship_templates_from_json(&config_path).unwrap(),
+        1
+    );
+    assert_eq!(
+        store.sync_ship_templates_from_json(&config_path).unwrap(),
+        0
+    );
+    let templates = store.load_ship_template_rows().unwrap();
+    assert_eq!(templates.len(), 1);
+    assert_eq!(templates[0].0, 77);
+    assert_eq!(templates[0].1["hp_levelup"], 1200);
+
+    let profile_id = ProfileId::new("runtime-schema").unwrap();
+    let mut account = NewAccountFactory::create(profile_id.clone(), "Runtime Captain");
+    let hero_id = HeroId::new(1).unwrap();
+    account.dock.heroes.get_mut(&hero_id).unwrap().template_id = TemplateId::new(77).unwrap();
+    account.dock.computed_stats.insert(
+        hero_id,
+        HeroComputedStats {
+            max_hp: 1_300,
+            attack: 42,
+            ..HeroComputedStats::default()
+        },
+    );
+    account
+        .dock
+        .heroes
+        .get_mut(&hero_id)
+        .unwrap()
+        .pskills
+        .insert(101, 3);
+    store.save_typed_account(&mut account).unwrap();
+
+    let loaded = store.load_typed_account(&profile_id).unwrap().unwrap();
+    assert_eq!(loaded.dock.computed_stats[&hero_id].max_hp, 1_300);
+    assert_eq!(loaded.dock.computed_stats[&hero_id].attack, 42);
+    assert_eq!(
+        loaded.dock.heroes[&hero_id].equip_slots,
+        vec![
+            Some(EquipId::new(1).unwrap()),
+            None,
+            Some(EquipId::new(2).unwrap())
+        ]
+    );
+    assert_eq!(loaded.dock.heroes[&hero_id].pskills.get(&101), Some(&3));
     let _ = std::fs::remove_dir_all(root);
 }

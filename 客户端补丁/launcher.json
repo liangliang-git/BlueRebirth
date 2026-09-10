@@ -13,7 +13,7 @@
   "nativeRoot": "client-patch\\native",
   "serverExecutable": "server\\blueoath-server.exe",
   "serverConfig": "server\\server.json",
-  "serverData": "server\\catalog\\data",
+  "serverData": "server\\saves",
   "logFile": "launcher.log",
   "logLevel": "info",
   "gameHash": "8AEE607813A759E047D81C2428990609322DE072437DD4597F80E8E3FAD1D404",

@@ -12,6 +12,8 @@ import argparse
 import json
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -77,6 +79,24 @@ def main() -> int:
     }
     (output / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    builder = repo_root / "tools" / "build-catalog-db.py"
+    catalog_root = output.parent
+    server_db = (
+        catalog_root.parent / "server_config.db"
+        if catalog_root.name == "catalog"
+        else catalog_root / "server_config.db"
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            str(builder),
+            "--catalog-root",
+            str(catalog_root),
+            "--output",
+            str(server_db),
+        ],
+        check=True,
     )
     print(f"Prepared {len(copied)} tables, {total_rows} rows to {output}")
     return 0

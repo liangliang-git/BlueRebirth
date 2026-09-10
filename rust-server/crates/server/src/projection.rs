@@ -11,6 +11,61 @@ const ZERO_TRACKED_BAG_ITEMS: &[i32] = &[
     10029, 10030, 10031, // construction resources
 ];
 
+// The client stores HeroGrid.CurHp as a fixed-point ratio.  A full-health ship
+// must receive 10_000_000_000, while the typed account stores absolute HP.
+const HERO_HP_COEFFICIENT: u64 = 10_000_000_000;
+
+fn hero_hp_to_client_ratio(current_hp: u64, max_hp: u64) -> i64 {
+    let max_hp = max_hp.max(1);
+    let current_hp = current_hp.min(max_hp);
+    let ratio = current_hp
+        .saturating_mul(HERO_HP_COEFFICIENT)
+        .checked_div(max_hp)
+        .unwrap_or_default()
+        .min(HERO_HP_COEFFICIENT);
+
+    // CurHp is read unconditionally by the client.  Preserve a non-zero wire
+    // value even for a sunk ship so Lua does not see nil.
+    i64::try_from(ratio.max(1)).unwrap_or(i64::MAX)
+}
+
+pub(crate) fn typed_hero_cur_hp_for_client(
+    account: &blueoath_domain::AccountState,
+    hero: &blueoath_domain::HeroState,
+) -> i64 {
+    hero_hp_to_client_ratio(
+        hero.hp,
+        ship_max_hp_for_typed_hero(
+            hero,
+            &account.activities.progress,
+            &account.dock.equipments,
+            SHIP_STAT_CATALOG.get(),
+            EQUIP_CATALOG.get(),
+            SHIP_REMOULD_CATALOG.get(),
+            SHIP_STAT_MULTIPLIER.get().copied().unwrap_or(1.0),
+        ),
+    )
+}
+
+#[cfg(test)]
+mod hero_hp_tests {
+    use super::{hero_hp_to_client_ratio, HERO_HP_COEFFICIENT};
+
+    #[test]
+    fn typed_absolute_hp_is_encoded_as_client_fixed_point_ratio() {
+        assert_eq!(
+            hero_hp_to_client_ratio(1_671, 1_671),
+            HERO_HP_COEFFICIENT as i64
+        );
+        assert_eq!(hero_hp_to_client_ratio(835, 1_671), 4_997_007_779);
+        assert_eq!(hero_hp_to_client_ratio(0, 1_671), 1);
+        assert_eq!(
+            hero_hp_to_client_ratio(2_000, 1_671),
+            HERO_HP_COEFFICIENT as i64
+        );
+    }
+}
+
 pub(super) fn hero_array<'a>(value: &'a Value, key: &str) -> Option<&'a Vec<Value>> {
     value.get(key).and_then(Value::as_array)
 }
@@ -290,7 +345,7 @@ pub(super) fn hero_bag_from_typed_account(account: &blueoath_domain::AccountStat
             create_time: i32::try_from(create_time).unwrap_or(i32::MAX),
             update_time: i32::try_from(now).unwrap_or(i32::MAX),
             affection: i32::try_from(hero.affection).unwrap_or(i32::MAX),
-            cur_hp: i64::try_from(hero.hp).unwrap_or(i64::MAX),
+            cur_hp: typed_hero_cur_hp_for_client(account, hero),
             mood: i32::try_from(hero.mood).unwrap_or(i32::MAX),
             equip_slots: hero
                 .equip_slots
@@ -507,6 +562,48 @@ pub(super) fn bag_info_from_typed_account(account: &blueoath_domain::AccountStat
         bag_type: 1,
         bag_size: 100,
         items,
+    }
+}
+
+pub(super) fn bag_info_from_typed_account_with_tombstones(
+    account: &blueoath_domain::AccountState,
+    removed_template_ids: &[i32],
+) -> BagInfo {
+    let mut bag = bag_info_from_typed_account(account);
+    for template_id in removed_template_ids {
+        if *template_id > 0
+            && !bag
+                .items
+                .iter()
+                .any(|item| item.template_id == *template_id)
+        {
+            bag.items.push(BagGrid {
+                template_id: *template_id,
+                num: 0,
+            });
+        }
+    }
+    bag
+}
+
+#[cfg(test)]
+mod typed_bag_tombstone_tests {
+    use super::*;
+    use blueoath_domain::{NewAccountFactory, ProfileId};
+
+    #[test]
+    fn consumed_treasure_is_projected_as_zero_for_client_cache_deletion() {
+        let account =
+            NewAccountFactory::create(ProfileId::new("treasure-tombstone").unwrap(), "Captain");
+        let bag = bag_info_from_typed_account_with_tombstones(&account, &[14_000]);
+
+        assert_eq!(
+            bag.items
+                .iter()
+                .find(|item| item.template_id == 14_000)
+                .map(|item| item.num),
+            Some(0)
+        );
     }
 }
 
@@ -1264,7 +1361,7 @@ pub(super) fn copy_record_list_from_typed_account(
                     template_id: i32::try_from(hero.template_id.get()).unwrap_or(i32::MAX),
                     level: i32::try_from(hero.level).unwrap_or(i32::MAX),
                     advance_level: 0,
-                    cur_hp: hero.hp,
+                    cur_hp: typed_hero_cur_hp_for_client(account, hero) as u64,
                     equips: hero
                         .equip_slots
                         .iter()
@@ -1607,6 +1704,7 @@ pub(super) fn daily_copy_progress_from_account(
 
 pub(super) fn daily_copy_progress_from_typed_account(
     account: &blueoath_domain::AccountState,
+    chapter_catalog: &ChapterCatalog,
     now: u32,
 ) -> Vec<DailyCopyProgress> {
     let reset_day = (u64::from(now) + 8 * 60 * 60) / 86_400;
@@ -1615,43 +1713,56 @@ pub(super) fn daily_copy_progress_from_typed_account(
     } else {
         std::collections::BTreeMap::new()
     };
-    let chapter_ids = challenge_times
-        .keys()
-        .chain(account.daily_copy.select_ex.keys())
-        .copied()
-        .collect::<std::collections::BTreeSet<_>>();
-    chapter_ids
-        .into_iter()
-        .filter_map(|chapter_id| {
-            Some(DailyCopyProgress {
-                chapter_id: i32::try_from(chapter_id.get()).ok()?,
-                challenge_times: i32::try_from(
-                    challenge_times
-                        .get(&chapter_id)
+    chapter_catalog
+        .daily_chapters
+        .iter()
+        .filter_map(|(chapter_id, _)| {
+            let chapter_id_key =
+                blueoath_domain::ChapterId::new(u64::try_from(*chapter_id).ok()?).ok()?;
+            let pass_copy = chapter_catalog
+                .daily_level_ids_by_chapter
+                .get(chapter_id)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|copy_id| {
+                    u64::try_from(*copy_id)
+                        .ok()
+                        .and_then(|id| blueoath_domain::CopyId::new(id).ok())
+                        .is_some_and(|copy_id| account.battle.passed_copies.contains(&copy_id))
+                })
+                .collect::<Vec<_>>();
+            let select_ex = account
+                .daily_copy
+                .select_ex
+                .get(&chapter_id_key)
+                .copied()
+                .unwrap_or(false);
+            let ex_star = if u64::from(account.daily_copy.reset_day) == reset_day {
+                i32::try_from(
+                    account
+                        .daily_copy
+                        .ex_stars
+                        .get(&chapter_id_key)
                         .copied()
                         .unwrap_or_default(),
                 )
-                .unwrap_or(i32::MAX),
-                pass_copy: Vec::new(),
-                select_ex: account
-                    .daily_copy
-                    .select_ex
-                    .get(&chapter_id)
-                    .copied()
-                    .unwrap_or(false),
-                ex_star: if u64::from(account.daily_copy.reset_day) == reset_day {
-                    i32::try_from(
-                        account
-                            .daily_copy
-                            .ex_stars
-                            .get(&chapter_id)
-                            .copied()
-                            .unwrap_or_default(),
-                    )
-                    .unwrap_or(i32::MAX)
-                } else {
-                    0
-                },
+                .unwrap_or(i32::MAX)
+            } else {
+                0
+            };
+            let challenge_time = challenge_times
+                .get(&chapter_id_key)
+                .copied()
+                .unwrap_or_default();
+            let has_progress =
+                !pass_copy.is_empty() || challenge_time > 0 || select_ex || ex_star > 0;
+            has_progress.then(|| DailyCopyProgress {
+                chapter_id: *chapter_id,
+                challenge_times: i32::try_from(challenge_time).unwrap_or(i32::MAX),
+                pass_copy,
+                select_ex,
+                ex_star,
             })
         })
         .collect()
@@ -1673,7 +1784,7 @@ pub(super) fn daily_copy_snapshot_payload_from_typed_account(
     DailyCopyCodec::encode_with_progress(
         &catalog.daily_chapters,
         &catalog.daily_groups,
-        &daily_copy_progress_from_typed_account(account, now),
+        &daily_copy_progress_from_typed_account(account, catalog, now),
         &daily_copy_group_progress_from_typed_account(account, false, now),
         &daily_copy_group_progress_from_typed_account(account, true, now),
     )
@@ -1914,4 +2025,34 @@ pub(super) fn normalize_daily_copy_state(
         root.insert("dailyCopy".to_owned(), daily);
     }
     changed
+}
+
+#[cfg(test)]
+mod typed_daily_copy_tests {
+    use super::*;
+    use blueoath_domain::{CopyId, NewAccountFactory, ProfileId};
+
+    #[test]
+    fn typed_daily_progress_projects_passed_copy_ids() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("daily-progress").unwrap(), "Captain");
+        account
+            .battle
+            .passed_copies
+            .insert(CopyId::new(20_101).unwrap());
+
+        let catalog = ChapterCatalog {
+            daily_chapters: vec![(20_001, 2)],
+            daily_level_ids_by_chapter: [(20_001, vec![20_101, 20_102, 20_518])]
+                .into_iter()
+                .collect(),
+            ..ChapterCatalog::default()
+        };
+
+        let progress = daily_copy_progress_from_typed_account(&account, &catalog, 0);
+
+        assert_eq!(progress.len(), 1);
+        assert_eq!(progress[0].chapter_id, 20_001);
+        assert_eq!(progress[0].pass_copy, vec![20_101]);
+    }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::catalog_db;
 use crate::config::SharedPush;
 use blueoath_domain::{
     AccountRepository, AccountState, NewAccountFactory, ProfileId, RepositoryError,
@@ -15,15 +16,64 @@ fn load_or_create_typed_account(
 ) -> Result<AccountState, blueoath_storage::StorageError> {
     let profile_id = ProfileId::new(profile_id.to_owned())
         .map_err(|_| blueoath_storage::StorageError::InvalidProfileId)?;
-    if let Some(account) = store.load_typed_account(&profile_id)? {
+    if let Some(mut account) = store.load_typed_account(&profile_id)? {
+        refresh_typed_hero_stats(&mut account);
+        normalize_typed_hero_hp(&mut account);
         return Ok(account);
     }
     let mut account = NewAccountFactory::create(profile_id.clone(), name.to_owned());
     grant_all_catalog_fashions(&mut account, fashion_catalog);
+    refresh_typed_hero_stats(&mut account);
+    normalize_typed_hero_hp(&mut account);
     AccountRepository::create(store, &account).map_err(storage_error_from_repository)?;
     store.load_typed_account(&profile_id)?.ok_or_else(|| {
         StorageError::InvalidTypedAccount("created account is unavailable".to_owned())
     })
+}
+
+fn refresh_typed_hero_stats(account: &mut AccountState) {
+    let updates = account
+        .dock
+        .heroes
+        .values()
+        .map(|hero| {
+            let attributes = ship_attributes_for_typed_hero(
+                hero,
+                &account.activities.progress,
+                &account.dock.equipments,
+                SHIP_STAT_CATALOG.get(),
+                EQUIP_CATALOG.get(),
+                SHIP_REMOULD_CATALOG.get(),
+                SHIP_STAT_MULTIPLIER.get().copied().unwrap_or(1.0),
+            );
+            (
+                hero.id,
+                blueoath_domain::HeroComputedStats::from_attributes(&attributes),
+            )
+        })
+        .collect::<Vec<_>>();
+    account.dock.computed_stats.clear();
+    account.dock.computed_stats.extend(updates);
+}
+
+fn normalize_typed_hero_hp(account: &mut AccountState) {
+    let Some(catalog) = SHIP_STAT_CATALOG.get() else {
+        return;
+    };
+    for hero in account.dock.heroes.values_mut() {
+        let max_hp = ship_max_hp_for_typed_hero(
+            hero,
+            &account.activities.progress,
+            &account.dock.equipments,
+            Some(catalog),
+            EQUIP_CATALOG.get(),
+            SHIP_REMOULD_CATALOG.get(),
+            SHIP_STAT_MULTIPLIER.get().copied().unwrap_or(1.0),
+        );
+        if hero.hp > max_hp {
+            hero.hp = max_hp;
+        }
+    }
 }
 
 fn grant_all_catalog_fashions(account: &mut AccountState, catalog: &FashionList) -> bool {
@@ -59,7 +109,11 @@ fn storage_error_from_repository(error: RepositoryError) -> StorageError {
     }
 }
 
-fn persist_typed_account(store: &ProfileStore, account: AccountState) -> Result<(), StorageError> {
+fn persist_typed_account(
+    store: &ProfileStore,
+    mut account: AccountState,
+) -> Result<(), StorageError> {
+    refresh_typed_hero_stats(&mut account);
     let profile = account.profile.as_ref().ok_or_else(|| {
         StorageError::InvalidTypedAccount("account profile is required".to_owned())
     })?;
@@ -79,12 +133,25 @@ fn persist_typed_account(store: &ProfileStore, account: AccountState) -> Result<
 }
 
 pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
+    let store = ProfileStore::open(&config.data_root)?;
+    if let Some(catalog_path) = config.catalog_path.as_ref() {
+        let config_dir = config_dir(catalog_path);
+        let database_path = catalog_db::catalog_db_path(&config_dir);
+        catalog_db::validate_catalog_db(&database_path).map_err(|error| {
+            ServerError::Catalog(format!(
+                "catalog database {} is invalid: {error}",
+                database_path.display()
+            ))
+        })?;
+    }
     let _ =
         BUILD_SHIP_CATALOG.get_or_init(|| load_build_ship_catalog(config.catalog_path.as_ref()));
     let _ = BUILD_FORMULA_CATALOG
         .get_or_init(|| load_build_formula_catalog(config.catalog_path.as_ref()));
     let _ = TALENT_CATALOG.get_or_init(|| load_talent_catalog(config.catalog_path.as_ref()));
     let _ = SHIP_STAT_CATALOG.get_or_init(|| load_ship_stat_catalog(config.catalog_path.as_ref()));
+    let _ = EQUIP_CATALOG.get_or_init(|| load_equip_catalog(config.catalog_path.as_ref()));
+    let _ = SHIP_STAT_MULTIPLIER.get_or_init(|| normalize_multiplier(config.ship_stat_multiplier));
     let _ =
         HERO_SKILL_CATALOG.get_or_init(|| load_hero_skill_catalog(config.catalog_path.as_ref()));
     let _ = HERO_SKILL_UPGRADE_CATALOG
@@ -157,7 +224,6 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
         .transpose()?
         .map(|address| address.port());
     let advertised_game_login_port = game_login_port.or(kcp_game_login_port);
-    let store = ProfileStore::open(&config.data_root)?;
     let mut shop = load_shop_catalog(config.catalog_path.as_ref());
     load_server_shop_goods(&mut shop, &config.data_root);
     let catalogs = Arc::new(GameCatalogs {

@@ -94,6 +94,7 @@ local entries = {
   "future-chapter.mod/main.lua",
   "custom-equipment.mod/main.lua",
   "fashion-preview-fix.mod/main.lua",
+  "guide-skip.mod/main.lua",
   "example.mod/main.lua"
 }
 

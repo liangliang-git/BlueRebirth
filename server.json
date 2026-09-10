@@ -1,7 +1,8 @@
 {
   "port": 0,
   "gameLoginPort": 0,
-  "catalogPath": ".\\rust-server\\catalog\\config",
+  "data": ".\\rust-server\\saves",
+  "catalogPath": ".\\rust-server",
   "dropMultiplier": 10.0,
   "shipExpMultiplier": 10.0,
   "commanderExpMultiplier": 10.0,

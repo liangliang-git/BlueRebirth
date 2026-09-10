@@ -186,6 +186,7 @@ where
         "tactic.GetHerosTactic",
         FleetInfoCodec::encode(&fleet_info_from_typed_account(account)),
     );
+
     write_payload!("shop.UpdateShopInfo", shop_info_payload(shop_catalog),);
     write_payload!("recharge.RechargeInfo", vec![0x1A, 0x00]);
     write_payload!(
@@ -282,6 +283,11 @@ pub(crate) fn copy_info_payload(
             ))
         })
         .collect::<Vec<_>>();
+    let mubar_passed_copy_ids = passed_copy_ids
+        .iter()
+        .copied()
+        .filter(|copy_id| catalog.mubar.contains(copy_id))
+        .collect::<Vec<_>>();
     let (copy_ids, max_copy_id, response_passed) = match copy_type {
         2 => (
             catalog.sea.clone(),
@@ -290,8 +296,8 @@ pub(crate) fn copy_info_payload(
         ),
         33 => (
             catalog.mubar.clone(),
-            catalog.mubar.iter().copied().max().unwrap_or_default(),
-            catalog.mubar.clone(),
+            copy_progress_max_or_first(&catalog.mubar, &mubar_passed_copy_ids),
+            mubar_passed_copy_ids,
         ),
         10 => (
             catalog.goods_copy.clone(),
@@ -415,6 +421,33 @@ fn copy_type_for_chapter(catalog: &ChapterCatalog, chapter_id: i32) -> i32 {
             .then_some(copy_type)
     })
     .unwrap_or(1)
+}
+
+fn copy_type_for_copy_id(catalog: &ChapterCatalog, copy_id: i32) -> i32 {
+    [
+        (2, &catalog.sea),
+        (33, &catalog.mubar),
+        (10, &catalog.goods_copy),
+        (24, &catalog.tower),
+        (34, &catalog.equip_new_test),
+        (9, &catalog.daily),
+        (1, &catalog.plot),
+    ]
+    .into_iter()
+    .find_map(|(copy_type, copy_ids)| copy_ids.contains(&copy_id).then_some(copy_type))
+    .unwrap_or(1)
+}
+
+fn copy_progress_payload_for_copy(
+    catalog: &ChapterCatalog,
+    copy_id: i32,
+    account: &AccountState,
+) -> Vec<u8> {
+    CopyInfoCodec::encode_payload(&copy_info_payload(
+        catalog,
+        copy_type_for_copy_id(catalog, copy_id),
+        account,
+    ))
 }
 
 fn handler_payload(result: HandlerResult, method: &str) -> Option<Response> {
@@ -801,6 +834,13 @@ where
         }
         _ if known_method == Some(KnownMethod::UserLogin) => {
             if let Some(typed) = typed_account.as_deref_mut() {
+                // A dropped client can leave a persisted battle session behind.
+                // This server has no resume handshake, so retaining that session
+                // blocks the next sortie until its timeout and makes StartBase
+                // appear unresponsive after reconnect.
+                if typed.battle.active.take().is_some() {
+                    tracing::debug!("cleared abandoned battle session on login");
+                }
                 advance_typed_task_event(typed, task_catalog, 1, 1);
                 let mut login_effects = ResponseEffects::default();
                 if typed.guild.is_some() {
@@ -1755,6 +1795,25 @@ where
             || method.is_family(MethodFamily::DailyCopy)
             || request.method == "copyinfo.GetCopyInfo" =>
         {
+            let settled_copy_id = if matches!(
+                request.method.as_str(),
+                "copy.PassBase" | "copy.PassMiniGame"
+            ) {
+                typed_account.as_ref().and_then(|account| {
+                    account
+                        .battle
+                        .active
+                        .as_ref()
+                        .and_then(|session| i32::try_from(session.copy_id.get()).ok())
+                        .or_else(|| {
+                            CopyMiniGamePassRequest::decode(request_args)
+                                .ok()
+                                .map(|request| request.copy_id)
+                        })
+                })
+            } else {
+                None
+            };
             let mut typed_handled = false;
             let mut battle_effects = ResponseEffects::default();
             let result = if let Some(typed) = typed_account.as_mut() {
@@ -1797,6 +1856,7 @@ where
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
+            let successful_battle_result = matches!(&result, HandlerResult::Reply(_));
             let payload = handler_payload(result, request.method.as_str());
             if typed_handled && request.method == "dailycopy.CopyEnter" {
                 if let Some(typed) = typed_account.as_deref() {
@@ -1822,6 +1882,38 @@ where
                         &mut post_pushes,
                         "user.UpdateUserInfo",
                         UserInfoCodec::encode(&user_info_from_typed_account(state, typed)),
+                    );
+                }
+            }
+            if typed_handled
+                && matches!(
+                    request.method.as_str(),
+                    "copy.PassBase" | "copy.PassMiniGame"
+                )
+                && successful_battle_result
+            {
+                if let (Some(copy_id), Some(catalog), Some(typed)) =
+                    (settled_copy_id, chapter_catalog, typed_account.as_deref())
+                {
+                    if catalog
+                        .daily_level_ids_by_chapter
+                        .values()
+                        .any(|copy_ids| copy_ids.contains(&copy_id))
+                    {
+                        append_method_push(
+                            &mut post_pushes,
+                            "dailycopy.UpdateDailyCopyData",
+                            daily_copy_snapshot_payload_from_typed_account(
+                                typed,
+                                Some(catalog),
+                                current_unix_seconds(),
+                            ),
+                        );
+                    }
+                    append_method_push(
+                        &mut post_pushes,
+                        "copy.GetCopy",
+                        copy_progress_payload_for_copy(catalog, copy_id, typed),
                     );
                 }
             }
@@ -2572,6 +2664,29 @@ mod route_guard_tests {
     }
 
     #[test]
+    fn settled_copy_progress_payload_contains_newly_passed_copy() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("settled-copy").unwrap(), "Captain");
+        let copy_id = CopyId::new(1_600_100).unwrap();
+        account.battle.passed_copies.insert(copy_id);
+        account.battle.copy_stars.insert(copy_id, 7);
+        let catalog = ChapterCatalog {
+            sea: vec![1_600_100],
+            ..ChapterCatalog::default()
+        };
+
+        let payload = copy_progress_payload_for_copy(&catalog, 1_600_100, &account);
+        let entry = decode_repeated_message_field(&payload, 1)
+            .into_iter()
+            .next()
+            .expect("settled copy entry");
+        assert_eq!(decode_varint_field(&entry, 1), 1_600_100);
+        assert_eq!(decode_varint_field(&entry, 3), 7);
+        assert_eq!(decode_varint_field(&entry, 6), 1);
+        assert_eq!(decode_varint_field(&payload, 3), 2);
+    }
+
+    #[test]
     fn sea_copy_bootstrap_includes_accumulated_chapter_stars() {
         let mut account =
             NewAccountFactory::create(ProfileId::new("sea-stars").unwrap(), "Captain");
@@ -2625,5 +2740,28 @@ mod route_guard_tests {
         assert_eq!(claimed_boxes.len(), 1);
         assert_eq!(decode_varint_field(&claimed_boxes[0], 1), 1);
         assert_eq!(decode_varint_field(&claimed_boxes[0], 2), 1);
+    }
+
+    #[test]
+    fn mubar_copy_payload_reports_account_progress_only() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("mubar-progress").unwrap(), "Captain");
+        let catalog = ChapterCatalog {
+            mubar: vec![932_111, 932_112, 932_113],
+            ..ChapterCatalog::default()
+        };
+
+        let initial = copy_info_payload(&catalog, 33, &account);
+        assert_eq!(initial.copy_ids, catalog.mubar);
+        assert_eq!(initial.max_copy_id, 932_111);
+        assert!(initial.passed_copy_ids.is_empty());
+
+        account
+            .battle
+            .passed_copies
+            .insert(CopyId::new(932_112).unwrap());
+        let progressed = copy_info_payload(&catalog, 33, &account);
+        assert_eq!(progressed.max_copy_id, 932_112);
+        assert_eq!(progressed.passed_copy_ids, vec![932_112]);
     }
 }

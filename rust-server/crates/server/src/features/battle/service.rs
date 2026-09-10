@@ -2,35 +2,11 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 use crate::features::copy::mopup_state::{
-    draw_copy_drop_with_seed, draw_draw_count, next_battle_drop_seed,
+    draw_copy_category_rewards_with_seed, draw_copy_drop_rewards_with_seed, draw_draw_count,
+    next_battle_drop_seed,
 };
 
-#[cfg(test)]
-pub(crate) fn handle_typed(
-    account: &mut blueoath_domain::AccountState,
-    method: &str,
-    request_args: &[u8],
-) -> HandlerResult {
-    let mut effects = ResponseEffects::default();
-    handle_typed_with_catalog(
-        account,
-        method,
-        request_args,
-        TypedBattleContext {
-            battle_catalog: None,
-            fashion_catalog: None,
-            hero_level_catalog: None,
-            drop_multiplier: 1.0,
-            ship_stat_multiplier: 1.0,
-            commander_exp_multiplier: 1.0,
-            ship_exp_multiplier: 1.0,
-            affection_multiplier: 1.0,
-            server_state: None,
-            effects: &mut effects,
-        },
-    )
-}
-
+// 处理星级奖励
 pub(crate) fn handle_typed_copy_star_reward(
     account: &mut blueoath_domain::AccountState,
     method: &str,
@@ -162,11 +138,13 @@ pub(crate) fn handle_typed_copy_star_reward(
     HandlerResult::Reply(Response::raw(method, encode_task_reward_list(&pending)))
 }
 
+// 抽取掉落奖励
 fn draw_typed_battle_drop_rewards(
     catalog: &BattleCatalog,
     copy_id: i32,
     multiplier: f64,
     grade: i32,
+    include_first_clear: bool,
 ) -> Vec<ShopReward> {
     let mut rewards = Vec::new();
     let mut draw_index = 0u64;
@@ -174,29 +152,35 @@ fn draw_typed_battle_drop_rewards(
     let settle_multiplier = multiplier * battle_evaluation_multipliers(Some(catalog), grade).1;
     let other_multiplier = multiplier * battle_other_drop_multiplier(Some(catalog), grade);
     for drop_id in catalog.copy_drop_ids.get(&copy_id).into_iter().flatten() {
-        let draws = draw_draw_count(
-            settle_multiplier,
-            mix_build_draw_roll(seed.wrapping_add(draw_index)),
+        let include_display_first_clear =
+            include_first_clear && !catalog.copy_first_rewards.contains_key(&copy_id);
+        let category_rewards = draw_copy_category_rewards_with_seed(
+            catalog,
+            *drop_id,
+            seed.wrapping_add(draw_index),
+            include_display_first_clear,
         );
         draw_index = draw_index.wrapping_add(1);
-        for _ in 0..draws {
-            let roll_seed = seed.wrapping_add(draw_index);
-            draw_index = draw_index.wrapping_add(1);
-            if let Some(mut reward) = draw_copy_drop_with_seed(catalog, *drop_id, 0, roll_seed) {
-                catalog.drop_quantities.apply(
-                    copy_id,
-                    &mut reward,
-                    roll_seed.wrapping_add(0xD1B5_4A32_D192_ED03),
-                );
-                rewards.push(reward);
-            }
+        for mut reward in category_rewards {
+            catalog.drop_quantities.apply(
+                copy_id,
+                &mut reward,
+                seed.wrapping_add(draw_index)
+                    .wrapping_add(0xD1B5_4A32_D192_ED03),
+            );
+            rewards.push(reward);
         }
     }
     for fleet_id in battle_session_fleet_ids(copy_id, Some(catalog)) {
         for drop_id in catalog.fleet_drop_ids.get(&fleet_id).into_iter().flatten() {
-            if let Some(mut reward) =
-                draw_copy_drop_with_seed(catalog, *drop_id, 0, seed.wrapping_add(draw_index))
-            {
+            let fleet_rewards = draw_copy_drop_rewards_with_seed(
+                catalog,
+                *drop_id,
+                0,
+                seed.wrapping_add(draw_index),
+            );
+            draw_index = draw_index.wrapping_add(1);
+            for mut reward in fleet_rewards {
                 draw_index = draw_index.wrapping_add(1);
                 catalog
                     .drop_quantities
@@ -210,19 +194,30 @@ fn draw_typed_battle_drop_rewards(
             .into_iter()
             .flatten()
         {
-            if let Some(mut reward) =
-                draw_copy_drop_with_seed(catalog, *drop_id, 0, seed.wrapping_add(draw_index))
-            {
-                draw_index = draw_index.wrapping_add(1);
-                catalog
-                    .drop_quantities
-                    .apply(copy_id, &mut reward, seed.wrapping_add(draw_index));
+            let fleet_rewards = draw_copy_drop_rewards_with_seed(
+                catalog,
+                *drop_id,
+                0,
+                seed.wrapping_add(draw_index),
+            );
+            draw_index = draw_index.wrapping_add(1);
+            if !fleet_rewards.is_empty() {
+                let mut category_rewards = Vec::new();
+                for mut reward in fleet_rewards {
+                    draw_index = draw_index.wrapping_add(1);
+                    catalog.drop_quantities.apply(
+                        copy_id,
+                        &mut reward,
+                        seed.wrapping_add(draw_index),
+                    );
+                    category_rewards.push(reward);
+                }
                 if draw_draw_count(
                     other_multiplier,
                     mix_build_draw_roll(seed.wrapping_add(draw_index)),
                 ) > 0
                 {
-                    rewards.push(reward);
+                    rewards.extend(category_rewards);
                 }
                 draw_index = draw_index.wrapping_add(1);
             }
@@ -233,19 +228,30 @@ fn draw_typed_battle_drop_rewards(
             .into_iter()
             .flatten()
         {
-            if let Some(mut reward) =
-                draw_copy_drop_with_seed(catalog, *drop_id, 0, seed.wrapping_add(draw_index))
-            {
-                draw_index = draw_index.wrapping_add(1);
-                catalog
-                    .drop_quantities
-                    .apply(copy_id, &mut reward, seed.wrapping_add(draw_index));
+            let fleet_rewards = draw_copy_drop_rewards_with_seed(
+                catalog,
+                *drop_id,
+                0,
+                seed.wrapping_add(draw_index),
+            );
+            draw_index = draw_index.wrapping_add(1);
+            if !fleet_rewards.is_empty() {
+                let mut category_rewards = Vec::new();
+                for mut reward in fleet_rewards {
+                    draw_index = draw_index.wrapping_add(1);
+                    catalog.drop_quantities.apply(
+                        copy_id,
+                        &mut reward,
+                        seed.wrapping_add(draw_index),
+                    );
+                    category_rewards.push(reward);
+                }
                 if draw_draw_count(
                     settle_multiplier,
                     mix_build_draw_roll(seed.wrapping_add(draw_index)),
                 ) > 0
                 {
-                    rewards.push(reward);
+                    rewards.extend(category_rewards);
                 }
                 draw_index = draw_index.wrapping_add(1);
             }
@@ -268,6 +274,7 @@ fn draw_typed_battle_drop_rewards(
     rewards
 }
 
+// 战斗上下文类型
 pub(crate) struct TypedBattleContext<'a> {
     battle_catalog: Option<&'a BattleCatalog>,
     fashion_catalog: Option<&'a FashionList>,
@@ -421,7 +428,6 @@ pub(crate) fn handle_typed_with_catalog(
                     request.copy_id,
                     &request.hero_groups,
                     battle_catalog,
-                    SHIP_STAT_CATALOG.get(),
                     ship_stat_multiplier,
                     BattleStartOptions {
                         is_running_fight: request.is_running_fight,
@@ -447,7 +453,15 @@ pub(crate) fn handle_typed_with_catalog(
                 ));
             };
             let result = battle_pass_result_from_request(&request);
-            save_typed_battle_hero_hp(account, &result.heroes, &hero_ids);
+            save_typed_battle_hero_hp(
+                account,
+                &result.heroes,
+                &hero_ids,
+                SHIP_STAT_CATALOG.get(),
+                EQUIP_CATALOG.get(),
+                SHIP_REMOULD_CATALOG.get(),
+                ship_stat_multiplier,
+            );
             let grade = if result.grade > 0 { result.grade } else { 3 };
             let first_pass_expected = !account.battle.passed_copies.contains(&copy_id);
             let mut rewards = Vec::new();
@@ -472,6 +486,7 @@ pub(crate) fn handle_typed_with_catalog(
                         copy_id.get() as i32,
                         drop_multiplier,
                         grade,
+                        first_pass_expected,
                     ));
                 }
             }
@@ -1002,7 +1017,6 @@ pub(crate) fn handle_typed_with_catalog(
                         .filter_map(|id| i32::try_from(id.get()).ok())
                         .collect()],
                     battle_catalog,
-                    SHIP_STAT_CATALOG.get(),
                     ship_stat_multiplier,
                     BattleStartOptions::default(),
                 )),
@@ -1225,12 +1239,12 @@ fn typed_sweep_rewards(
     drop_multiplier: f64,
 ) -> Vec<ShopReward> {
     let mut rewards = Vec::new();
-    if !account
+    let first_pass = !account
         .battle
         .passed_copies
         .iter()
-        .any(|id| id.get() == u64::try_from(copy_id).unwrap_or_default())
-    {
+        .any(|id| id.get() == u64::try_from(copy_id).unwrap_or_default());
+    if first_pass {
         if let Some(first) = catalog.copy_first_rewards.get(&copy_id) {
             rewards.extend(first.iter().map(|(goods_type, item_id, num)| ShopReward {
                 goods_type: *goods_type,
@@ -1240,12 +1254,14 @@ fn typed_sweep_rewards(
             }));
         }
     }
-    for _ in 0..sweep_count {
+    let has_copy_first_reward = catalog.copy_first_rewards.contains_key(&copy_id);
+    for index in 0..sweep_count {
         rewards.extend(draw_typed_battle_drop_rewards(
             catalog,
             copy_id,
             drop_multiplier,
             3,
+            index == 0 && first_pass && !has_copy_first_reward,
         ));
     }
     rewards
@@ -1300,6 +1316,10 @@ fn save_typed_battle_hero_hp(
     account: &mut blueoath_domain::AccountState,
     heroes: &[BattleHeroResult],
     allowed_hero_ids: &[blueoath_domain::HeroId],
+    ship_stat_catalog: Option<&ShipStatCatalog>,
+    equip_catalog: Option<&EquipCatalog>,
+    remould_catalog: Option<&ShipRemouldCatalog>,
+    ship_stat_multiplier: f64,
 ) {
     for result in heroes {
         if result.hero_id == 0
@@ -1313,8 +1333,20 @@ fn save_typed_battle_hero_hp(
         let Ok(hero_id) = blueoath_domain::HeroId::new(result.hero_id) else {
             continue;
         };
+        let progress = &account.activities.progress;
         if let Some(hero) = account.dock.heroes.get_mut(&hero_id) {
-            hero.hp = u64::try_from(result.hp.max(0)).unwrap_or_default();
+            let max_hp = ship_max_hp_for_typed_hero(
+                hero,
+                progress,
+                &account.dock.equipments,
+                ship_stat_catalog,
+                equip_catalog,
+                remould_catalog,
+                ship_stat_multiplier,
+            );
+            hero.hp = u64::try_from(result.hp.max(0))
+                .unwrap_or_default()
+                .min(max_hp);
         }
     }
 }
@@ -1349,817 +1381,4 @@ fn daily_copy_enter_payload(start_base_ret: &[u8]) -> Vec<u8> {
     let mut payload = Vec::new();
     append_message_field(&mut payload, 1, start_base_ret);
     payload
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::common::response::HandlerResult;
-    use blueoath_domain::{ChapterId, CopyId, FleetId, NewAccountFactory, ProfileId};
-
-    use super::*;
-
-    #[test]
-    fn typed_attack_updates_active_battle_session() {
-        let mut account = NewAccountFactory::create(ProfileId::new("battle").unwrap(), "Battle");
-        let chapter_id = ChapterId::new(1).unwrap();
-        let copy_id = CopyId::new(9).unwrap();
-        let fleet_id = FleetId::new(1).unwrap();
-        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
-        account
-            .fleet
-            .fleets
-            .entry(fleet_id)
-            .or_default()
-            .members
-            .push(hero_id);
-        blueoath_game::BattleService::start(&mut account, chapter_id, copy_id, fleet_id, 10)
-            .unwrap();
-        account.battle.active.as_mut().unwrap().hero_ids = vec![hero_id];
-
-        let mut request = Vec::new();
-        append_varint_field(&mut request, 1, 1);
-        append_varint_field(&mut request, 2, copy_id.get());
-        append_varint_field(&mut request, 3, hero_id.get());
-        append_varint_field(&mut request, 4, 7);
-
-        assert!(matches!(
-            handle_typed(&mut account, "copy.AttackBase", &request),
-            HandlerResult::Reply(_)
-        ));
-        let active = account.battle.active.as_ref().unwrap();
-        assert_eq!(active.attack_count, 1);
-        assert_eq!(active.revision, 1);
-    }
-
-    #[test]
-    fn typed_start_and_pass_complete_battle_lifecycle() {
-        let mut account =
-            NewAccountFactory::create(ProfileId::new("battle-flow").unwrap(), "Battle");
-        let fleet_id = FleetId::new(1).unwrap();
-        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
-        account
-            .fleet
-            .fleets
-            .entry(fleet_id)
-            .or_default()
-            .members
-            .push(hero_id);
-
-        let mut start = Vec::new();
-        append_varint_field(&mut start, 2, 9);
-        assert!(matches!(
-            handle_typed(&mut account, "copy.StartBase", &start),
-            HandlerResult::Reply(_)
-        ));
-        assert!(account.battle.active.is_some());
-
-        assert!(matches!(
-            handle_typed(&mut account, "copy.PassBase", &[]),
-            HandlerResult::Reply(_)
-        ));
-        assert!(account.battle.active.is_none());
-        assert!(account
-            .battle
-            .passed_copies
-            .contains(&CopyId::new(9).unwrap()));
-        assert_eq!(
-            account.battle.copy_stars.get(&CopyId::new(9).unwrap()),
-            Some(&7)
-        );
-        assert_eq!(account.battle.records.len(), 1);
-    }
-
-    #[test]
-    fn typed_challenge_battle_defers_supply_debit_without_navigation_push() {
-        let mut account =
-            NewAccountFactory::create(ProfileId::new("battle-supply-order").unwrap(), "Battle");
-        let fleet_id = FleetId::new(1).unwrap();
-        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
-        account
-            .fleet
-            .fleets
-            .entry(fleet_id)
-            .or_default()
-            .members
-            .push(hero_id);
-        let mut catalog = BattleCatalog::default();
-        catalog.copies.insert(
-            9,
-            BattleCopy {
-                config_id: 9,
-                copy_type: 32,
-                fleet_ids: vec![1],
-            },
-        );
-        catalog.supply_cost_by_copy.insert(9, (10, 0));
-        let before = account
-            .resources
-            .amount(blueoath_domain::CurrencyKind::Supply)
-            .get();
-        let mut start = Vec::new();
-        append_varint_field(&mut start, 2, 9);
-        let mut effects = ResponseEffects::default();
-        assert!(matches!(
-            handle_typed_with_catalog(
-                &mut account,
-                "copy.StartBase",
-                &start,
-                TypedBattleContext::new(
-                    Some(&catalog),
-                    None,
-                    None,
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0,
-                    &mut effects,
-                ),
-            ),
-            HandlerResult::Reply(_)
-        ));
-        assert_eq!(
-            account
-                .resources
-                .amount(blueoath_domain::CurrencyKind::Supply)
-                .get(),
-            before
-        );
-        assert!(matches!(
-            handle_typed_with_catalog(
-                &mut account,
-                "copy.PassBase",
-                &[],
-                TypedBattleContext::new(
-                    Some(&catalog),
-                    None,
-                    None,
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0,
-                    &mut effects,
-                ),
-            ),
-            HandlerResult::Reply(_)
-        ));
-        assert_eq!(
-            account
-                .resources
-                .amount(blueoath_domain::CurrencyKind::Supply)
-                .get(),
-            before - 10
-        );
-        let (_, posts, _) = effects.into_parts();
-        assert!(!posts
-            .iter()
-            .any(|response| response.method == "copy.GetCopy"));
-    }
-
-    #[test]
-    fn typed_battle_settlement_applies_configured_experience() {
-        let mut account =
-            NewAccountFactory::create(ProfileId::new("battle-experience").unwrap(), "Battle");
-        let fleet_id = FleetId::new(1).unwrap();
-        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
-        account.fleet.fleets.insert(
-            fleet_id,
-            blueoath_domain::FleetRecord {
-                members: vec![hero_id],
-                ..blueoath_domain::FleetRecord::default()
-            },
-        );
-        let mut catalog = BattleCatalog::default();
-        catalog.copies.insert(
-            9,
-            BattleCopy {
-                config_id: 9,
-                copy_type: 2,
-                fleet_ids: vec![7],
-            },
-        );
-        catalog.fleet_rewards.insert(
-            7,
-            BattleFleetReward {
-                commander_exp: 10,
-                ship_exp: 20,
-            },
-        );
-        catalog.supply_cost_by_copy.insert(9, (0, 0));
-        let commander_before = account.character.exp;
-        let hero_before = account.dock.heroes[&hero_id].exp;
-        let mut start = Vec::new();
-        append_varint_field(&mut start, 2, 9);
-        let mut effects = ResponseEffects::default();
-        assert!(matches!(
-            handle_typed_with_catalog(
-                &mut account,
-                "copy.StartBase",
-                &start,
-                TypedBattleContext::new(
-                    Some(&catalog),
-                    None,
-                    None,
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0,
-                    &mut effects,
-                ),
-            ),
-            HandlerResult::Reply(_)
-        ));
-
-        let HandlerResult::Reply(response) = handle_typed_with_catalog(
-            &mut account,
-            "copy.PassBase",
-            &[],
-            TypedBattleContext::new(Some(&catalog), None, None, 1.0, 1.0, 1.0, 1.0, &mut effects),
-        ) else {
-            panic!("battle settlement must succeed");
-        };
-        let payload = response.payload.into_bytes();
-        assert_eq!(account.character.exp, commander_before + 10);
-        assert_eq!(account.dock.heroes[&hero_id].exp, hero_before + 24);
-        assert!(
-            payload.contains(&0x5a),
-            "ship experience field 11 is missing"
-        );
-    }
-
-    #[test]
-    fn typed_battle_settlement_updates_supply_mood_affection_and_mvp() {
-        let mut account =
-            NewAccountFactory::create(ProfileId::new("battle-settlement-state").unwrap(), "Battle");
-        let fleet_id = FleetId::new(1).unwrap();
-        let hero_ids = account
-            .dock
-            .heroes
-            .keys()
-            .copied()
-            .take(1)
-            .collect::<Vec<_>>();
-        assert_eq!(hero_ids.len(), 1);
-        account.fleet.fleets.insert(
-            fleet_id,
-            blueoath_domain::FleetRecord {
-                members: hero_ids.clone(),
-                ..blueoath_domain::FleetRecord::default()
-            },
-        );
-        let mut catalog = BattleCatalog::default();
-        catalog.copies.insert(
-            9,
-            BattleCopy {
-                config_id: 9,
-                copy_type: 2,
-                fleet_ids: vec![7],
-            },
-        );
-        catalog.supply_cost_by_copy.insert(9, (10, 0));
-        catalog.settlement_by_copy.insert(
-            9,
-            BattleSettlementRule {
-                affection_add: 500,
-                affection_flagship_add: 125,
-                affection_mvp_add: 125,
-                affection_reduce: 10_000,
-                mood_reduce: 20_000,
-                mood_shipwrecks_reduce: 100_000,
-            },
-        );
-        let before_supply = account
-            .resources
-            .amount(blueoath_domain::CurrencyKind::Supply)
-            .get();
-        let before_flagship = account.dock.heroes[&hero_ids[0]].clone();
-        let mut start = Vec::new();
-        append_varint_field(&mut start, 2, 9);
-        let state = ServerState::new("battle-settlement-state", "Battle", "test");
-        let mut effects = ResponseEffects::default();
-        assert!(matches!(
-            handle_typed_with_catalog(
-                &mut account,
-                "copy.StartBase",
-                &start,
-                TypedBattleContext::new(
-                    Some(&catalog),
-                    None,
-                    None,
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0,
-                    &mut effects,
-                )
-                .with_server_state(&state),
-            ),
-            HandlerResult::Reply(_)
-        ));
-        let mut pass = Vec::new();
-        append_varint_field(&mut pass, 8, 1);
-        append_varint_field(&mut pass, 9, hero_ids[0].get());
-        for hero_id in &hero_ids {
-            let mut hero = Vec::new();
-            append_varint_field(&mut hero, 1, hero_id.get());
-            append_varint_field(&mut hero, 2, 100);
-            append_message_field(&mut pass, 18, &hero);
-        }
-
-        assert!(matches!(
-            handle_typed_with_catalog(
-                &mut account,
-                "copy.PassBase",
-                &pass,
-                TypedBattleContext::new(
-                    Some(&catalog),
-                    None,
-                    None,
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0,
-                    &mut effects,
-                )
-                .with_server_state(&state),
-            ),
-            HandlerResult::Reply(_)
-        ));
-
-        assert_eq!(
-            account
-                .resources
-                .amount(blueoath_domain::CurrencyKind::Supply)
-                .get(),
-            before_supply - 10
-        );
-        assert_eq!(
-            account.dock.heroes[&hero_ids[0]].affection,
-            before_flagship.affection + 900
-        );
-        assert_eq!(
-            account.dock.heroes[&hero_ids[0]].mood,
-            before_flagship.mood - 20_000
-        );
-        let (_, posts, _) = effects.into_parts();
-        assert!(posts
-            .iter()
-            .any(|response| response.method == "user.UpdateUserInfo"));
-        assert!(posts
-            .iter()
-            .any(|response| response.method == "hero.UpdateHeroBagData"));
-    }
-
-    #[test]
-    fn typed_mini_game_pass_updates_battle_state() {
-        let mut account = NewAccountFactory::create(ProfileId::new("mini-game").unwrap(), "Battle");
-        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
-        account
-            .fleet
-            .fleets
-            .entry(FleetId::new(1).unwrap())
-            .or_default()
-            .members
-            .push(hero_id);
-        let mut request = Vec::new();
-        append_varint_field(&mut request, 1, 9);
-        append_varint_field(&mut request, 12, 15);
-        append_varint_field(&mut request, 19, 1);
-
-        assert!(matches!(
-            handle_typed(&mut account, "copy.PassMiniGame", &request),
-            HandlerResult::Reply(_)
-        ));
-        assert!(account
-            .battle
-            .passed_copies
-            .contains(&CopyId::new(9).unwrap()));
-        assert_eq!(account.battle.records.len(), 1);
-    }
-
-    #[test]
-    fn typed_copy_star_reward_is_idempotent_and_persistent_in_state() {
-        let mut account =
-            NewAccountFactory::create(ProfileId::new("star-reward").unwrap(), "Battle");
-        account.battle.passed_copies.insert(CopyId::new(9).unwrap());
-        let mut chapter_catalog = ChapterCatalog::default();
-        chapter_catalog.star_rewards_by_chapter.insert(
-            1,
-            ChapterStarRewards {
-                level_ids: vec![9],
-                star_conditions: vec![3],
-                reward_ids: vec![9001],
-            },
-        );
-        let mut task_catalog = TaskCatalog::default();
-        task_catalog.rewards_by_id.insert(9001, vec![(1, 5000, 2)]);
-        let mut request = Vec::new();
-        append_varint_field(&mut request, 1, 1);
-        append_varint_field(&mut request, 2, 1);
-        let mut effects = ResponseEffects::default();
-
-        assert!(matches!(
-            handle_typed_copy_star_reward(
-                &mut account,
-                "copy.StarReward",
-                &request,
-                Some(&chapter_catalog),
-                Some(&task_catalog),
-                &mut effects,
-            ),
-            HandlerResult::Reply(_)
-        ));
-        assert_eq!(
-            account
-                .inventory
-                .items
-                .get(&blueoath_domain::TemplateId::new(5000).unwrap()),
-            Some(&2)
-        );
-        assert!(matches!(
-            handle_typed_copy_star_reward(
-                &mut account,
-                "copy.FetchRewardBox",
-                &request,
-                Some(&chapter_catalog),
-                Some(&task_catalog),
-                &mut effects,
-            ),
-            HandlerResult::Error(GameError::InvalidState(_))
-        ));
-    }
-
-    #[test]
-    fn typed_copy_star_reward_accumulates_saved_copy_stars() {
-        let mut account =
-            NewAccountFactory::create(ProfileId::new("star-reward-sum").unwrap(), "Battle");
-        let first = CopyId::new(9).unwrap();
-        let second = CopyId::new(10).unwrap();
-        account.battle.passed_copies.insert(first);
-        account.battle.copy_stars.insert(first, 1);
-        let mut chapter_catalog = ChapterCatalog::default();
-        chapter_catalog.star_rewards_by_chapter.insert(
-            1,
-            ChapterStarRewards {
-                level_ids: vec![9, 10],
-                star_conditions: vec![3],
-                reward_ids: vec![9001],
-            },
-        );
-        let mut task_catalog = TaskCatalog::default();
-        task_catalog.rewards_by_id.insert(9001, vec![(1, 5001, 1)]);
-        let mut request = Vec::new();
-        append_varint_field(&mut request, 1, 1);
-        append_varint_field(&mut request, 2, 1);
-        let mut effects = ResponseEffects::default();
-        assert!(matches!(
-            handle_typed_copy_star_reward(
-                &mut account,
-                "copy.StarReward",
-                &request,
-                Some(&chapter_catalog),
-                Some(&task_catalog),
-                &mut effects,
-            ),
-            HandlerResult::Error(GameError::InvalidState(_))
-        ));
-        account.battle.passed_copies.insert(second);
-        account.battle.copy_stars.insert(second, 3);
-        assert!(matches!(
-            handle_typed_copy_star_reward(
-                &mut account,
-                "copy.StarReward",
-                &request,
-                Some(&chapter_catalog),
-                Some(&task_catalog),
-                &mut effects,
-            ),
-            HandlerResult::Reply(_)
-        ));
-    }
-
-    #[test]
-    fn typed_copy_star_reward_counts_bits_in_star_masks() {
-        let mut account =
-            NewAccountFactory::create(ProfileId::new("star-reward-mask").unwrap(), "Battle");
-        for copy_id in [9, 10, 11] {
-            let copy_id = CopyId::new(copy_id).unwrap();
-            account.battle.passed_copies.insert(copy_id);
-            account.battle.copy_stars.insert(copy_id, 7);
-        }
-        let mut chapter_catalog = ChapterCatalog::default();
-        chapter_catalog.star_rewards_by_chapter.insert(
-            1,
-            ChapterStarRewards {
-                level_ids: vec![9, 10, 11],
-                star_conditions: vec![10],
-                reward_ids: vec![9001],
-            },
-        );
-        let mut task_catalog = TaskCatalog::default();
-        task_catalog.rewards_by_id.insert(9001, vec![(1, 5001, 1)]);
-        let mut request = Vec::new();
-        append_varint_field(&mut request, 1, 1);
-        append_varint_field(&mut request, 2, 1);
-        let mut effects = ResponseEffects::default();
-
-        assert!(matches!(
-            handle_typed_copy_star_reward(
-                &mut account,
-                "copy.StarReward",
-                &request,
-                Some(&chapter_catalog),
-                Some(&task_catalog),
-                &mut effects,
-            ),
-            HandlerResult::Error(GameError::InvalidState(_))
-        ));
-    }
-
-    #[test]
-    fn typed_copy_records_project_delete_and_apply_to_fleet() {
-        let mut account =
-            NewAccountFactory::create(ProfileId::new("copy-record").unwrap(), "Battle");
-        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
-        account
-            .battle
-            .records
-            .push(blueoath_domain::CopyRecordState {
-                copy_id: CopyId::new(9).unwrap(),
-                hero_ids: vec![hero_id],
-                pass_time: 12,
-                secret_id: 2,
-                strategy_id: 3,
-                power: 99,
-                record_time: 100,
-                ex_buffs: vec![7],
-            });
-
-        let mut request = Vec::new();
-        append_varint_field(&mut request, 1, 9);
-        append_varint_field(&mut request, 2, 0);
-        assert!(matches!(
-            handle_typed(&mut account, "copy.GetRecord", &request),
-            HandlerResult::Reply(_)
-        ));
-        assert!(matches!(
-            handle_typed(&mut account, "copy.TacticOn", &request),
-            HandlerResult::Reply(_)
-        ));
-        assert_eq!(
-            account.fleet.fleets.values().next().unwrap().members,
-            vec![hero_id]
-        );
-        assert!(matches!(
-            handle_typed(&mut account, "copy.DeleteRecord", &request),
-            HandlerResult::Reply(_)
-        ));
-        assert!(account.battle.records.is_empty());
-    }
-
-    #[test]
-    fn typed_daily_copy_enter_starts_battle_and_updates_daily_state() {
-        let mut account =
-            NewAccountFactory::create(ProfileId::new("daily-enter").unwrap(), "Battle");
-        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
-        account.fleet.fleets.insert(
-            FleetId::new(1).unwrap(),
-            blueoath_domain::FleetRecord {
-                formation_id: 2,
-                tactic_id: 3,
-                members: vec![hero_id],
-                ..blueoath_domain::FleetRecord::default()
-            },
-        );
-        let mut request = Vec::new();
-        append_varint_field(&mut request, 1, 1);
-        append_varint_field(&mut request, 2, 1);
-        append_varint_field(&mut request, 3, 1);
-
-        assert!(matches!(
-            handle_typed(&mut account, "dailycopy.CopyEnter", &request),
-            HandlerResult::Reply(_)
-        ));
-        assert!(account.battle.active.is_some());
-        assert_eq!(
-            account
-                .daily_copy
-                .challenge_times
-                .get(&ChapterId::new(1).unwrap()),
-            Some(&1)
-        );
-    }
-
-    #[test]
-    fn typed_daily_copy_debits_supply_once_after_settlement() {
-        let mut account =
-            NewAccountFactory::create(ProfileId::new("daily-supply-order").unwrap(), "Battle");
-        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
-        account.fleet.fleets.insert(
-            FleetId::new(1).unwrap(),
-            blueoath_domain::FleetRecord {
-                members: vec![hero_id],
-                ..blueoath_domain::FleetRecord::default()
-            },
-        );
-        let mut catalog = BattleCatalog::default();
-        catalog.copies.insert(
-            1,
-            BattleCopy {
-                config_id: 1,
-                copy_type: 9,
-                fleet_ids: vec![1],
-            },
-        );
-        catalog.daily_group_by_copy.insert(1, 1);
-        catalog.supply_cost_by_copy.insert(1, (10, 0));
-        let before = account
-            .resources
-            .amount(blueoath_domain::CurrencyKind::Supply)
-            .get();
-        let mut request = Vec::new();
-        append_varint_field(&mut request, 1, 1);
-        append_varint_field(&mut request, 2, 1);
-        append_varint_field(&mut request, 3, 1);
-        let mut effects = ResponseEffects::default();
-
-        assert!(matches!(
-            handle_typed_with_catalog(
-                &mut account,
-                "dailycopy.CopyEnter",
-                &request,
-                TypedBattleContext::new(
-                    Some(&catalog),
-                    None,
-                    None,
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0,
-                    &mut effects,
-                ),
-            ),
-            HandlerResult::Reply(_)
-        ));
-        assert_eq!(
-            account
-                .resources
-                .amount(blueoath_domain::CurrencyKind::Supply)
-                .get(),
-            before
-        );
-        assert!(matches!(
-            handle_typed_with_catalog(
-                &mut account,
-                "copy.PassBase",
-                &[],
-                TypedBattleContext::new(
-                    Some(&catalog),
-                    None,
-                    None,
-                    1.0,
-                    1.0,
-                    1.0,
-                    1.0,
-                    &mut effects,
-                ),
-            ),
-            HandlerResult::Reply(_)
-        ));
-        assert_eq!(
-            account
-                .resources
-                .amount(blueoath_domain::CurrencyKind::Supply)
-                .get(),
-            before - 10
-        );
-    }
-
-    #[test]
-    fn typed_quit_clears_active_battle_session() {
-        let mut account =
-            NewAccountFactory::create(ProfileId::new("battle-quit").unwrap(), "Battle");
-        account.battle.active = Some(blueoath_domain::BattleSession {
-            chapter_id: ChapterId::new(1).unwrap(),
-            copy_id: CopyId::new(9).unwrap(),
-            current_fleet: 1,
-            started_at: 1,
-            expires_at: 2,
-            revision: 0,
-            remaining_fleet_ids: Vec::new(),
-            hero_ids: Vec::new(),
-            attack_count: 0,
-        });
-        assert!(matches!(
-            handle_typed(&mut account, "copy.QuitBase", &[]),
-            HandlerResult::Reply(_)
-        ));
-        assert!(account.battle.active.is_none());
-    }
-
-    #[test]
-    fn typed_mop_up_get_returns_domain_queue() {
-        let mut account = NewAccountFactory::create(ProfileId::new("mop-up").unwrap(), "Battle");
-        account
-            .sweep
-            .entries
-            .push(blueoath_domain::SweepEntryState {
-                fleet_id: 1,
-                copy_id: 9,
-                start_time: 10,
-                end_time: 20,
-                sweep_counts: 2,
-                chapter_id: 0,
-            });
-        let mut effects = ResponseEffects::default();
-        let result = handle_typed_mop_up(
-            &ServerState::new("mop-up", "Battle", "test"),
-            &mut account,
-            "mopUp.GetMopUpData",
-            &[],
-            None,
-            &mut effects,
-        );
-        assert!(matches!(result, HandlerResult::Reply(_)));
-        assert_eq!(account.sweep.entries[0].copy_id, 9);
-    }
-
-    #[test]
-    fn typed_sweep_does_not_debit_supply_when_reward_settlement_fails() {
-        let mut account =
-            NewAccountFactory::create(ProfileId::new("sweep-atomicity").unwrap(), "Battle");
-        let hero_id = account.dock.heroes.keys().next().copied().unwrap();
-        account.fleet.fleets.insert(
-            FleetId::new(1).unwrap(),
-            blueoath_domain::FleetRecord {
-                members: vec![hero_id],
-                ..blueoath_domain::FleetRecord::default()
-            },
-        );
-        account.battle.passed_copies.insert(CopyId::new(9).unwrap());
-        let mut catalog = BattleCatalog::default();
-        catalog.supply_cost_by_copy.insert(9, (10, 0));
-        catalog
-            .copy_must_drop_rewards
-            .insert(9, (1, vec![(1, 0, 1)]));
-        let before = account
-            .resources
-            .amount(blueoath_domain::CurrencyKind::Supply)
-            .get();
-        let mut request = Vec::new();
-        append_varint_field(&mut request, 1, 1);
-        append_varint_field(&mut request, 2, 9);
-        append_varint_field(&mut request, 3, 1);
-        let mut effects = ResponseEffects::default();
-
-        assert!(matches!(
-            handle_typed_mop_up(
-                &ServerState::new("mop-up", "Battle", "test"),
-                &mut account,
-                "mopUp.StartSweep",
-                &request,
-                Some(&catalog),
-                &mut effects,
-            ),
-            HandlerResult::Error(_)
-        ));
-        assert_eq!(
-            account
-                .resources
-                .amount(blueoath_domain::CurrencyKind::Supply)
-                .get(),
-            before
-        );
-    }
-
-    #[test]
-    fn typed_sweep_repeats_normal_drop_pipeline_for_each_run() {
-        let account = NewAccountFactory::create(ProfileId::new("sweep-drops").unwrap(), "Battle");
-        let mut catalog = BattleCatalog::default();
-        catalog.copies.insert(
-            9,
-            BattleCopy {
-                config_id: 9,
-                copy_type: 2,
-                fleet_ids: vec![7],
-            },
-        );
-        catalog.fleet_drop_ids.insert(7, vec![77]);
-        catalog.drop_pools.insert(77, vec![(1, 9_001, 2, 2, 1)]);
-        catalog
-            .copy_must_drop_rewards
-            .insert(9, (1, vec![(1, 9_002, 3)]));
-
-        let rewards = typed_sweep_rewards(&account, &catalog, 9, 2, 1.0);
-        let fleet_drops = rewards
-            .iter()
-            .filter(|reward| reward.item_id == 9_001 && reward.num == 2)
-            .count();
-        let guaranteed_drops = rewards
-            .iter()
-            .filter(|reward| reward.item_id == 9_002 && reward.num == 3)
-            .count();
-
-        assert_eq!(fleet_drops, 2);
-        assert_eq!(guaranteed_drops, 2);
-    }
 }

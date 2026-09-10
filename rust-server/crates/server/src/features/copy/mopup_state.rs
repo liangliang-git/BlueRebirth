@@ -1,91 +1,6 @@
 #![allow(dead_code)]
 
-#[cfg(test)]
-use serde_json::Value;
-
 use super::*;
-
-#[cfg(test)]
-#[cfg(test)]
-#[cfg(test)]
-pub(crate) fn mop_up_payload(account: &Value, now: u32) -> Vec<u8> {
-    mop_up_payload_with_pass_rets(account, now, &[])
-}
-
-#[cfg(test)]
-#[cfg(test)]
-#[cfg(test)]
-pub(crate) fn mop_up_payload_with_pass_rets(
-    account: &Value,
-    now: u32,
-    pass_rets: &[Vec<u8>],
-) -> Vec<u8> {
-    let entries = account
-        .get("sweep")
-        .and_then(|sweep| sweep.get("entries"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let mut output = Vec::new();
-    let active = mop_up_active_count(account, now);
-    append_varint_field(&mut output, 1, active as u64);
-    for entry in entries {
-        let mut encoded = Vec::new();
-        append_varint_field(
-            &mut encoded,
-            1,
-            json_i64(&entry, "fleetId").unwrap_or_default().max(0) as u64,
-        );
-        append_varint_field(
-            &mut encoded,
-            2,
-            json_i64(&entry, "copyId").unwrap_or_default().max(0) as u64,
-        );
-        append_varint_field(
-            &mut encoded,
-            3,
-            json_i64(&entry, "startTime").unwrap_or_default().max(0) as u64,
-        );
-        append_varint_field(
-            &mut encoded,
-            4,
-            json_i64(&entry, "endTime").unwrap_or_default().max(0) as u64,
-        );
-        append_varint_field(
-            &mut encoded,
-            5,
-            json_i64(&entry, "sweepCounts").unwrap_or_default().max(0) as u64,
-        );
-        append_varint_field(
-            &mut encoded,
-            6,
-            json_i64(&entry, "chapterId").unwrap_or_default().max(0) as u64,
-        );
-        append_message_field(&mut output, 2, &encoded);
-    }
-    for pass_ret in pass_rets {
-        append_message_field(&mut output, 3, pass_ret);
-    }
-    output
-}
-
-#[cfg(test)]
-#[cfg(test)]
-#[cfg(test)]
-pub(crate) fn completed_sweep_copy_id(account: &Value, now: u32) -> i32 {
-    account
-        .get("sweep")
-        .and_then(|sweep| sweep.get("entries"))
-        .and_then(Value::as_array)
-        .and_then(|entries| {
-            entries.iter().find_map(|entry| {
-                (json_i64(entry, "endTime").unwrap_or_default() <= i64::from(now))
-                    .then(|| json_i32(entry, "copyId"))
-                    .flatten()
-            })
-        })
-        .unwrap_or_default()
-}
 
 pub(crate) fn mop_up_pass_rets(copy_id: i32, rewards: &[ShopReward]) -> Vec<Vec<u8>> {
     // Emit completion record even when stage has no configured drops. The client opens
@@ -96,23 +11,6 @@ pub(crate) fn mop_up_pass_rets(copy_id: i32, rewards: &[ShopReward]) -> Vec<Vec<
     vec![battle_pass_payload_with_rewards(
         copy_id, false, 3, 60, rewards,
     )]
-}
-
-#[cfg(test)]
-#[cfg(test)]
-#[cfg(test)]
-pub(crate) fn mop_up_active_count(account: &Value, now: u32) -> usize {
-    account
-        .get("sweep")
-        .and_then(|sweep| sweep.get("entries"))
-        .and_then(Value::as_array)
-        .map(|entries| {
-            entries
-                .iter()
-                .filter(|entry| json_i64(entry, "endTime").unwrap_or_default() > i64::from(now))
-                .count()
-        })
-        .unwrap_or_default()
 }
 
 pub(crate) fn draw_draw_count(multiplier: f64, seed: u64) -> usize {
@@ -142,7 +40,104 @@ pub(crate) fn draw_copy_drop_with_seed(
     if depth >= 16 {
         return None;
     }
-    let entries = catalog.drop_pools.get(&drop_id)?;
+    catalog.drop_pools.get(&drop_id)?;
+    draw_copy_drop_rewards_with_seed(catalog, drop_id, depth, seed)
+        .into_iter()
+        .next()
+}
+
+pub(crate) fn draw_copy_drop_rewards_with_seed(
+    catalog: &BattleCatalog,
+    drop_id: i32,
+    depth: u8,
+    seed: u64,
+) -> Vec<ShopReward> {
+    if depth >= 16 {
+        return Vec::new();
+    }
+    let Some(pool) = catalog.drop_pools.get(&drop_id) else {
+        return Vec::new();
+    };
+    let mut rewards = Vec::new();
+    for index in 0..pool.random_count {
+        if let Some(reward) = draw_drop_entry_with_seed(
+            catalog,
+            &pool.random_entries,
+            depth,
+            seed.wrapping_add(u64::try_from(index).unwrap_or_default()),
+        ) {
+            rewards.push(reward);
+        }
+    }
+    let offset = u64::try_from(pool.random_count.max(0)).unwrap_or_default();
+    for index in 0..pool.separate_count {
+        if let Some(reward) = draw_drop_entry_with_seed(
+            catalog,
+            &pool.separate_entries,
+            depth,
+            seed.wrapping_add(offset)
+                .wrapping_add(u64::try_from(index).unwrap_or_default()),
+        ) {
+            rewards.push(reward);
+        }
+    }
+    rewards
+}
+
+pub(crate) fn draw_copy_category_rewards_with_seed(
+    catalog: &BattleCatalog,
+    drop_id: i32,
+    seed: u64,
+    include_first_clear: bool,
+) -> Vec<ShopReward> {
+    let Some(pool) = catalog.copy_drop_pools.get(&drop_id) else {
+        return Vec::new();
+    };
+    let mut rewards = Vec::new();
+    let mut offset = 0u64;
+    if include_first_clear {
+        for (index, entry) in pool.first_clear_entries.iter().enumerate() {
+            if let Some(reward) =
+                draw_drop_entry_direct(catalog, entry, 0, seed.wrapping_add(index as u64))
+            {
+                rewards.push(reward);
+            }
+        }
+        offset = pool.first_clear_entries.len() as u64;
+    }
+    for (index, entry) in pool.guaranteed_entries.iter().enumerate() {
+        if let Some(reward) =
+            draw_drop_entry_direct(catalog, entry, 0, seed.wrapping_add(offset + index as u64))
+        {
+            rewards.push(reward);
+        }
+    }
+    offset += pool.guaranteed_entries.len() as u64;
+    if !pool.random_entries.is_empty() {
+        for index in 0..pool.random_count {
+            if let Some(reward) = draw_drop_entry_with_seed(
+                catalog,
+                &pool.random_entries,
+                0,
+                seed.wrapping_add(offset)
+                    .wrapping_add(u64::try_from(index).unwrap_or_default()),
+            ) {
+                rewards.push(reward);
+            }
+        }
+    }
+    rewards
+}
+
+fn draw_drop_entry_with_seed(
+    catalog: &BattleCatalog,
+    entries: &[BuildDropEntry],
+    depth: u8,
+    seed: u64,
+) -> Option<ShopReward> {
+    if depth >= 16 {
+        return None;
+    }
     let total = entries
         .iter()
         .map(|entry| i64::from(entry.4.max(0)))
@@ -156,218 +151,92 @@ pub(crate) fn draw_copy_drop_with_seed(
         if roll >= 0 {
             continue;
         }
-        if entry.0 == 4 {
-            return draw_copy_drop_with_seed(
-                catalog,
-                entry.1,
-                depth + 1,
-                mix_build_draw_roll(seed ^ 0xA076_1D64_78BD_642F),
-            );
-        }
-        return Some(ShopReward {
-            goods_type: entry.0,
-            item_id: entry.1,
-            num: entry.2.max(1),
-            instance_id: 0,
-        });
+        return draw_drop_entry_direct(
+            catalog,
+            entry,
+            depth,
+            mix_build_draw_roll(seed ^ 0xA076_1D64_78BD_642F),
+        );
     }
     None
 }
 
-#[cfg(test)]
-#[cfg(test)]
-#[cfg(test)]
-pub(crate) fn fleet_hero_ids(account: &Value, fleet_id: u64) -> Vec<u64> {
-    let Some(tactics) = account
-        .get("fleet")
-        .and_then(|fleet| fleet.get("tactics"))
-        .and_then(Value::as_array)
-    else {
-        return Vec::new();
-    };
-    tactics
-        .iter()
-        .enumerate()
-        .find(|(index, tactic)| {
-            json_u64(tactic, "fleetId") == Some(fleet_id)
-                || u64::try_from(index.saturating_add(1)).ok() == Some(fleet_id)
-        })
-        .map(|(_, tactic)| {
-            json_i32_array(tactic, "heroInfo")
-                .into_iter()
-                .chain(json_i32_array(tactic, "heroIds"))
-                .filter(|id| *id > 0)
-                .filter_map(|id| u64::try_from(id).ok())
-                .collect()
-        })
-        .unwrap_or_default()
+fn draw_drop_entry_direct(
+    catalog: &BattleCatalog,
+    entry: &BuildDropEntry,
+    depth: u8,
+    seed: u64,
+) -> Option<ShopReward> {
+    if entry.0 == 4 {
+        return draw_copy_drop_with_seed(catalog, entry.1, depth + 1, seed);
+    }
+    Some(ShopReward {
+        goods_type: entry.0,
+        item_id: entry.1,
+        num: entry.2.max(1),
+        instance_id: 0,
+    })
 }
 
 #[cfg(test)]
-#[cfg(test)]
-#[cfg(test)]
-pub(crate) fn settle_mop_up(
-    account: &mut Value,
-    catalog: Option<&BattleCatalog>,
-    fashion_catalog: Option<&FashionList>,
-    now: u32,
-) -> Vec<ShopReward> {
-    settle_mop_up_with_config(
-        account,
-        catalog,
-        fashion_catalog,
-        now,
-        1.0,
-        1.0,
-        1.0,
-        None,
-        None,
-    )
-}
+mod tests {
+    use super::*;
 
-#[allow(clippy::too_many_arguments)]
-#[cfg(test)]
-#[cfg(test)]
-pub(crate) fn settle_mop_up_with_config(
-    account: &mut Value,
-    catalog: Option<&BattleCatalog>,
-    fashion_catalog: Option<&FashionList>,
-    now: u32,
-    drop_multiplier: f64,
-    commander_exp_multiplier: f64,
-    ship_exp_multiplier: f64,
-    commander_level_catalog: Option<&CommanderLevelCatalog>,
-    hero_level_catalog: Option<&HeroLevelCatalog>,
-) -> Vec<ShopReward> {
-    settle_mop_up_with_gameplay_config(
-        account,
-        catalog,
-        fashion_catalog,
-        now,
-        drop_multiplier,
-        commander_exp_multiplier,
-        ship_exp_multiplier,
-        1.0,
-        commander_level_catalog,
-        hero_level_catalog,
-    )
-}
+    #[test]
+    fn category_drop_keeps_singletons_and_draws_one_per_candidate_group() {
+        let mut catalog = BattleCatalog::default();
+        catalog.copy_drop_pools.insert(
+            20_0412,
+            BattleCopyDropPool {
+                first_clear_entries: vec![(5, 2, 50, 1, 1)],
+                guaranteed_entries: vec![(5, 9, 1, 1, 1), (1, 13_001, 1, 1, 1)],
+                random_entries: vec![(2, 30_012, 1, 1, 1), (2, 30_022, 1, 1, 1)],
+                random_count: 1,
+            },
+        );
 
-#[allow(clippy::too_many_arguments)]
-#[cfg(test)]
-#[cfg(test)]
-pub(crate) fn settle_mop_up_with_gameplay_config(
-    account: &mut Value,
-    catalog: Option<&BattleCatalog>,
-    fashion_catalog: Option<&FashionList>,
-    now: u32,
-    drop_multiplier: f64,
-    commander_exp_multiplier: f64,
-    ship_exp_multiplier: f64,
-    affection_multiplier: f64,
-    commander_level_catalog: Option<&CommanderLevelCatalog>,
-    hero_level_catalog: Option<&HeroLevelCatalog>,
-) -> Vec<ShopReward> {
-    let Some(catalog) = catalog else {
-        return Vec::new();
-    };
-    let completed = account
-        .get("sweep")
-        .and_then(|sweep| sweep.get("entries"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|entry| json_i64(entry, "endTime").unwrap_or_default() <= i64::from(now))
-        .cloned()
-        .collect::<Vec<_>>();
-    if completed.is_empty() {
-        return Vec::new();
-    }
-    let mut rewards = Vec::new();
-    for entry in &completed {
-        let copy_id = json_i32(entry, "copyId").unwrap_or_default();
-        let count = json_i32(entry, "sweepCounts")
-            .unwrap_or_default()
-            .clamp(1, 99);
-        let fleet_id = json_u64(entry, "fleetId").unwrap_or_default();
-        let hero_ids = fleet_hero_ids(account, fleet_id);
-        let (commander_base_exp, ship_base_exp) = battle_copy_experience(Some(catalog), copy_id);
-        for _ in 0..count {
-            let commander_exp =
-                scale_reward(i64::from(commander_base_exp), commander_exp_multiplier)
-                    .clamp(0, i64::from(i32::MAX)) as i32;
-            let ship_exp = scale_reward(i64::from(ship_base_exp), ship_exp_multiplier)
-                .clamp(0, i64::from(i32::MAX)) as i32;
-            add_commander_battle_exp(account, commander_exp, commander_level_catalog);
-            if !hero_ids.is_empty() {
-                add_ship_battle_exp(account, &hero_ids, ship_exp, hero_level_catalog);
-            }
-            if let Some(rule) = catalog.settlement_by_copy.get(&copy_id).copied() {
-                apply_battle_settlement(
-                    account,
-                    &hero_ids,
-                    None,
-                    &std::collections::HashSet::new(),
-                    rule,
-                    affection_multiplier,
-                );
-            }
-            rewards.extend(draw_battle_drop_rewards(
-                account,
-                Some(catalog),
-                copy_id,
-                drop_multiplier,
-                now,
-                fashion_catalog,
-            ));
-        }
-    }
-    if let Some(entries) = account
-        .get_mut("sweep")
-        .and_then(|sweep| sweep.get_mut("entries"))
-        .and_then(Value::as_array_mut)
-    {
-        entries.retain(|entry| json_i64(entry, "endTime").unwrap_or_default() > i64::from(now));
-    }
-    rewards
-}
+        let rewards = draw_copy_category_rewards_with_seed(&catalog, 20_0412, 7, true);
 
-#[cfg(test)]
-#[cfg(test)]
-pub(crate) fn update_mop_up_state(account: &mut Value, method: &str, args: &[u8], now: u32) {
-    let (fleet_id, copy_id, sweep_counts) = decode_mop_up_arg(args);
-    let Some(root) = account.as_object_mut() else {
-        return;
-    };
-    let sweep = root
-        .entry("sweep".to_owned())
-        .or_insert_with(|| json!({"entries": []}));
-    let Some(sweep) = sweep.as_object_mut() else {
-        return;
-    };
-    let entries = sweep
-        .entry("entries".to_owned())
-        .or_insert_with(|| json!([]));
-    let Some(entries) = entries.as_array_mut() else {
-        return;
-    };
-    if method == "mopUp.StopSweep" {
-        entries.retain(|entry| {
-            (fleet_id != 0 && json_u64(entry, "fleetId") != Some(fleet_id))
-                || (copy_id != 0 && json_u64(entry, "copyId") != Some(copy_id))
-        });
-        return;
+        assert_eq!(rewards.len(), 4);
+        assert!(rewards
+            .iter()
+            .any(|reward| { reward.goods_type == 5 && reward.item_id == 2 && reward.num == 50 }));
+        assert!(rewards
+            .iter()
+            .any(|reward| { reward.goods_type == 5 && reward.item_id == 9 && reward.num == 1 }));
+        assert!(rewards.iter().any(|reward| {
+            reward.goods_type == 1 && reward.item_id == 13_001 && reward.num == 1
+        }));
+        assert_eq!(
+            rewards
+                .iter()
+                .filter(|reward| reward.goods_type == 2)
+                .count(),
+            1
+        );
+
+        let repeat_rewards = draw_copy_category_rewards_with_seed(&catalog, 20_0412, 7, false);
+        assert_eq!(repeat_rewards.len(), 3);
+        assert!(!repeat_rewards
+            .iter()
+            .any(|reward| reward.goods_type == 5 && reward.item_id == 2));
     }
-    if fleet_id == 0 || copy_id == 0 || sweep_counts == 0 {
-        return;
+
+    #[test]
+    fn battle_drop_pools_draw_random_and_separate_categories() {
+        let mut catalog = BattleCatalog::default();
+        catalog.drop_pools.insert(
+            33_0101,
+            BattleDropPool {
+                random_entries: vec![(1, 10_182, 1, 1, 1)],
+                random_count: 1,
+                separate_entries: vec![(1, 10_185, 1, 1, 1)],
+                separate_count: 1,
+            },
+        );
+
+        let rewards = draw_copy_drop_rewards_with_seed(&catalog, 33_0101, 0, 9);
+
+        assert_eq!(rewards.len(), 2);
     }
-    entries.retain(|entry| json_u64(entry, "fleetId") != Some(fleet_id));
-    entries.push(json!({
-        "fleetId": fleet_id,
-        "copyId": copy_id,
-        "startTime": now,
-        "endTime": now.saturating_add(1),
-        "sweepCounts": sweep_counts,
-        "chapterId": 0,
-    }));
 }

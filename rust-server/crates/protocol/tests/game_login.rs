@@ -11,28 +11,27 @@ use blueoath_protocol::{
 };
 
 #[test]
-fn initial_guide_progress_skips_startup_but_keeps_feature_guides() {
+fn initial_guide_progress_skips_startup_and_2a_locking_guide() {
     let payload = GuideInfoCodec::encode_initial_progress_completed();
 
     assert!(payload
         .windows(b"GUIDE_DONE_STAGES".len())
         .any(|window| window == b"GUIDE_DONE_STAGES"));
-    for stage_id in ["10000", "100000", "1000000", "99995", "99998", "99992"] {
+    for stage_id in [
+        "10000", "100000", "1000000", "99995", "99998", "99992", "1200000",
+    ] {
         let stage_id = stage_id.as_bytes();
         assert!(payload
             .windows(stage_id.len())
             .any(|window| window == stage_id));
     }
     assert!(!payload
-        .windows(b"1200000".len())
-        .any(|window| window == b"1200000"));
-    assert!(!payload
         .windows(b"160000".len())
         .any(|window| window == b"160000"));
 }
 
 #[test]
-fn guide_progress_restores_saved_settings_without_exposing_internal_preferences() {
+fn guide_progress_restores_completed_settings_without_exposing_transient_state() {
     let settings = [
         (
             "GUIDE_DONE_STAGES".to_owned(),
@@ -49,12 +48,28 @@ fn guide_progress_restores_saved_settings_without_exposing_internal_preferences(
     assert!(payload
         .windows(b"1200000".len())
         .any(|window| window == b"1200000"));
-    assert!(payload
+    assert!(!payload
         .windows(b"1200001".len())
         .any(|window| window == b"1200001"));
     assert!(!payload
         .windows(b"__client_prefs".len())
         .any(|window| window == b"__client_prefs"));
+}
+
+#[test]
+fn guide_progress_merges_required_done_stages_into_saved_map() {
+    let settings = [("GUIDE_DONE_STAGES".to_owned(), "{[\"10000\"]=1}".to_owned())]
+        .into_iter()
+        .collect();
+
+    let payload = GuideInfoCodec::encode_progress(&settings);
+
+    assert!(payload
+        .windows(b"10000".len())
+        .any(|window| window == b"10000"));
+    assert!(payload
+        .windows(b"1200000".len())
+        .any(|window| window == b"1200000"));
 }
 
 #[test]
@@ -326,7 +341,9 @@ fn hero_bag_codec_emits_client_safe_grid_fields() {
     assert!(payload
         .windows(3)
         .any(|window| window == [0x10, 0xC8, 0x01]));
-    assert!(payload.contains(&0x12));
+    assert!(payload
+        .windows(6)
+        .any(|window| window == [0x1A, 0x04, 0x08, 0x00, 0x10, 0x01]));
     assert!(payload.contains(&0x6A));
 }
 

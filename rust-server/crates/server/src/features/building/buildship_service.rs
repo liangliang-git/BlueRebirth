@@ -383,8 +383,9 @@ fn grant_typed_build_reward(
                     exp: 0,
                     mood: MOOD_INITIAL as u32,
                     affection: 500_000,
-                    hp: 10_000_000_000,
+                    hp: ship_initial_hp_for_template(template_id.get()),
                     locked: false,
+                    created_utc: String::new(),
                     equip_slots: vec![None; 6],
                     pskills: std::collections::BTreeMap::new(),
                 };

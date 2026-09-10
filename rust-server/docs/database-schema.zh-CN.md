@@ -1,6 +1,6 @@
 # BlueRebirth 服务端数据库中文说明
 
-本文档对应 `客户端补丁/server/catalog/data/profiles.db` 当前 SQLite 结构，共 54 张业务表。结构来源为实际数据库及 `rust-server/migrations` 迁移文件。
+本文档对应 `客户端补丁/server/saves/profiles.db` 当前 SQLite 结构。结构来源为实际数据库及 `rust-server/migrations` 迁移文件。
 
 ## 通用约定
 
@@ -48,7 +48,7 @@
 | `name` | TEXT | 指挥官名称 |
 | `level` | INTEGER | 指挥官等级 |
 | `exp` | INTEGER | 指挥官当前经验 |
-| `secretary_id` | INTEGER | 当前秘书舰实例 ID，对应 `heroes.hero_id` |
+| `secretary_id` | INTEGER | 当前秘书舰实例 ID，对应 `hero_runtime.hero_id` |
 | `gold` | INTEGER | 金币数量 |
 | `diamond` | INTEGER | 钻石数量 |
 | `supply` | INTEGER | 燃料数量 |
@@ -61,23 +61,41 @@
 
 ## 舰船、装备与背包
 
-### `heroes` - 舰船实例
+### `hero_runtime` - 舰船统一运行时数据
+
+舰船实例、等级、经验、状态、服务器计算属性、装备槽、技能等级全部按舰船实例保存。该表已合并原 `heroes`；静态模板属性仍通过 `template_id` 关联全局 `ship_template`。
 
 | 字段 | 类型 | 中文说明 |
 |---|---|---|
 | `profile_id` | TEXT | 存档 ID，复合主键 |
 | `hero_id` | INTEGER | 舰船实例 ID，复合主键 |
-| `template_id` | INTEGER | 舰船模板/突破阶段配置 ID |
-| `level` | INTEGER | 舰船等级 |
-| `exp` | INTEGER | 舰船当前经验 |
-| `mood` | INTEGER | 舰船心情值 |
-| `affection` | INTEGER | 舰船好感值 |
-| `hp` | INTEGER | 舰船持久/生命状态值 |
-| `lock_state` | INTEGER | 锁定状态，`0=未锁定`、`1=锁定` |
-| `created_utc` | TEXT | 获得时间，ISO 8601 UTC |
+| `template_id` | INTEGER | 全局舰船模板 ID |
+| `fashioning` | INTEGER | 当前装备时装 ID |
 | `name` | TEXT | 舰船自定义名称 |
 | `change_name_time` | INTEGER | 最近改名时间，Unix 秒 |
-| `fashioning` | INTEGER | 当前装备时装 ID |
+| `level` / `exp` | INTEGER | 舰船等级 / 当前经验 |
+| `mood` / `affection` | INTEGER | 心情值 / 好感值 |
+| `current_hp` | INTEGER | 当前生命值 |
+| `lock_state` | INTEGER | 锁定状态，`0=未锁定`、`1=锁定` |
+| `created_utc` | TEXT | 获得时间，ISO 8601 UTC |
+| `max_level` | INTEGER | 舰船最大等级 |
+| `intensify_level` | INTEGER | 强化等级汇总 |
+| `breakthrough_level` | INTEGER | 突破等级 |
+| `remould_level` | INTEGER | 改造等级 |
+| `resonance_level` | INTEGER | 共鸣等级 |
+| `computed_max_hp` | INTEGER | 服务端计算最大生命值 |
+| `computed_scout_num` | INTEGER | 服务端计算索敌/侦察值 |
+| `computed_attack` / `computed_defense` | INTEGER | 服务端计算攻击 / 防御 |
+| `computed_torpedo_attack` / `computed_torpedo_defense` | INTEGER | 服务端计算雷击 / 雷击防御 |
+| `computed_to_air_attack` / `computed_to_torpedo_attack` | INTEGER | 服务端计算对空 / 对鱼雷攻击 |
+| `computed_ship_bomb_attack` / `computed_ship_torpedo_attack` | INTEGER | 服务端计算舰爆 / 舰攻 |
+| `computed_ship_air_control` | INTEGER | 服务端计算制空值 |
+| `computed_crit` / `computed_anti_crit` | INTEGER | 服务端计算暴击 / 抗暴 |
+| `computed_hit` / `computed_dodge` | INTEGER | 服务端计算命中 / 闪避 |
+| `computed_attributes_json` | TEXT | 其他服务端计算属性 JSON |
+| `equip_slot_1` ~ `equip_slot_6` | INTEGER | 六个装备槽中的装备实例 ID，可为空 |
+| `skill_levels_json` | TEXT | 技能 ID 到技能等级的 JSON 映射；不再单独持久化技能槽字段 |
+| `updated_utc` | TEXT | 最近更新时间，ISO 8601 UTC |
 
 ### `equipments` - 装备实例
 
@@ -90,15 +108,6 @@
 | `star` | INTEGER | 装备星级 |
 | `enhance_exp` | INTEGER | 强化经验/强化进度 |
 | `hero_id` | INTEGER | 装备所属舰船实例 ID；未装备时为空 |
-
-### `hero_equip_slots` - 舰船装备槽
-
-| 字段 | 类型 | 中文说明 |
-|---|---|---|
-| `profile_id` | TEXT | 存档 ID，复合主键 |
-| `hero_id` | INTEGER | 舰船实例 ID，复合主键 |
-| `slot_index` | INTEGER | 装备槽序号，复合主键 |
-| `equip_id` | INTEGER | 槽内装备实例 ID；空槽为 NULL |
 
 ### `inventory` - 道具背包
 
@@ -129,22 +138,14 @@
 | `tactic_name` | TEXT | 战术/舰队名称 |
 | `tactic_type` | INTEGER | 战术类型 |
 
-### `fleet_members` - 舰队普通成员
+### `fleet_members` - 舰队成员
 
 | 字段 | 类型 | 中文说明 |
 |---|---|---|
 | `profile_id` | TEXT | 存档 ID，复合主键 |
 | `fleet_id` | INTEGER | 舰队 ID，复合主键 |
+| `member_kind` | INTEGER | 成员类别，`0=普通`、`1=扩展`，参与复合主键 |
 | `position` | INTEGER | 编队位置，复合主键 |
-| `hero_id` | INTEGER | 舰船实例 ID |
-
-### `fleet_ex_members` - 舰队扩展成员
-
-| 字段 | 类型 | 中文说明 |
-|---|---|---|
-| `profile_id` | TEXT | 存档 ID，复合主键 |
-| `fleet_id` | INTEGER | 舰队 ID，复合主键 |
-| `position` | INTEGER | 扩展队列位置，复合主键 |
 | `hero_id` | INTEGER | 舰船实例 ID |
 
 ### `preset_fleet_meta` - 预设舰队全局状态
@@ -276,15 +277,6 @@
 | `select_ex` | INTEGER | 已选择的扩展难度/模式 |
 | `extra_group` | INTEGER | 额外关卡组 ID |
 | `ex_star` | INTEGER | 扩展难度累计星级 |
-
-### `sea_progress` - 海域关卡进度
-
-| 字段 | 类型 | 中文说明 |
-|---|---|---|
-| `profile_id` | TEXT | 存档 ID，复合主键 |
-| `copy_id` | INTEGER | 海域关卡 ID，复合主键 |
-| `star_level` | INTEGER | 海域关卡星级位掩码/星级状态 |
-| `pass_count` | INTEGER | 累计通关次数 |
 
 ### `sea_difficulty` - 海域难度选择
 
@@ -580,7 +572,17 @@
 
 ## 旧本地服务兼容表
 
-以下三张表服务早期简化协议和本地接口，不等同于当前游戏登录协议的 `characters`、`heroes`、`fleets`。
+以下三张表服务早期简化协议和本地接口，不等同于当前游戏登录协议的 `characters`、`hero_runtime`、`fleets`。
+
+## 表合并检查结论
+
+- `heroes` 已合并到 `hero_runtime`，后续只读写 `hero_runtime`。
+- `hero_equip_slots` 与 `hero_runtime.equip_slot_1` ~ `equip_slot_6` 重复，已删除。
+- `fleet_ex_members` 已合并到 `fleet_members`，使用 `member_kind` 区分普通/扩展编队。
+- `sea_progress` 是旧版关卡进度表，已并入 `copy_progress` 后删除。
+- `equipments`、`ship_template`、`characters` 不合并：分别是装备实例、全局静态模板、指挥官账号资源，生命周期和数量关系不同。
+- `copy_*`、`battle_*`、`support_*`、`supply_*`、`building_*`、`preset_fleet_*` 是不同业务父对象下的关系/进度表，不能按舰船实例直接合并。
+- `activity_progress`、任务、聊天、公会、时装、背包和旧 `local_*` 表的数据域不同，保留独立表。
 
 ### `local_runtime` - 旧本地账号状态
 
@@ -622,8 +624,8 @@ FROM characters;
 ### 查看舰船状态
 
 ```sql
-SELECT hero_id, template_id, level, exp, mood, affection, hp, fashioning
-FROM heroes
+SELECT hero_id, template_id, level, exp, mood, affection, current_hp, fashioning
+FROM hero_runtime
 WHERE profile_id = 'local-player'
 ORDER BY hero_id;
 ```
@@ -658,4 +660,3 @@ SELECT *
 FROM battle_sessions
 WHERE profile_id = 'local-player';
 ```
-

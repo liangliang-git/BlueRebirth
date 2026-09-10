@@ -80,9 +80,23 @@ foreach ($fileName in @('announcements.json', 'gm-goods.json', 'gm-mails.json', 
   if (-not (Test-Path -LiteralPath $runtimePath -PathType Leaf)) {
     throw "Server runtime data file is missing: $runtimePath"
   }
-  Copy-Item -LiteralPath $runtimePath -Destination (Join-Path $runtimeDestination $fileName) -Force
+  $runtimeDestinationPath = Join-Path $runtimeDestination $fileName
+  if ([System.IO.Path]::GetFullPath($runtimePath) -ne [System.IO.Path]::GetFullPath($runtimeDestinationPath)) {
+    Copy-Item -LiteralPath $runtimePath -Destination $runtimeDestinationPath -Force
+  }
 }
 
 $bytes = ($files | Measure-Object -Property Length -Sum).Sum
 Write-Host "Exported $($files.Count) config databases ($bytes source bytes) as $ConfigFormat to $destination" -ForegroundColor Green
 Write-Host "Copied 4 server runtime JSON files to $runtimeDestination" -ForegroundColor Green
+
+if ($ConfigFormat -in @('json', 'both')) {
+  $catalogRoot = Split-Path -Parent $destination
+  $catalogDbBuilder = Join-Path $repoRoot 'tools\build-catalog-db.py'
+  $catalogDb = Join-Path (Split-Path -Parent $catalogRoot) 'server_config.db'
+  & $python.Source $catalogDbBuilder --catalog-root $catalogRoot --output $catalogDb
+  if ($LASTEXITCODE -ne 0) {
+    throw "catalog database build failed with exit code $LASTEXITCODE"
+  }
+  Write-Host "Built server_config.db under $(Split-Path -Parent $catalogRoot)" -ForegroundColor Green
+}

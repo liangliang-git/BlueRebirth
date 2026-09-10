@@ -118,6 +118,16 @@ impl BattleService {
         account: &mut AccountState,
         context: BattleStartContext,
     ) -> Result<(), GameServiceError> {
+        // A client can disconnect before sending PassBase/QuitBase. Expired sessions
+        // remain persisted, so they must not block the next battle indefinitely.
+        if account
+            .battle
+            .active
+            .as_ref()
+            .is_some_and(|session| session.expires_at <= context.started_at)
+        {
+            account.battle.active = None;
+        }
         if account.battle.active.is_some() {
             return Err(GameServiceError::BattleAlreadyActive);
         }
@@ -248,6 +258,7 @@ mod tests {
                 affection: 0,
                 hp: 1,
                 locked: false,
+                created_utc: String::new(),
                 equip_slots: Vec::new(),
                 pskills: std::collections::BTreeMap::new(),
             },
@@ -355,5 +366,40 @@ mod tests {
             Err(GameServiceError::BattleExpired)
         );
         assert!(account.battle.active.is_some());
+    }
+
+    #[test]
+    fn battle_service_replaces_expired_persisted_session() {
+        let mut account = account();
+        BattleService::start_with_context(
+            &mut account,
+            BattleStartContext {
+                chapter_id: ChapterId::new(1).unwrap(),
+                copy_id: CopyId::new(2).unwrap(),
+                fleet_id: FleetId::new(1).unwrap(),
+                hero_ids: vec![HeroId::new(7).unwrap()],
+                remaining_fleet_ids: vec![2],
+                started_at: 10,
+                expires_at: 20,
+            },
+        )
+        .unwrap();
+        BattleService::start_with_context(
+            &mut account,
+            BattleStartContext {
+                chapter_id: ChapterId::new(1).unwrap(),
+                copy_id: CopyId::new(3).unwrap(),
+                fleet_id: FleetId::new(1).unwrap(),
+                hero_ids: vec![HeroId::new(7).unwrap()],
+                remaining_fleet_ids: vec![3],
+                started_at: 20,
+                expires_at: 30,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            account.battle.active.unwrap().copy_id,
+            CopyId::new(3).unwrap()
+        );
     }
 }

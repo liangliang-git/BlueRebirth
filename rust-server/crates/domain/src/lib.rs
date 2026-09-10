@@ -192,6 +192,9 @@ pub struct HeroState {
     pub affection: u64,
     pub hp: u64,
     pub locked: bool,
+    /// UTC timestamp when this ship instance was created.
+    #[serde(default)]
+    pub created_utc: String,
     pub equip_slots: Vec<Option<EquipId>>,
     #[serde(default)]
     pub pskills: BTreeMap<u64, u32>,
@@ -201,6 +204,56 @@ pub struct HeroState {
 pub struct DockState {
     pub heroes: BTreeMap<HeroId, HeroState>,
     pub equipments: BTreeMap<EquipId, EquipmentState>,
+    /// Server-owned calculated combat snapshot for each hero.
+    /// Static values live in the global ship template catalog.
+    #[serde(default)]
+    pub computed_stats: BTreeMap<HeroId, HeroComputedStats>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeroComputedStats {
+    pub max_hp: u64,
+    pub scout_num: u64,
+    pub attack: u64,
+    pub defense: u64,
+    pub torpedo_attack: u64,
+    pub torpedo_defense: u64,
+    pub to_air_attack: u64,
+    pub to_torpedo_attack: u64,
+    pub ship_bomb_attack: u64,
+    pub ship_torpedo_attack: u64,
+    pub ship_air_control: u64,
+    pub crit: u64,
+    pub anti_crit: u64,
+    pub hit: u64,
+    pub dodge: u64,
+    /// Attributes known by client protocol but not promoted to named columns yet.
+    #[serde(default)]
+    pub extra_attributes: BTreeMap<i32, i64>,
+}
+
+impl HeroComputedStats {
+    pub fn from_attributes(attributes: &BTreeMap<i32, i64>) -> Self {
+        let get = |id| attributes.get(&id).copied().unwrap_or_default().max(0) as u64;
+        Self {
+            max_hp: get(1),
+            scout_num: get(5),
+            attack: get(8),
+            defense: get(9),
+            torpedo_attack: get(10),
+            torpedo_defense: get(11),
+            to_air_attack: get(12),
+            to_torpedo_attack: get(13),
+            ship_bomb_attack: get(14),
+            ship_torpedo_attack: get(15),
+            ship_air_control: get(16),
+            crit: get(17),
+            anti_crit: get(18),
+            hit: get(19),
+            dodge: get(20),
+            extra_attributes: attributes.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1201,6 +1254,7 @@ impl NewAccountFactory {
                 affection: 500_000,
                 hp: 10_000_000_000,
                 locked: true,
+                created_utc: String::new(),
                 equip_slots: vec![
                     Some(EquipId::new(1).expect("starter equipment id is positive")),
                     None,

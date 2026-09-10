@@ -13,7 +13,8 @@
 
 已包含
 - server\blueoath-server.exe：Rust Release 服务端
-- server\catalog：日服配置、掉落配置、商店/邮件配置、账号存档
+- server\server_config.db：服务端配置数据库
+- server\saves：账号存档
 - client-patch\native：x86 注入器和 Payload
 - client-patch\Mods：Lua 客户端补丁
 - start-rust-client-only.bat：服务端已运行时只启动客户端
@@ -37,6 +38,6 @@
 说明
 - 仅支持当前日服 Windows 客户端，GameAssembly.dll 哈希已固定。
 - 补丁包不包含原始客户端资源；原客户端必须已经在游戏根目录的 blueoath 文件夹中。
-- 账号数据保存于 server\catalog\data\profiles.db。
+- 账号数据保存于 server\saves\profiles.db。
 - 服务端端口：HTTP 7080；游戏登录 TCP/KCP 7201；客户端重定向端口 10173。
 - 若客户端更新导致 GameAssembly.dll 哈希变化，需要重新生成并替换补丁包中的 GAME_HASH 和 native 文件。

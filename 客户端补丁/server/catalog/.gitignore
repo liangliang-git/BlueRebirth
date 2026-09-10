@@ -1,7 +1,0 @@
-config/*.db
-data/*.json
-data/*.db
-!data/announcements.json
-!data/build-pools.json
-!data/gm-goods.json
-!data/gm-mails.json

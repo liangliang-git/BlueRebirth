@@ -413,6 +413,7 @@ pub(crate) fn handle_typed(
             for entry in request.entries {
                 let key = entry.key;
                 let value = entry.value;
+                tracing::debug!(key = %key, value = %value, "guide setting update");
                 account.guide.settings.insert(key.clone(), value.clone());
                 let mut setting = Vec::new();
                 append_bytes_field(&mut setting, 1, key.as_bytes());
@@ -1299,29 +1300,6 @@ fn typed_milestone_info_payload(account: &blueoath_domain::AccountState) -> Vec<
     output
 }
 
-#[cfg(test)]
-fn apply_support_reward(
-    account: &mut Value,
-    hero_ids: &[u64],
-    hero_level_catalog: Option<&HeroLevelCatalog>,
-    goods_type: i32,
-    item_id: i32,
-    amount: i32,
-) {
-    if amount <= 0 || item_id <= 0 {
-        return;
-    }
-    if goods_type == 5 && item_id == 6 {
-        add_ship_battle_exp(account, hero_ids, amount, hero_level_catalog);
-    } else if goods_type == 5 {
-        if let Some(key) = currency_character_key(item_id) {
-            add_character_i64(account, key, amount);
-        }
-    } else if goods_type == 1 || goods_type == 6 {
-        add_bag_item(account, item_id, amount);
-    }
-}
-
 fn encode_support_settlement(settlement: &SupportSettlement) -> Vec<u8> {
     let mut output = Vec::new();
     for (field, rewards) in [
@@ -1445,8 +1423,9 @@ mod tests {
                 exp: 0,
                 mood: 100,
                 affection: 0,
-                hp: 10_000_000_000,
+                hp: ship_initial_hp_for_template(10_210_511),
                 locked: false,
+                created_utc: String::new(),
                 equip_slots: Vec::new(),
                 pskills: std::collections::BTreeMap::new(),
             },
