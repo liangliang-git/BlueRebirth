@@ -1,5 +1,4 @@
 use super::*;
-use crate::catalog_db;
 use crate::config::SharedPush;
 use blueoath_domain::{
     AccountRepository, AccountState, NewAccountFactory, ProfileId, RepositoryError,
@@ -37,7 +36,7 @@ fn refresh_typed_hero_stats(account: &mut AccountState) {
         .heroes
         .values()
         .map(|hero| {
-            let attributes = ship_attributes_for_typed_hero(
+            let attributes = ship_attributes_for_typed_hero_with_heroes(
                 hero,
                 &account.activities.progress,
                 &account.dock.equipments,
@@ -45,6 +44,7 @@ fn refresh_typed_hero_stats(account: &mut AccountState) {
                 EQUIP_CATALOG.get(),
                 SHIP_REMOULD_CATALOG.get(),
                 SHIP_STAT_MULTIPLIER.get().copied().unwrap_or(1.0),
+                Some(&account.dock.heroes),
             );
             (
                 hero.id,
@@ -60,8 +60,9 @@ fn normalize_typed_hero_hp(account: &mut AccountState) {
     let Some(catalog) = SHIP_STAT_CATALOG.get() else {
         return;
     };
+    let heroes = account.dock.heroes.clone();
     for hero in account.dock.heroes.values_mut() {
-        let max_hp = ship_max_hp_for_typed_hero(
+        let max_hp = ship_max_hp_for_typed_hero_with_heroes(
             hero,
             &account.activities.progress,
             &account.dock.equipments,
@@ -69,6 +70,7 @@ fn normalize_typed_hero_hp(account: &mut AccountState) {
             EQUIP_CATALOG.get(),
             SHIP_REMOULD_CATALOG.get(),
             SHIP_STAT_MULTIPLIER.get().copied().unwrap_or(1.0),
+            Some(&heroes),
         );
         if hero.hp > max_hp {
             hero.hp = max_hp;
@@ -134,41 +136,35 @@ fn persist_typed_account(
 
 pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
     let store = ProfileStore::open(&config.data_root)?;
-    if let Some(catalog_path) = config.catalog_path.as_ref() {
-        let config_dir = config_dir(catalog_path);
-        let database_path = catalog_db::catalog_db_path(&config_dir);
-        catalog_db::validate_catalog_db(&database_path).map_err(|error| {
-            ServerError::Catalog(format!(
-                "catalog database {} is invalid: {error}",
-                database_path.display()
-            ))
-        })?;
-    }
-    let _ =
-        BUILD_SHIP_CATALOG.get_or_init(|| load_build_ship_catalog(config.catalog_path.as_ref()));
+    let config_source =
+        ConfigSource::open(config.catalog_path.as_deref()).map_err(ServerError::Catalog)?;
+    config_source
+        .warm_required_configs()
+        .map_err(ServerError::Catalog)?;
+    let _ = BUILD_SHIP_CATALOG.get_or_init(|| load_build_ship_catalog(Some(config_source.root())));
     let _ = BUILD_FORMULA_CATALOG
-        .get_or_init(|| load_build_formula_catalog(config.catalog_path.as_ref()));
-    let _ = TALENT_CATALOG.get_or_init(|| load_talent_catalog(config.catalog_path.as_ref()));
-    let _ = SHIP_STAT_CATALOG.get_or_init(|| load_ship_stat_catalog(config.catalog_path.as_ref()));
-    let _ = EQUIP_CATALOG.get_or_init(|| load_equip_catalog(config.catalog_path.as_ref()));
+        .get_or_init(|| load_build_formula_catalog(Some(config_source.root())));
+    let _ = TALENT_CATALOG.get_or_init(|| load_talent_catalog(Some(config_source.root())));
+    let _ = SHIP_STAT_CATALOG.get_or_init(|| load_ship_stat_catalog(Some(config_source.root())));
+    let _ =
+        COMBINATION_CATALOG.get_or_init(|| load_combination_catalog(Some(config_source.root())));
+    let _ = EQUIP_CATALOG.get_or_init(|| load_equip_catalog(Some(config_source.root())));
     let _ = SHIP_STAT_MULTIPLIER.get_or_init(|| normalize_multiplier(config.ship_stat_multiplier));
-    let _ =
-        HERO_SKILL_CATALOG.get_or_init(|| load_hero_skill_catalog(config.catalog_path.as_ref()));
+    let _ = HERO_SKILL_CATALOG.get_or_init(|| load_hero_skill_catalog(Some(config_source.root())));
     let _ = HERO_SKILL_UPGRADE_CATALOG
-        .get_or_init(|| load_hero_skill_upgrade_catalog(config.catalog_path.as_ref()));
+        .get_or_init(|| load_hero_skill_upgrade_catalog(Some(config_source.root())));
     let _ = SHIP_INTENSIFY_CATALOG
-        .get_or_init(|| load_ship_intensify_catalog(config.catalog_path.as_ref()));
+        .get_or_init(|| load_ship_intensify_catalog(Some(config_source.root())));
+    let _ = SHIP_BREAK_CATALOG.get_or_init(|| load_ship_break_catalog(Some(config_source.root())));
     let _ =
-        SHIP_BREAK_CATALOG.get_or_init(|| load_ship_break_catalog(config.catalog_path.as_ref()));
-    let _ = SHIP_ADVANCE_CATALOG
-        .get_or_init(|| load_ship_advance_catalog(config.catalog_path.as_ref()));
-    let _ = SHIP_REMOULD_CATALOG
-        .get_or_init(|| load_ship_remould_catalog(config.catalog_path.as_ref()));
-    let _ = RECHARGE_CATALOG.get_or_init(|| load_recharge_catalog(config.catalog_path.as_ref()));
-    let _ = GAMEPLAY_CATALOG.get_or_init(|| load_gameplay_catalog(config.catalog_path.as_ref()));
+        SHIP_ADVANCE_CATALOG.get_or_init(|| load_ship_advance_catalog(Some(config_source.root())));
+    let _ =
+        SHIP_REMOULD_CATALOG.get_or_init(|| load_ship_remould_catalog(Some(config_source.root())));
+    let _ = RECHARGE_CATALOG.get_or_init(|| load_recharge_catalog(Some(config_source.root())));
+    let _ = GAMEPLAY_CATALOG.get_or_init(|| load_gameplay_catalog(Some(config_source.root())));
     let _ = COMMANDER_LEVEL_CATALOG
-        .get_or_init(|| load_commander_level_catalog(config.catalog_path.as_ref()));
-    let _ = SUPPORT_CATALOG.get_or_init(|| load_support_catalog(config.catalog_path.as_ref()));
+        .get_or_init(|| load_commander_level_catalog(Some(config_source.root())));
+    let _ = SUPPORT_CATALOG.get_or_init(|| load_support_catalog(Some(config_source.root())));
     BUILD_SHIP_CATALOG
         .get()
         .expect("build ship catalog initialized")
@@ -224,24 +220,27 @@ pub async fn run(config: ServerConfig) -> Result<(), ServerError> {
         .transpose()?
         .map(|address| address.port());
     let advertised_game_login_port = game_login_port.or(kcp_game_login_port);
-    let mut shop = load_shop_catalog(config.catalog_path.as_ref());
-    load_server_shop_goods(&mut shop, &config.data_root);
+    let mut shop = load_shop_catalog(Some(config_source.root()));
+    load_server_shop_goods(&mut shop, Some(config_source.database_path()))
+        .map_err(ServerError::Catalog)?;
+    let mail_templates = load_server_mail_templates(Some(config_source.database_path()))
+        .map_err(ServerError::Catalog)?;
     let catalogs = Arc::new(GameCatalogs {
-        chapters: Arc::new(load_chapter_catalog(config.catalog_path.as_ref())),
-        fashion: Arc::new(load_fashion_catalog(config.catalog_path.as_ref())),
-        equip: Arc::new(load_equip_catalog(config.catalog_path.as_ref())),
+        chapters: Arc::new(load_chapter_catalog(Some(config_source.root()))),
+        fashion: Arc::new(load_fashion_catalog(Some(config_source.root()))),
+        equip: Arc::new(load_equip_catalog(Some(config_source.root()))),
         shop: Arc::new(shop),
-        handbook_behaviours: Arc::new(load_handbook_behaviours(config.catalog_path.as_ref())),
-        hero_memories: Arc::new(load_hero_memories(config.catalog_path.as_ref())),
-        tasks: Arc::new(load_task_catalog(config.catalog_path.as_ref())),
-        battle: Arc::new(load_battle_catalog(config.catalog_path.as_ref())),
-        mails: Arc::new(load_server_mail_templates(&config.data_root)),
-        hero_level: Arc::new(load_hero_level_catalog(config.catalog_path.as_ref())),
-        hero_breakdown: Arc::new(load_hero_breakdown_catalog(config.catalog_path.as_ref())),
-        buildings: Arc::new(load_building_catalog(config.catalog_path.as_ref())),
-        equip_new_test: Arc::new(load_equip_new_test_catalog(config.catalog_path.as_ref())),
-        affection: Arc::new(load_affection_catalog(config.catalog_path.as_ref())),
-        combination: Arc::new(load_combination_catalog(config.catalog_path.as_ref())),
+        handbook_behaviours: Arc::new(load_handbook_behaviours(Some(config_source.root()))),
+        hero_memories: Arc::new(load_hero_memories(Some(config_source.root()))),
+        tasks: Arc::new(load_task_catalog(Some(config_source.root()))),
+        battle: Arc::new(load_battle_catalog(Some(config_source.root()))),
+        mails: Arc::new(mail_templates),
+        hero_level: Arc::new(load_hero_level_catalog(Some(config_source.root()))),
+        hero_breakdown: Arc::new(load_hero_breakdown_catalog(Some(config_source.root()))),
+        buildings: Arc::new(load_building_catalog(Some(config_source.root()))),
+        equip_new_test: Arc::new(load_equip_new_test_catalog(Some(config_source.root()))),
+        affection: Arc::new(load_affection_catalog(Some(config_source.root()))),
+        combination: Arc::new(load_combination_catalog(Some(config_source.root()))),
     });
     catalogs.validate().map_err(ServerError::Catalog)?;
     catalogs

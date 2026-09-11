@@ -2,6 +2,9 @@ local EQUIP_ID = 900001
 local SOURCE_EQUIP_ID = 30023
 local SHOP_GOOD_ID = 990001
 local SOURCE_SHOP_GOOD_ID = 20013
+local SSR_EQUIPMENT_SHOP_GOOD_BASE = 1800000
+local UR_EQUIPMENT_SHOP_GOOD_BASE = 2800000
+local EQUIPMENT_SHOP_PRICE = 200
 
 local config_patched = false
 
@@ -73,6 +76,109 @@ local function ensure_shop_good(configs)
   return configs
 end
 
+local function quality_equipment_shop_spec(good_id, equipment_configs)
+  local numeric_good_id = tonumber(good_id)
+  if numeric_good_id == nil or type(equipment_configs) ~= "table" then
+    return nil
+  end
+
+  local good_base = nil
+  local quality = nil
+  local currency_id = nil
+  if numeric_good_id > SSR_EQUIPMENT_SHOP_GOOD_BASE
+      and numeric_good_id < UR_EQUIPMENT_SHOP_GOOD_BASE then
+    good_base = SSR_EQUIPMENT_SHOP_GOOD_BASE
+    quality = 4
+    currency_id = 9
+  elseif numeric_good_id > UR_EQUIPMENT_SHOP_GOOD_BASE then
+    good_base = UR_EQUIPMENT_SHOP_GOOD_BASE
+    quality = 5
+    currency_id = 32
+  else
+    return nil
+  end
+
+  local equipment_id = numeric_good_id - good_base
+  local equipment = equipment_configs[equipment_id]
+  if type(equipment) ~= "table" or tonumber(equipment.quality) ~= quality then
+    return nil
+  end
+  return equipment_id, currency_id, quality
+end
+
+local function ensure_quality_equipment_shop_good(configs, equipment_configs, requested_good_id)
+  if type(configs) ~= "table" or type(equipment_configs) ~= "table" then
+    return nil
+  end
+
+  local equipment_id, currency_id, quality = quality_equipment_shop_spec(
+    requested_good_id,
+    equipment_configs
+  )
+  if equipment_id == nil then
+    return nil
+  end
+
+  local numeric_good_id = tonumber(requested_good_id)
+  local existing = rawget(configs, numeric_good_id)
+  if type(existing) == "table" then
+    return existing
+  end
+
+  local source_id = quality == 4 and SOURCE_SHOP_GOOD_ID or 80002
+  local source = rawget(configs, source_id)
+  if type(source) ~= "table" then
+    return nil
+  end
+
+  local good = deep_clone(source)
+  good.id = numeric_good_id
+  good.shelf_id = numeric_good_id
+  good.name = (quality == 4 and "SSR Equipment" or "UR Equipment") .. " x1"
+  good.goods = {2, equipment_id, 1}
+  good.price = {{EQUIPMENT_SHOP_PRICE}}
+  good.currency = {{5, currency_id}}
+  good.price2 = {{5, currency_id, EQUIPMENT_SHOP_PRICE, EQUIPMENT_SHOP_PRICE, 100}}
+  good.stock = -1
+  good.manual_refresh_stock = 1
+  good.goods_visible = 1
+  good.__blueoath_generated_equipment_shop = true
+  configs[numeric_good_id] = good
+  return good
+end
+
+local function install_lazy_quality_equipment_shop_goods(configs, equipment_configs)
+  if type(configs) ~= "table" or type(equipment_configs) ~= "table" then
+    return
+  end
+  local current_metatable = getmetatable(configs)
+  if current_metatable and current_metatable.__blueoath_lazy_equipment_shop then
+    return
+  end
+
+  local metatable = {}
+  if current_metatable ~= nil then
+    for key, value in pairs(current_metatable) do
+      metatable[key] = value
+    end
+  end
+  local previous_index = current_metatable and current_metatable.__index or nil
+  metatable.__index = function(target, key)
+    local inherited = nil
+    if type(previous_index) == "function" then
+      inherited = previous_index(target, key)
+    elseif type(previous_index) == "table" then
+      inherited = previous_index[key]
+    end
+    if inherited ~= nil then
+      return inherited
+    end
+    return ensure_quality_equipment_shop_good(target, equipment_configs, key)
+  end
+  metatable.__blueoath_lazy_equipment_shop = true
+  setmetatable(configs, metatable)
+end
+
 local function patch_config_manager(manager)
   if config_patched or type(manager) ~= "table" then
     return
@@ -89,6 +195,7 @@ local function patch_config_manager(manager)
       ensure_equipment(data)
     elseif name == "config_shop_goods" then
       ensure_shop_good(data)
+      install_lazy_quality_equipment_shop_goods(data, manager.GetData("config_equip"))
     end
     return data
   end
@@ -98,9 +205,11 @@ local function patch_config_manager(manager)
     if name == "config_equip" and numeric_id == EQUIP_ID then
       local configs = manager.GetData("config_equip")
       return configs and configs[EQUIP_ID] or nil
-    elseif name == "config_shop_goods" and numeric_id == SHOP_GOOD_ID then
+    elseif name == "config_shop_goods" and numeric_id ~= nil then
       local configs = manager.GetData("config_shop_goods")
-      return configs and configs[SHOP_GOOD_ID] or nil
+      if configs and type(configs[numeric_id]) == "table" then
+        return configs[numeric_id]
+      end
     end
     return original_get_data_by_id(name, id, ...)
   end

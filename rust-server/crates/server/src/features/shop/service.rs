@@ -347,26 +347,25 @@ fn apply_typed_shop_good(
                     u64::try_from(good.item_id).unwrap_or_default(),
                 )
                 .ok()?;
-                account.dock.heroes.insert(
+                let mut hero = blueoath_domain::HeroState {
                     id,
-                    blueoath_domain::HeroState {
-                        id,
-                        template_id,
-                        fashioning: u32::try_from(template_id.get().saturating_sub(1) / 10)
-                            .unwrap_or(u32::MAX),
-                        name: String::new(),
-                        change_name_time: 0,
-                        level: 1,
-                        exp: 0,
-                        mood: 100,
-                        affection: 500_000,
-                        hp: ship_initial_hp_for_template(template_id.get()),
-                        locked: false,
-                        created_utc: String::new(),
-                        equip_slots: vec![None; 6],
-                        pskills: std::collections::BTreeMap::new(),
-                    },
-                );
+                    template_id,
+                    fashioning: u32::try_from(template_id.get().saturating_sub(1) / 10)
+                        .unwrap_or(u32::MAX),
+                    name: String::new(),
+                    change_name_time: 0,
+                    level: 1,
+                    exp: 0,
+                    mood: blueoath_domain::HERO_MOOD_INITIAL,
+                    affection: 500_000,
+                    hp: ship_initial_hp_for_template(template_id.get()),
+                    locked: false,
+                    created_utc: String::new(),
+                    equip_slots: vec![None; 6],
+                    pskills: std::collections::BTreeMap::new(),
+                };
+                initialize_typed_hero_loadout_from_catalog(account, &mut hero);
+                account.dock.heroes.insert(id, hero);
                 last_id = i32::try_from(id.get()).ok()?;
             }
             Some(ShopReward {

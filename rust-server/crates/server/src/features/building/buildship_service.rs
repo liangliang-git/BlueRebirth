@@ -389,24 +389,14 @@ fn grant_typed_build_reward(
                     equip_slots: vec![None; 6],
                     pskills: std::collections::BTreeMap::new(),
                 };
-                if let Some(defaults) = catalog.ship_defaults.get(&reward.item_id) {
-                    for (slot, equip_template) in defaults.iter().take(6).enumerate() {
-                        let equip_id = next_typed_equip_id(account)?;
-                        let equip_template = TemplateId::new(*equip_template as u64).ok()?;
-                        account.dock.equipments.insert(
-                            equip_id,
-                            EquipmentState {
-                                id: equip_id,
-                                template_id: equip_template,
-                                enhance_level: 0,
-                                star: 0,
-                                enhance_exp: 0,
-                                hero_id: Some(id),
-                            },
-                        );
-                        hero.equip_slots[slot] = Some(equip_id);
-                    }
-                }
+                initialize_typed_hero_loadout(
+                    account,
+                    &mut hero,
+                    catalog
+                        .ship_defaults
+                        .get(&reward.item_id)
+                        .map(Vec::as_slice),
+                );
                 account.dock.heroes.insert(id, hero);
                 last_id = id.get();
             }

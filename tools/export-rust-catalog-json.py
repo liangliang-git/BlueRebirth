@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 
 XOR_KEY = 0x55
-CONFIG_NAME_RE = re.compile(r"config_[A-Za-z0-9_]+\.db")
+CONFIG_NAME_RE = re.compile(r"[\"'](config_[A-Za-z0-9_]+)(?:\.db)?[\"']")
 
 
 def parse_id(value: object) -> int:
@@ -59,8 +59,17 @@ def atomic_write(path: Path, document: dict[str, object]) -> None:
 
 
 def used_database_names(repo_root: Path) -> set[str]:
-    loader = repo_root / "rust-server" / "crates" / "server" / "src" / "catalog_loader.rs"
-    names = set(CONFIG_NAME_RE.findall(loader.read_text(encoding="utf-8")))
+    loader_candidates = (
+        repo_root / "rust-server" / "crates" / "server" / "src" / "game_config" / "loader.rs",
+        repo_root / "rust-server" / "crates" / "server" / "src" / "catalog_loader.rs",
+    )
+    loader = next((path for path in loader_candidates if path.is_file()), None)
+    if loader is None:
+        raise RuntimeError(
+            "game config loader is unavailable; checked: "
+            + ", ".join(str(path) for path in loader_candidates)
+        )
+    names = {match.group(1) for match in CONFIG_NAME_RE.finditer(loader.read_text(encoding="utf-8"))}
     if not names:
         raise RuntimeError(f"no config_*.db references found in {loader}")
     return names
@@ -95,7 +104,7 @@ def main() -> int:
     databases = sorted(source.glob("config_*.db"))
     if not args.all:
         names = used_database_names(repo_root)
-        databases = [database for database in databases if database.name in names]
+        databases = [database for database in databases if database.stem in names]
     if not databases:
         raise RuntimeError(f"no matching config_*.db files found under {source}")
 

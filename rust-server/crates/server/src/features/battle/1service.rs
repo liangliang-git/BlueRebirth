@@ -2,7 +2,7 @@ use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
 use crate::features::copy::mopup_state::{
-    draw_copy_category_rewards_with_seed, draw_copy_drop_rewards_with_seed, draw_draw_count,
+    draw_copy_category_rewards_with_seed_multiplier, draw_copy_drop_rewards_with_seed_multiplier,
     next_battle_drop_seed,
 };
 
@@ -122,8 +122,11 @@ pub(crate) fn handle_typed_copy_star_reward(
             "copy star reward type is unsupported",
         ));
     }
-    for reward in &pending {
-        let _ = grant_typed_task_reward(account, reward);
+    let mut pending = pending;
+    if !grant_typed_task_rewards_with_fashion(account, &mut pending, None) {
+        return HandlerResult::Error(GameError::InvalidState(
+            "copy star reward could not be granted",
+        ));
     }
     for index in requested_indexes {
         account
@@ -146,38 +149,129 @@ fn draw_typed_battle_drop_rewards(
     grade: i32,
     include_first_clear: bool,
 ) -> Vec<ShopReward> {
+    let fleet_ids = battle_session_fleet_ids(copy_id, Some(catalog));
+    draw_typed_battle_drop_rewards_for_fleets(
+        catalog,
+        copy_id,
+        &fleet_ids,
+        multiplier,
+        grade,
+        true,
+        include_first_clear,
+    )
+}
+
+fn draw_typed_battle_wave_drop_rewards(
+    catalog: &BattleCatalog,
+    copy_id: i32,
+    fleet_ids: &[i32],
+    multiplier: f64,
+    grade: i32,
+    include_stage_rewards: bool,
+) -> Vec<ShopReward> {
+    draw_typed_battle_drop_rewards_for_fleets(
+        catalog,
+        copy_id,
+        fleet_ids,
+        multiplier,
+        grade,
+        include_stage_rewards,
+        false,
+    )
+}
+
+fn draw_typed_battle_drop_rewards_for_fleets(
+    catalog: &BattleCatalog,
+    copy_id: i32,
+    fleet_ids: &[i32],
+    multiplier: f64,
+    grade: i32,
+    include_stage_rewards: bool,
+    include_first_clear: bool,
+) -> Vec<ShopReward> {
     let mut rewards = Vec::new();
     let mut draw_index = 0u64;
     let seed = next_battle_drop_seed();
     let settle_multiplier = multiplier * battle_evaluation_multipliers(Some(catalog), grade).1;
     let other_multiplier = multiplier * battle_other_drop_multiplier(Some(catalog), grade);
-    for drop_id in catalog.copy_drop_ids.get(&copy_id).into_iter().flatten() {
-        let include_display_first_clear =
-            include_first_clear && !catalog.copy_first_rewards.contains_key(&copy_id);
-        let category_rewards = draw_copy_category_rewards_with_seed(
-            catalog,
-            *drop_id,
-            seed.wrapping_add(draw_index),
-            include_display_first_clear,
-        );
-        draw_index = draw_index.wrapping_add(1);
-        for mut reward in category_rewards {
-            catalog.drop_quantities.apply(
-                copy_id,
-                &mut reward,
-                seed.wrapping_add(draw_index)
-                    .wrapping_add(0xD1B5_4A32_D192_ED03),
-            );
-            rewards.push(reward);
+    let is_daily_copy = catalog.daily_group_by_copy.contains_key(&copy_id);
+    if include_stage_rewards {
+        let basic_drop_ids = if is_daily_copy {
+            catalog.daily_basic_drop_ids_by_copy.get(&copy_id)
+        } else {
+            catalog.copy_drop_ids.get(&copy_id)
+        };
+        for drop_id in basic_drop_ids.into_iter().flatten() {
+            let category_rewards = if is_daily_copy {
+                draw_copy_drop_rewards_with_seed_multiplier(
+                    catalog,
+                    *drop_id,
+                    0,
+                    seed.wrapping_add(draw_index),
+                    multiplier,
+                )
+            } else {
+                let include_display_first_clear =
+                    include_first_clear && !catalog.copy_first_rewards.contains_key(&copy_id);
+                draw_copy_category_rewards_with_seed_multiplier(
+                    catalog,
+                    *drop_id,
+                    seed.wrapping_add(draw_index),
+                    include_display_first_clear,
+                    multiplier,
+                )
+            };
+            draw_index = draw_index.wrapping_add(1);
+            for mut reward in category_rewards {
+                catalog.drop_quantities.apply(
+                    copy_id,
+                    &mut reward,
+                    seed.wrapping_add(draw_index)
+                        .wrapping_add(0xD1B5_4A32_D192_ED03),
+                );
+                rewards.push(reward);
+            }
+        }
+
+        // config_daily_group.extra_drop is the actual daily extra-reward pool.
+        // Extra attempts are intentionally unlimited up to the wire-visible
+        // 99,999 sentinel, so every successful daily run can draw this pool.
+        if is_daily_copy {
+            for drop_id in catalog
+                .daily_extra_drop_ids_by_copy
+                .get(&copy_id)
+                .into_iter()
+                .flatten()
+            {
+                let category_rewards = draw_copy_drop_rewards_with_seed_multiplier(
+                    catalog,
+                    *drop_id,
+                    0,
+                    seed.wrapping_add(draw_index),
+                    multiplier,
+                );
+                draw_index = draw_index.wrapping_add(1);
+                for mut reward in category_rewards {
+                    catalog.drop_quantities.apply(
+                        copy_id,
+                        &mut reward,
+                        seed.wrapping_add(draw_index)
+                            .wrapping_add(0xD1B5_4A32_D192_ED03),
+                    );
+                    rewards.push(reward);
+                }
+            }
         }
     }
-    for fleet_id in battle_session_fleet_ids(copy_id, Some(catalog)) {
+
+    for fleet_id in fleet_ids {
         for drop_id in catalog.fleet_drop_ids.get(&fleet_id).into_iter().flatten() {
-            let fleet_rewards = draw_copy_drop_rewards_with_seed(
+            let fleet_rewards = draw_copy_drop_rewards_with_seed_multiplier(
                 catalog,
                 *drop_id,
                 0,
                 seed.wrapping_add(draw_index),
+                multiplier,
             );
             draw_index = draw_index.wrapping_add(1);
             for mut reward in fleet_rewards {
@@ -194,15 +288,15 @@ fn draw_typed_battle_drop_rewards(
             .into_iter()
             .flatten()
         {
-            let fleet_rewards = draw_copy_drop_rewards_with_seed(
+            let fleet_rewards = draw_copy_drop_rewards_with_seed_multiplier(
                 catalog,
                 *drop_id,
                 0,
                 seed.wrapping_add(draw_index),
+                other_multiplier,
             );
             draw_index = draw_index.wrapping_add(1);
             if !fleet_rewards.is_empty() {
-                let mut category_rewards = Vec::new();
                 for mut reward in fleet_rewards {
                     draw_index = draw_index.wrapping_add(1);
                     catalog.drop_quantities.apply(
@@ -210,16 +304,8 @@ fn draw_typed_battle_drop_rewards(
                         &mut reward,
                         seed.wrapping_add(draw_index),
                     );
-                    category_rewards.push(reward);
+                    rewards.push(reward);
                 }
-                if draw_draw_count(
-                    other_multiplier,
-                    mix_build_draw_roll(seed.wrapping_add(draw_index)),
-                ) > 0
-                {
-                    rewards.extend(category_rewards);
-                }
-                draw_index = draw_index.wrapping_add(1);
             }
         }
         for drop_id in catalog
@@ -228,15 +314,15 @@ fn draw_typed_battle_drop_rewards(
             .into_iter()
             .flatten()
         {
-            let fleet_rewards = draw_copy_drop_rewards_with_seed(
+            let fleet_rewards = draw_copy_drop_rewards_with_seed_multiplier(
                 catalog,
                 *drop_id,
                 0,
                 seed.wrapping_add(draw_index),
+                settle_multiplier,
             );
             draw_index = draw_index.wrapping_add(1);
             if !fleet_rewards.is_empty() {
-                let mut category_rewards = Vec::new();
                 for mut reward in fleet_rewards {
                     draw_index = draw_index.wrapping_add(1);
                     catalog.drop_quantities.apply(
@@ -244,34 +330,56 @@ fn draw_typed_battle_drop_rewards(
                         &mut reward,
                         seed.wrapping_add(draw_index),
                     );
-                    category_rewards.push(reward);
+                    rewards.push(reward);
                 }
-                if draw_draw_count(
-                    settle_multiplier,
-                    mix_build_draw_roll(seed.wrapping_add(draw_index)),
-                ) > 0
-                {
-                    rewards.extend(category_rewards);
-                }
-                draw_index = draw_index.wrapping_add(1);
             }
         }
     }
-    if let Some((count, guaranteed)) = catalog.copy_must_drop_rewards.get(&copy_id) {
-        for _ in 0..*count {
-            rewards.extend(
-                guaranteed
-                    .iter()
-                    .map(|(goods_type, item_id, num)| ShopReward {
-                        goods_type: *goods_type,
-                        item_id: *item_id,
-                        num: *num,
-                        instance_id: 0,
-                    }),
-            );
+
+    if include_stage_rewards {
+        if let Some((count, guaranteed)) = catalog.copy_must_drop_rewards.get(&copy_id) {
+            for _ in 0..*count {
+                rewards.extend(
+                    guaranteed
+                        .iter()
+                        .map(|(goods_type, item_id, num)| ShopReward {
+                            goods_type: *goods_type,
+                            item_id: *item_id,
+                            num: *num,
+                            instance_id: 0,
+                        }),
+                );
+            }
         }
     }
     rewards
+}
+
+fn queue_battle_inventory_refresh(
+    effects: &mut ResponseEffects,
+    account: &blueoath_domain::AccountState,
+    fashion_catalog: Option<&FashionList>,
+) {
+    // Battle rewards mutate several independent client caches. Sending only bag data
+    // leaves equipment/ship/fashion drops invisible until a later full refresh.
+    // Queue snapshots before the battle callback so the result screen cannot overwrite
+    // them with its pre-settlement cache.
+    effects.push_pre(Response::raw(
+        "bag.UpdateBagData",
+        BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+    ));
+    effects.push_pre(Response::raw(
+        "hero.UpdateHeroBagData",
+        HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+    ));
+    effects.push_pre(Response::raw(
+        "equip.UpdateEquipBagData",
+        EquipListCodec::encode(&equip_list_from_typed_account(account)),
+    ));
+    effects.push_pre(Response::raw(
+        "fashion.updateData",
+        FashionListCodec::encode(&fashion_list_from_typed_account(account, fashion_catalog)),
+    ));
 }
 
 // 战斗上下文类型
@@ -464,48 +572,14 @@ pub(crate) fn handle_typed_with_catalog(
             );
             let grade = if result.grade > 0 { result.grade } else { 3 };
             let first_pass_expected = !account.battle.passed_copies.contains(&copy_id);
-            let mut rewards = Vec::new();
-            if grade < 9 && first_pass_expected {
-                rewards.extend(
-                    battle_catalog
-                        .and_then(|catalog| catalog.copy_first_rewards.get(&(copy_id.get() as i32)))
-                        .into_iter()
-                        .flatten()
-                        .map(|(goods_type, item_id, num)| ShopReward {
-                            goods_type: *goods_type,
-                            item_id: *item_id,
-                            num: *num,
-                            instance_id: 0,
-                        }),
-                );
-            }
-            if grade < 9 {
-                if let Some(catalog) = battle_catalog {
-                    rewards.extend(draw_typed_battle_drop_rewards(
-                        catalog,
-                        copy_id.get() as i32,
-                        drop_multiplier,
-                        grade,
-                        first_pass_expected,
-                    ));
-                }
-            }
-            if !can_grant_typed_task_rewards(account, &rewards) {
-                return HandlerResult::Error(GameError::InvalidState(
-                    "battle reward cannot be granted",
-                ));
-            }
             let remaining_fleet_ids = account
                 .battle
                 .active
                 .as_ref()
                 .map(|session| session.remaining_fleet_ids.clone())
                 .unwrap_or_default();
-            let passed_fleet_ids = if result.passed_fleet_ids.is_empty() {
-                remaining_fleet_ids
-                    .first()
-                    .map(|fleet_id| vec![u64::from(*fleet_id)])
-                    .unwrap_or_default()
+            let reported_fleet_ids = if result.passed_fleet_ids.is_empty() {
+                Vec::new()
             } else {
                 result
                     .passed_fleet_ids
@@ -525,51 +599,101 @@ pub(crate) fn handle_typed_with_catalog(
                     })
                     .collect()
             };
-            if !passed_fleet_ids.is_empty() && !remaining_fleet_ids.is_empty() {
-                if passed_fleet_ids.iter().any(|fleet_id| {
-                    !remaining_fleet_ids.contains(&u32::try_from(*fleet_id).unwrap_or(0))
-                }) {
-                    return HandlerResult::Error(GameError::InvalidRequest(
-                        "battle pass fleet is not active",
-                    ));
+            let Some(current_fleet_id) = remaining_fleet_ids.first().copied() else {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "battle session has no remaining wave",
+                ));
+            };
+            // Client can report more than one fleet in FleetInfo/EnemyFleets. One
+            // PassBase is one wave settlement; session order is authoritative.
+            // Otherwise a 5-wave copy can be completed after 4 requests.
+            if !reported_fleet_ids.is_empty()
+                && !reported_fleet_ids.contains(&u64::from(current_fleet_id))
+            {
+                tracing::warn!(
+                    copy_id = copy_id.get(),
+                    current_fleet_id,
+                    reported_fleet_ids = ?reported_fleet_ids,
+                    "battle pass reported fleet is not current; using session wave"
+                );
+            }
+            let passed_fleet_ids = vec![u64::from(current_fleet_id)];
+            let remaining_after_wave = remaining_fleet_ids
+                .into_iter()
+                .filter(|fleet_id| !passed_fleet_ids.contains(&u64::from(*fleet_id)))
+                .collect::<Vec<_>>();
+            let is_final_wave = remaining_after_wave.is_empty();
+            let mut rewards = Vec::new();
+            if grade < 9 {
+                if is_final_wave && first_pass_expected {
+                    rewards.extend(
+                        battle_catalog
+                            .and_then(|catalog| {
+                                catalog.copy_first_rewards.get(&(copy_id.get() as i32))
+                            })
+                            .into_iter()
+                            .flatten()
+                            .map(|(goods_type, item_id, num)| ShopReward {
+                                goods_type: *goods_type,
+                                item_id: *item_id,
+                                num: *num,
+                                instance_id: 0,
+                            }),
+                    );
                 }
-                let remaining_fleet_ids = remaining_fleet_ids
-                    .into_iter()
-                    .filter(|fleet_id| !passed_fleet_ids.contains(&u64::from(*fleet_id)))
-                    .collect::<Vec<_>>();
-                if !remaining_fleet_ids.is_empty() {
-                    if let Some(active) = account.battle.active.as_mut() {
-                        active.remaining_fleet_ids = remaining_fleet_ids.clone();
-                        active.current_fleet = remaining_fleet_ids[0];
-                    }
-                    return HandlerResult::Reply(Response::raw(
-                        method,
-                        battle_pass_payload_with_rewards(
-                            i32::try_from(copy_id.get()).unwrap_or_default(),
-                            false,
+                if let Some(catalog) = battle_catalog {
+                    let current_fleet_ids = passed_fleet_ids
+                        .iter()
+                        .filter_map(|fleet_id| i32::try_from(*fleet_id).ok())
+                        .collect::<Vec<_>>();
+                    let wave_rewards = if is_final_wave {
+                        draw_typed_battle_drop_rewards_for_fleets(
+                            catalog,
+                            copy_id.get() as i32,
+                            &current_fleet_ids,
+                            drop_multiplier,
                             grade,
-                            result.battle_time,
-                            &[],
-                        ),
-                    ));
+                            true,
+                            first_pass_expected,
+                        )
+                    } else {
+                        draw_typed_battle_wave_drop_rewards(
+                            catalog,
+                            copy_id.get() as i32,
+                            &current_fleet_ids,
+                            drop_multiplier,
+                            grade,
+                            false,
+                        )
+                    };
+                    rewards.extend(wave_rewards);
                 }
             }
-            let supply_cost = match battle_catalog {
-                Some(catalog) => {
-                    let Some(cost) = battle_supply_cost_typed(
-                        account,
-                        Some(catalog),
-                        i32::try_from(copy_id.get()).unwrap_or_default(),
-                        &hero_ids.iter().map(|id| id.get()).collect::<Vec<_>>(),
-                        1,
-                    ) else {
-                        return HandlerResult::Error(GameError::InvalidState(
-                            "battle supply configuration is invalid",
-                        ));
-                    };
-                    Some(cost)
+            if !can_grant_typed_task_rewards(account, &rewards) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "battle reward cannot be granted",
+                ));
+            }
+            let supply_cost = if is_final_wave {
+                match battle_catalog {
+                    Some(catalog) => {
+                        let Some(cost) = battle_supply_cost_typed(
+                            account,
+                            Some(catalog),
+                            i32::try_from(copy_id.get()).unwrap_or_default(),
+                            &hero_ids.iter().map(|id| id.get()).collect::<Vec<_>>(),
+                            1,
+                        ) else {
+                            return HandlerResult::Error(GameError::InvalidState(
+                                "battle supply configuration is invalid",
+                            ));
+                        };
+                        Some(cost)
+                    }
+                    None => None,
                 }
-                None => None,
+            } else {
+                None
             };
             if let Some(supply_cost) = supply_cost {
                 if account
@@ -584,24 +708,51 @@ pub(crate) fn handle_typed_with_catalog(
                 }
             }
             let account_before_settlement = account.clone();
-            let first_pass = BattleService::settle_at(
-                account,
-                copy_id,
-                grade < 9,
-                u64::from(current_unix_seconds()),
-            )
-            .map_err(|_| GameError::InvalidState("battle settlement is invalid"));
+            let first_pass = if is_final_wave {
+                BattleService::settle_at(
+                    account,
+                    copy_id,
+                    grade < 9,
+                    u64::from(current_unix_seconds()),
+                )
+                .map_err(|_| GameError::InvalidState("battle settlement is invalid"))
+            } else {
+                Ok(false)
+            };
             match first_pass {
                 Ok(first_pass) => {
-                    for reward in &mut rewards {
-                        let _ =
-                            grant_typed_task_reward_with_fashion(account, reward, fashion_catalog);
+                    if is_final_wave && grade < 9 {
+                        if let Some(group_id) = battle_catalog.and_then(|catalog| {
+                            catalog
+                                .daily_group_by_copy
+                                .get(&i32::try_from(copy_id.get()).ok()?)
+                        }) {
+                            let group_id = u64::try_from(*group_id).unwrap_or_default();
+                            let success_times = account
+                                .daily_copy
+                                .group_success_times
+                                .entry(group_id)
+                                .or_default();
+                            *success_times = success_times.saturating_add(1);
+                        }
+                    }
+                    if !grant_typed_task_rewards_with_fashion(
+                        account,
+                        &mut rewards,
+                        fashion_catalog,
+                    ) {
+                        *account = account_before_settlement;
+                        return HandlerResult::Error(GameError::InvalidState(
+                            "battle reward could not be granted",
+                        ));
                     }
                     let exp_rewards = if grade < 9 {
-                        let (commander_base, ship_base) = battle_copy_experience(
-                            battle_catalog,
-                            i32::try_from(copy_id.get()).unwrap_or_default(),
-                        );
+                        let current_fleet_ids = passed_fleet_ids
+                            .iter()
+                            .filter_map(|fleet_id| i32::try_from(*fleet_id).ok())
+                            .collect::<Vec<_>>();
+                        let (commander_base, ship_base) =
+                            battle_fleet_experience(battle_catalog, &current_fleet_ids);
                         let (exp_ratio, _) = battle_evaluation_multipliers(battle_catalog, grade);
                         let commander_exp = scale_reward(
                             i64::from(commander_base),
@@ -661,30 +812,18 @@ pub(crate) fn handle_typed_with_catalog(
                             "battle supply settlement failed",
                         ));
                     }
-                    if grade < 9 {
+                    if !is_final_wave {
+                        if let Some(active) = account.battle.active.as_mut() {
+                            active.remaining_fleet_ids = remaining_after_wave.clone();
+                            active.current_fleet = remaining_after_wave[0];
+                        }
+                    }
+                    if is_final_wave && grade < 9 {
                         let star_level = account.battle.copy_stars.entry(copy_id).or_default();
                         *star_level = (*star_level).max(7);
                     }
                     if !rewards.is_empty() || !exp_rewards.is_empty() || settlement_changed {
-                        effects.push_post(Response::raw(
-                            "bag.UpdateBagData",
-                            BagInfoCodec::encode(&bag_info_from_typed_account(account)),
-                        ));
-                        effects.push_post(Response::raw(
-                            "hero.UpdateHeroBagData",
-                            HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
-                        ));
-                        effects.push_post(Response::raw(
-                            "equip.UpdateEquipBagData",
-                            EquipListCodec::encode(&equip_list_from_typed_account(account)),
-                        ));
-                        effects.push_post(Response::raw(
-                            "fashion.updateData",
-                            FashionListCodec::encode(&fashion_list_from_typed_account(
-                                account,
-                                fashion_catalog,
-                            )),
-                        ));
+                        queue_battle_inventory_refresh(effects, account, fashion_catalog);
                     }
                     if let Some(server_state) = server_state {
                         effects.push_post(Response::raw(
@@ -695,7 +834,7 @@ pub(crate) fn handle_typed_with_catalog(
                             )),
                         ));
                     }
-                    if grade < 9 {
+                    if is_final_wave && grade < 9 {
                         account
                             .battle
                             .records
@@ -766,8 +905,11 @@ pub(crate) fn handle_typed_with_catalog(
             }
             if first_pass {
                 let mut rewards = rewards;
-                for reward in &mut rewards {
-                    let _ = grant_typed_task_reward_with_fashion(account, reward, fashion_catalog);
+                if !grant_typed_task_rewards_with_fashion(account, &mut rewards, fashion_catalog) {
+                    account.battle.passed_copies.remove(&copy_id_typed);
+                    return HandlerResult::Error(GameError::InvalidState(
+                        "mini-game reward could not be granted",
+                    ));
                 }
                 account.battle.copy_stars.insert(copy_id_typed, 7);
                 effects.push_post(Response::raw(
@@ -1173,8 +1315,12 @@ pub(crate) fn handle_typed_mop_up(
                 ));
             }
             let account_before_settlement = account.clone();
-            for reward in &rewards {
-                let _ = grant_typed_task_reward(account, reward);
+            let mut rewards = rewards;
+            if !grant_typed_task_rewards_with_fashion(account, &mut rewards, None) {
+                *account = account_before_settlement;
+                return HandlerResult::Error(GameError::InvalidState(
+                    "sweep reward could not be granted",
+                ));
             }
             apply_typed_sweep_experience(
                 account,
@@ -1223,6 +1369,18 @@ pub(crate) fn handle_typed_mop_up(
             effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            ));
+            effects.push_pre(Response::raw(
+                "hero.UpdateHeroBagData",
+                HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+            ));
+            effects.push_pre(Response::raw(
+                "equip.UpdateEquipBagData",
+                EquipListCodec::encode(&equip_list_from_typed_account(account)),
+            ));
+            effects.push_pre(Response::raw(
+                "fashion.updateData",
+                FashionListCodec::encode(&fashion_list_from_typed_account(account, None)),
             ));
             effects.push_post(Response::raw("mopUp.GetMopUpData", payload.clone()));
             HandlerResult::Reply(Response::raw(method, payload))
@@ -1321,6 +1479,7 @@ fn save_typed_battle_hero_hp(
     remould_catalog: Option<&ShipRemouldCatalog>,
     ship_stat_multiplier: f64,
 ) {
+    let hero_snapshot = account.dock.heroes.clone();
     for result in heroes {
         if result.hero_id == 0
             || (!allowed_hero_ids.is_empty()
@@ -1335,7 +1494,7 @@ fn save_typed_battle_hero_hp(
         };
         let progress = &account.activities.progress;
         if let Some(hero) = account.dock.heroes.get_mut(&hero_id) {
-            let max_hp = ship_max_hp_for_typed_hero(
+            let max_hp = ship_max_hp_for_typed_hero_with_heroes(
                 hero,
                 progress,
                 &account.dock.equipments,
@@ -1343,10 +1502,9 @@ fn save_typed_battle_hero_hp(
                 equip_catalog,
                 remould_catalog,
                 ship_stat_multiplier,
+                Some(&hero_snapshot),
             );
-            hero.hp = u64::try_from(result.hp.max(0))
-                .unwrap_or_default()
-                .min(max_hp);
+            hero.hp = typed_hero_hp_from_client_ratio(result.hp, max_hp).min(max_hp);
         }
     }
 }
@@ -1381,4 +1539,255 @@ fn daily_copy_enter_payload(start_base_ret: &[u8]) -> Vec<u8> {
     let mut payload = Vec::new();
     append_message_field(&mut payload, 1, start_base_ret);
     payload
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn battle_inventory_refresh_covers_all_reward_caches() {
+        let account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("battle-refresh").unwrap(),
+            "Captain",
+        );
+        let mut effects = ResponseEffects::default();
+
+        queue_battle_inventory_refresh(&mut effects, &account, None);
+
+        let (pre, post, error) = effects.into_parts();
+        assert_eq!(
+            pre.iter()
+                .map(|response| response.method.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "bag.UpdateBagData",
+                "hero.UpdateHeroBagData",
+                "equip.UpdateEquipBagData",
+                "fashion.updateData",
+            ]
+        );
+        assert!(post.is_empty());
+        assert!(error.is_none());
+    }
+
+    #[test]
+    fn daily_battle_draws_basic_and_unlimited_extra_drop_pools() {
+        let mut catalog = BattleCatalog::default();
+        catalog.daily_group_by_copy.insert(20_101, 2);
+        catalog
+            .daily_basic_drop_ids_by_copy
+            .insert(20_101, vec![33_011]);
+        catalog
+            .daily_extra_drop_ids_by_copy
+            .insert(20_101, vec![33_012]);
+        catalog.drop_pools.insert(
+            33_011,
+            BattleDropPool {
+                separate_entries: vec![(1, 13_001, 180, 180, 10_000)],
+                separate_count: 1,
+                ..BattleDropPool::default()
+            },
+        );
+        catalog.drop_pools.insert(
+            33_012,
+            BattleDropPool {
+                separate_entries: vec![(5, 13, 10, 10, 10_000)],
+                separate_count: 1,
+                ..BattleDropPool::default()
+            },
+        );
+
+        let rewards = draw_typed_battle_drop_rewards(&catalog, 20_101, 1.0, 3, false);
+
+        assert!(
+            rewards.iter().any(|reward| reward.goods_type == 1
+                && reward.item_id == 13_001
+                && reward.num == 180),
+            "rewards: {rewards:?}"
+        );
+        assert!(rewards
+            .iter()
+            .any(|reward| reward.goods_type == 5 && reward.item_id == 13 && reward.num == 10));
+    }
+
+    #[test]
+    fn multi_wave_drop_rewards_are_scoped_to_current_fleet() {
+        let mut catalog = BattleCatalog::default();
+        catalog.copies.insert(
+            20_101,
+            BattleCopy {
+                config_id: 20_101,
+                copy_type: 2,
+                fleet_ids: vec![11, 12],
+            },
+        );
+        catalog.copy_drop_ids.insert(20_101, vec![20_1001]);
+        catalog.copy_drop_pools.insert(
+            20_1001,
+            BattleCopyDropPool {
+                guaranteed_entries: vec![(1, 900, 5, 1, 10_000)],
+                ..BattleCopyDropPool::default()
+            },
+        );
+        catalog.fleet_drop_ids.insert(11, vec![11_001]);
+        catalog.fleet_drop_ids.insert(12, vec![12_001]);
+        for (drop_id, item_id) in [(11_001, 11), (12_001, 12)] {
+            catalog.drop_pools.insert(
+                drop_id,
+                BattleDropPool {
+                    separate_entries: vec![(1, item_id, 1, 1, 10_000)],
+                    separate_count: 1,
+                    ..BattleDropPool::default()
+                },
+            );
+        }
+
+        let first_wave =
+            draw_typed_battle_wave_drop_rewards(&catalog, 20_101, &[11], 1.0, 3, false);
+        assert_eq!(
+            first_wave
+                .iter()
+                .map(|reward| (reward.goods_type, reward.item_id, reward.num))
+                .collect::<Vec<_>>(),
+            vec![(1, 11, 1)]
+        );
+
+        let final_wave = draw_typed_battle_wave_drop_rewards(&catalog, 20_101, &[12], 1.0, 3, true);
+        assert!(final_wave
+            .iter()
+            .any(|reward| (reward.goods_type, reward.item_id, reward.num) == (1, 12, 1)));
+        assert!(final_wave
+            .iter()
+            .any(|reward| (reward.goods_type, reward.item_id, reward.num) == (1, 900, 5)));
+        assert!(!final_wave.iter().any(|reward| reward.item_id == 11));
+    }
+
+    #[test]
+    fn intermediate_battle_pass_grants_wave_reward_and_keeps_session_active() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("battle-wave-settlement").unwrap(),
+            "Captain",
+        );
+        let hero_id = *account.dock.heroes.keys().next().expect("starter hero");
+        account.battle.active = Some(blueoath_domain::BattleSession {
+            chapter_id: blueoath_domain::ChapterId::new(20_101).unwrap(),
+            copy_id: blueoath_domain::CopyId::new(20_101).unwrap(),
+            current_fleet: 11,
+            started_at: u64::from(current_unix_seconds()),
+            expires_at: u64::from(current_unix_seconds()).saturating_add(1_800),
+            revision: 0,
+            remaining_fleet_ids: vec![11, 12],
+            hero_ids: vec![hero_id],
+            attack_count: 0,
+        });
+
+        let mut catalog = BattleCatalog::default();
+        catalog.copies.insert(
+            20_101,
+            BattleCopy {
+                config_id: 20_101,
+                copy_type: 2,
+                fleet_ids: vec![11, 12],
+            },
+        );
+        catalog.fleet_drop_ids.insert(11, vec![11_001]);
+        catalog.fleet_rewards.insert(
+            11,
+            BattleFleetReward {
+                commander_exp: 10,
+                ship_exp: 20,
+            },
+        );
+        catalog.drop_pools.insert(
+            11_001,
+            BattleDropPool {
+                separate_entries: vec![(1, 11, 1, 1, 10_000)],
+                separate_count: 1,
+                ..BattleDropPool::default()
+            },
+        );
+        catalog.supply_cost_by_copy.insert(20_101, (100, 0));
+
+        let mut pass = Vec::new();
+        append_varint_field(&mut pass, 8, 3);
+        append_varint_field(&mut pass, 12, 12);
+        let mut fleet = Vec::new();
+        append_varint_field(&mut fleet, 1, 11);
+        append_message_field(&mut pass, 17, &fleet);
+        let mut extra_reported_fleet = Vec::new();
+        append_varint_field(&mut extra_reported_fleet, 1, 12);
+        append_message_field(&mut pass, 20, &extra_reported_fleet);
+
+        let mut effects = ResponseEffects::default();
+        let result = handle_typed_with_catalog(
+            &mut account,
+            "copy.PassBase",
+            &pass,
+            TypedBattleContext::new(Some(&catalog), None, None, 1.0, 1.0, 1.0, 1.0, &mut effects),
+        );
+
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert_eq!(
+            account
+                .inventory
+                .items
+                .get(&blueoath_domain::TemplateId::new(11).unwrap()),
+            Some(&1)
+        );
+        let active = account.battle.active.as_ref().expect("next wave remains");
+        assert_eq!(active.remaining_fleet_ids, vec![12]);
+        assert_eq!(active.current_fleet, 12);
+        assert!(account.battle.passed_copies.is_empty());
+        assert_eq!(account.character.exp, 10);
+        assert_eq!(
+            account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Supply)
+                .get(),
+            10_000
+        );
+
+        catalog.fleet_rewards.insert(
+            12,
+            BattleFleetReward {
+                commander_exp: 30,
+                ship_exp: 40,
+            },
+        );
+        let mut final_pass = Vec::new();
+        append_varint_field(&mut final_pass, 8, 3);
+        append_varint_field(&mut final_pass, 12, 12);
+        let mut final_fleet = Vec::new();
+        append_varint_field(&mut final_fleet, 1, 12);
+        append_message_field(&mut final_pass, 17, &final_fleet);
+
+        let mut final_effects = ResponseEffects::default();
+        let final_result = handle_typed_with_catalog(
+            &mut account,
+            "copy.PassBase",
+            &final_pass,
+            TypedBattleContext::new(
+                Some(&catalog),
+                None,
+                None,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                &mut final_effects,
+            ),
+        );
+
+        assert!(matches!(final_result, HandlerResult::Reply(_)));
+        assert_eq!(account.character.exp, 40);
+        assert_eq!(
+            account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Supply)
+                .get(),
+            9_900
+        );
+        assert!(account.battle.active.is_none());
+    }
 }

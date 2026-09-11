@@ -1716,18 +1716,21 @@ pub struct EquipDismantleRequest {
     pub equip_ids: Vec<u64>,
 }
 
+const MAX_EQUIPMENT_DISMANTLE_COUNT: usize = 1_000;
+
 impl Decode for EquipDismantleRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
         let values = fields.get(&1).map(Vec::as_slice).unwrap_or_default();
-        if values.is_empty() || values.len() > 99 {
+        if values.is_empty() || values.len() > MAX_EQUIPMENT_DISMANTLE_COUNT {
             return Err(ProtocolError::Invalid(
                 "equipment dismantle request is invalid",
             ));
         }
         let mut equip_ids = Vec::with_capacity(values.len());
+        let mut seen = std::collections::HashSet::with_capacity(values.len());
         for value in values {
-            if *value == 0 || equip_ids.contains(value) {
+            if *value == 0 || !seen.insert(*value) {
                 return Err(ProtocolError::Invalid(
                     "equipment dismantle ids are invalid",
                 ));
@@ -1749,7 +1752,8 @@ impl Decode for EquipRiseStarRequest {
         let fields = decode_varint_fields(payload)?;
         let equip_id = optional_u64(&fields, 1, "equipment rise star has duplicate equipment id")?;
         let values = fields.get(&2).map(Vec::as_slice).unwrap_or_default();
-        if equip_id == 0 || values.is_empty() || values.len() > 99 {
+        // First star levels can be purchased with no sacrificial equipment.
+        if equip_id == 0 || values.len() > 99 {
             return Err(ProtocolError::Invalid(
                 "equipment rise star request is invalid",
             ));
@@ -3429,6 +3433,38 @@ pub struct BathroomRequest {
     pub is_auto: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BathroomAutoRequest {
+    pub hero_id: u64,
+    pub is_auto: bool,
+}
+
+impl Decode for BathroomAutoRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            hero_id: optional_u64(&fields, 1, "bathroom auto has duplicate hero id")?,
+            is_auto: optional_i32(&fields, 2, "bathroom auto has duplicate status")? != 0,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BathroomServiceRequest {
+    pub hero_id: u64,
+    pub gift_id: u64,
+}
+
+impl Decode for BathroomServiceRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        let fields = decode_varint_fields(payload)?;
+        Ok(Self {
+            hero_id: optional_u64(&fields, 1, "bathroom service has duplicate hero id")?,
+            gift_id: optional_u64(&fields, 2, "bathroom service has duplicate gift id")?,
+        })
+    }
+}
+
 impl Decode for BathroomRequest {
     fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
         let fields = decode_varint_fields(payload)?;
@@ -4230,6 +4266,10 @@ impl CopyInfoCodec {
 
 pub struct DailyCopyCodec;
 
+/// Server-side daily extra reward attempts. The client treats this as the
+/// remaining daily allowance; keep it high enough to behave as unlimited.
+pub const DAILY_EXTRA_REWARD_LIMIT: i32 = 99_999;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DailyCopyProgress {
     pub chapter_id: i32,
@@ -4304,11 +4344,12 @@ impl DailyCopyCodec {
                         .iter()
                         .find(|item| item.group_id == *group_id)
                 };
-                write_varint_field(
-                    &mut group,
-                    2,
-                    progress.map_or(0, |item| item.success_times) as u32 as u64,
-                );
+                let success_times = if field == 3 {
+                    DAILY_EXTRA_REWARD_LIMIT
+                } else {
+                    progress.map_or(0, |item| item.success_times)
+                };
+                write_varint_field(&mut group, 2, success_times.max(0) as u32 as u64);
                 write_bytes(&mut output, field, &group);
             }
         }
@@ -4609,25 +4650,58 @@ impl HeroBagCodec {
         }
         write_varint_field(&mut output, 2, value.template_id as u32 as u64);
 
-        // THeroGrid.Equips is repeated THeroEquip. Each entry contains
-        // EquipIndex (P1..P6, encoded as 0..5) and EquipId. It is not a
-        // grouped message with equipment type and nested slot messages.
-        let normal_slots = value
+        // THeroGrid.Equips is repeated TEquipsInfoByType. The client reads
+        // each nested slot as EquipsInfo and expects EquipsId to be encoded,
+        // including zero for empty slots.
+        let normal_states = value
             .equip_groups
             .iter()
             .find(|group| group.equip_type == 1)
             .map(|group| group.slots.as_slice())
             .unwrap_or(&[]);
-        for index in 0..6 {
-            let equip_id = normal_slots
-                .get(index)
-                .map(|slot| slot.equip_id)
-                .or_else(|| value.equip_slots.get(index).copied())
-                .unwrap_or_default();
-            let mut equip = Vec::new();
-            write_varint_field(&mut equip, 1, index as u64);
-            write_varint_field(&mut equip, 2, u64::from(equip_id));
-            write_bytes(&mut output, 3, &equip);
+        let mut equip_groups = value.equip_groups.clone();
+        if !equip_groups.iter().any(|group| group.equip_type == 1) {
+            equip_groups.insert(
+                0,
+                HeroEquipGroup {
+                    equip_type: 1,
+                    slots: (0..6)
+                        .map(|index| HeroEquipSlot {
+                            equip_id: value.equip_slots.get(index).copied().unwrap_or_default(),
+                            state: 0,
+                        })
+                        .collect(),
+                },
+            );
+        }
+        for group in equip_groups {
+            let mut equips_by_type = Vec::new();
+            write_varint_field(&mut equips_by_type, 1, group.equip_type as u32 as u64);
+            for index in 0..6 {
+                let slot = group
+                    .slots
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| HeroEquipSlot {
+                        equip_id: if group.equip_type == 1 {
+                            value.equip_slots.get(index).copied().unwrap_or_default()
+                        } else {
+                            0
+                        },
+                        state: normal_states
+                            .get(index)
+                            .map(|slot| slot.state)
+                            .unwrap_or_default(),
+                    });
+                let mut equip = Vec::new();
+                // Empty slots must still carry EquipsId=0; omitted scalar is nil in Lua.
+                write_varint_field(&mut equip, 1, u64::from(slot.equip_id));
+                if slot.state != 0 {
+                    write_varint_field(&mut equip, 2, slot.state as u32 as u64);
+                }
+                write_bytes(&mut equips_by_type, 2, &equip);
+            }
+            write_bytes(&mut output, 3, &equips_by_type);
         }
 
         if value.level != 0 {
@@ -5689,5 +5763,27 @@ mod request_decode_tests {
         assert_eq!(request.treasure_id, 80520);
         assert_eq!(request.position, 3);
         assert_eq!(request.count, 1);
+    }
+
+    #[test]
+    fn equipment_dismantle_accepts_more_than_one_hundred_items() {
+        let mut payload = Vec::new();
+        for equip_id in 1..=101 {
+            payload.extend(varint_field(1, equip_id));
+        }
+
+        let request = super::EquipDismantleRequest::decode(&payload)
+            .expect("batch dismantle should accept more than one hundred items");
+        assert_eq!(request.equip_ids.len(), 101);
+    }
+
+    #[test]
+    fn equipment_dismantle_rejects_excessive_batches() {
+        let mut payload = Vec::new();
+        for equip_id in 1..=1_001 {
+            payload.extend(varint_field(1, equip_id));
+        }
+
+        assert!(super::EquipDismantleRequest::decode(&payload).is_err());
     }
 }

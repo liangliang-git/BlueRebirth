@@ -1,42 +1,44 @@
-use crate::catalog::BattleDropQuantities;
+use crate::game_config::BattleDropQuantities;
 use rusqlite::{types::ValueRef, Connection, OpenFlags, Row};
 use serde_json::{Map, Number, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 const SCHEMA_VERSION: &str = "2";
 
 #[derive(Clone)]
-struct CachedRows(Vec<(i32, Value)>);
+struct CachedRows(Arc<Vec<(i32, Value)>>);
 
 static CONFIG_ROWS_CACHE: OnceLock<Mutex<HashMap<(PathBuf, String), CachedRows>>> = OnceLock::new();
+static CONFIG_CONNECTION_CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<Connection>>>>> =
+    OnceLock::new();
 
-pub(super) struct ServerShopCostRow {
-    pub(super) goods_type: i32,
-    pub(super) item_id: i32,
-    pub(super) amount: i64,
+pub(crate) struct ServerShopCostRow {
+    pub(crate) goods_type: i32,
+    pub(crate) item_id: i32,
+    pub(crate) amount: i64,
 }
 
-pub(super) struct ServerShopGoodRow {
-    pub(super) shop_id: i32,
-    pub(super) good_id: i32,
-    pub(super) goods_type: i32,
-    pub(super) item_id: i32,
-    pub(super) num: i32,
-    pub(super) costs: Vec<ServerShopCostRow>,
+pub(crate) struct ServerShopGoodRow {
+    pub(crate) shop_id: i32,
+    pub(crate) good_id: i32,
+    pub(crate) goods_type: i32,
+    pub(crate) item_id: i32,
+    pub(crate) num: i32,
+    pub(crate) costs: Vec<ServerShopCostRow>,
 }
 
-pub(super) struct ServerMailRow {
-    pub(super) mid: u64,
-    pub(super) goods_type: i32,
-    pub(super) config_id: i32,
-    pub(super) num: i32,
-    pub(super) subject: String,
-    pub(super) content: String,
+pub(crate) struct ServerMailRow {
+    pub(crate) mid: u64,
+    pub(crate) goods_type: i32,
+    pub(crate) config_id: i32,
+    pub(crate) num: i32,
+    pub(crate) subject: String,
+    pub(crate) content: String,
 }
 
-pub(super) fn catalog_db_path(config_dir: &Path) -> PathBuf {
+pub(crate) fn config_db_path(config_dir: &Path) -> PathBuf {
     let catalog_root = if config_dir
         .file_name()
         .is_some_and(|name| name == "server-config")
@@ -59,7 +61,28 @@ pub(super) fn catalog_db_path(config_dir: &Path) -> PathBuf {
 
 fn open_readonly(path: &Path) -> Result<Connection, String> {
     Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(|error| format!("open catalog database {}: {error}", path.display()))
+        .map_err(|error| format!("open config database {}: {error}", path.display()))
+}
+
+fn cached_connection(path: &Path) -> Result<Arc<Mutex<Connection>>, String> {
+    let cache = CONFIG_CONNECTION_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = cache
+        .lock()
+        .map_err(|_| "config database connection cache poisoned".to_owned())?;
+    if let Some(connection) = guard.get(path) {
+        return Ok(Arc::clone(connection));
+    }
+    let connection = Arc::new(Mutex::new(open_readonly(path)?));
+    guard.insert(path.to_path_buf(), Arc::clone(&connection));
+    Ok(connection)
+}
+
+fn lock_connection(
+    connection: &Arc<Mutex<Connection>>,
+) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
+    connection
+        .lock()
+        .map_err(|_| "config database connection poisoned".to_owned())
 }
 
 fn quote_identifier(value: &str) -> Result<String, String> {
@@ -85,14 +108,15 @@ fn meta_value(connection: &Connection, key: &str) -> Result<Option<String>, Stri
         .map_err(|error| format!("read catalog metadata `{key}`: {error}"))
 }
 
-pub(super) fn validate_catalog_db(path: &Path) -> Result<(), String> {
+pub(crate) fn validate_config_db(path: &Path) -> Result<(), String> {
     if !path.is_file() {
         return Err(format!(
             "catalog database does not exist: {}",
             path.display()
         ));
     }
-    let connection = open_readonly(path)?;
+    let cached = cached_connection(path)?;
+    let connection = lock_connection(&cached)?;
     let version = meta_value(&connection, "schema_version")?
         .ok_or_else(|| "catalog database has no schema_version".to_string())?;
     if version != SCHEMA_VERSION {
@@ -210,27 +234,36 @@ fn load_config_rows_uncached(
     Ok(result)
 }
 
-pub(super) fn load_config_rows(
+pub(crate) fn load_config_rows_shared(
     path: &Path,
     config_name: &str,
-) -> Result<Vec<(i32, Value)>, String> {
+) -> Result<Arc<Vec<(i32, Value)>>, String> {
     let key = (path.to_path_buf(), config_name.to_string());
     let cache = CONFIG_ROWS_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(guard) = cache.lock() {
         if let Some(rows) = guard.get(&key) {
-            return Ok(rows.0.clone());
+            return Ok(Arc::clone(&rows.0));
         }
     }
-    let connection = open_readonly(path)?;
-    let rows = load_config_rows_uncached(&connection, config_name)?;
+    let cached = cached_connection(path)?;
+    let connection = lock_connection(&cached)?;
+    let rows = Arc::new(load_config_rows_uncached(&connection, config_name)?);
     if let Ok(mut guard) = cache.lock() {
-        guard.insert(key, CachedRows(rows.clone()));
+        guard.insert(key, CachedRows(Arc::clone(&rows)));
     }
     Ok(rows)
 }
 
-pub(super) fn load_drop_quantities(path: &Path) -> Result<BattleDropQuantities, String> {
-    let connection = open_readonly(path)?;
+pub(crate) fn load_config_rows(
+    path: &Path,
+    config_name: &str,
+) -> Result<Vec<(i32, Value)>, String> {
+    Ok(load_config_rows_shared(path, config_name)?.as_ref().clone())
+}
+
+pub(crate) fn load_drop_quantities(path: &Path) -> Result<BattleDropQuantities, String> {
+    let cached = cached_connection(path)?;
+    let connection = lock_connection(&cached)?;
     let mut result = BattleDropQuantities::default();
     let mut statement = connection
         .prepare(
@@ -266,8 +299,9 @@ pub(super) fn load_drop_quantities(path: &Path) -> Result<BattleDropQuantities, 
     Ok(result)
 }
 
-pub(super) fn load_server_shop_goods(path: &Path) -> Result<Vec<ServerShopGoodRow>, String> {
-    let connection = open_readonly(path)?;
+pub(crate) fn load_server_shop_goods(path: &Path) -> Result<Vec<ServerShopGoodRow>, String> {
+    let cached = cached_connection(path)?;
+    let connection = lock_connection(&cached)?;
     let mut statement = connection
         .prepare(
             "SELECT good_id, shop_id, goods_type, item_id, num, source_priority \
@@ -324,8 +358,9 @@ pub(super) fn load_server_shop_goods(path: &Path) -> Result<Vec<ServerShopGoodRo
     Ok(result)
 }
 
-pub(super) fn load_server_mail_templates(path: &Path) -> Result<Vec<ServerMailRow>, String> {
-    let connection = open_readonly(path)?;
+pub(crate) fn load_server_mail_templates(path: &Path) -> Result<Vec<ServerMailRow>, String> {
+    let cached = cached_connection(path)?;
+    let connection = lock_connection(&cached)?;
     let mut statement = connection
         .prepare(
             "SELECT mid, goods_type, config_id, num, subject, content \

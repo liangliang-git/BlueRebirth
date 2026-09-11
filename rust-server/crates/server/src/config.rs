@@ -298,7 +298,7 @@ pub struct ServerConfig {
     pub trace_methods: bool,
     pub trace_kcp: bool,
     pub data_root: PathBuf,
-    /// Server-owned catalog config directory. Contains `config_*.json` files.
+    /// Server-owned game configuration root containing `server_config.db`.
     pub catalog_path: Option<PathBuf>,
     pub drop_multiplier: f64,
     pub ship_exp_multiplier: f64,

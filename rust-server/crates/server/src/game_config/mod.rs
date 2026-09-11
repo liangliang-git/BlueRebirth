@@ -1,5 +1,15 @@
 #![allow(dead_code)]
 
+mod db;
+mod loader;
+mod parse;
+
+pub(crate) use loader::*;
+pub(crate) use loader::{
+    load_chapter_catalog, load_combination_catalog, load_server_mail_templates,
+    load_server_shop_goods, mix_build_draw_roll, ConfigSource,
+};
+
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -48,11 +58,16 @@ pub(super) struct HeroBreakdownCatalog {
 /// 组合规则
 #[derive(Debug, Clone, Default)]
 pub(super) struct CombinationRule {
+    pub(super) level_start: i32,
     pub(super) level_end: i32,
     pub(super) next_id: i32,
     pub(super) star: i32,
     pub(super) levelup_costs: Vec<(i32, i32, i32)>,
     pub(super) break_costs: Vec<(i32, i32, i32)>,
+    pub(super) prop_up: Vec<(i32, i64)>,
+    pub(super) break_prop_up: Vec<(i32, i64)>,
+    pub(super) prop_up_percent: Vec<(i32, i64)>,
+    pub(super) break_prop_up_percent: Vec<(i32, i64)>,
 }
 
 /// 组合目录
@@ -71,17 +86,54 @@ pub(super) struct BuildingCatalog {
     #[cfg(test)]
     pub(super) recipe_configs: BTreeMap<i32, Value>,
     pub(super) typed_building_configs: BTreeMap<i32, BuildingConfig>,
+    pub(super) upgrade_rules_by_template: BTreeMap<i32, BuildingUpgradeRule>,
     pub(super) typed_recipe_configs: BTreeMap<i32, RecipeConfig>,
     pub(super) resource_time_seconds: BTreeMap<i32, i32>,
+    pub(super) worker_hp_max: i32,
+    pub(super) worker_hp_level_up: Vec<i32>,
+    pub(super) worker_recover: i32,
+    pub(super) worker_recover_interval_seconds: i32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct BuildingConfig {
     pub(super) building_type: i32,
+    pub(super) level: i32,
+    pub(super) hero_capacity: usize,
     pub(super) product_max: i32,
     pub(super) product_id: Option<i32>,
     pub(super) productivity: i32,
     pub(super) produce_speed: i32,
+    pub(super) add_mood: i32,
+    pub(super) hero_addition: i32,
+    pub(super) add_worker_hp: i32,
+    pub(super) food_cost: i32,
+    pub(super) mood_cost: i32,
+    pub(super) oil_addition: i32,
+    pub(super) gold_addition: i32,
+    pub(super) power_cost: i32,
+    pub(super) production_time_less: i32,
+    pub(super) reduce_cost: i32,
+    pub(super) recipe_ids: Vec<i32>,
+}
+
+/// Wire `ProduceSpeed` is fixed-point output per `BuildingTimeUnit`.
+/// Resource buildings use `productivity`; power stations use `addworkerhp`.
+pub(super) fn building_produce_speed(config: &BuildingConfig) -> i32 {
+    match config.building_type {
+        2 => config.add_worker_hp,
+        3 | 4 => config.productivity,
+        _ => config.produce_speed,
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct BuildingUpgradeRule {
+    pub(super) costs: Vec<(i32, i32, i64)>,
+    pub(super) cost_money: i64,
+    pub(super) cost_work: i32,
+    pub(super) office_level: i32,
+    pub(super) duration_seconds: i32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1027,6 +1079,9 @@ pub(super) struct ShipBreakConfig {
     pub(super) break_item_mub: Option<(i32, i32)>,
     pub(super) break_usableitem_mub: Vec<i32>,
     pub(super) currency_cost: Option<(i32, i32, i64)>,
+    pub(super) ship_break_effect_ids: Vec<i32>,
+    pub(super) value_effect_ids: Vec<i32>,
+    pub(super) value_effect_powers: Vec<i32>,
 }
 
 impl ShipBreakCatalog {
@@ -1045,6 +1100,11 @@ impl ShipBreakCatalog {
                     .break_item_mub
                     .is_some_and(|(item, count)| item <= 0 || count <= 0)
                 || config.break_usableitem_mub.iter().any(|item| *item <= 0)
+                || config
+                    .ship_break_effect_ids
+                    .iter()
+                    .chain(&config.value_effect_ids)
+                    .any(|effect_id| *effect_id <= 0)
                 || config
                     .currency_cost
                     .is_some_and(|(kind, item, cost)| kind != 5 || item <= 0 || cost < 0)
@@ -1204,6 +1264,12 @@ pub(super) struct BattleCatalog {
     pub(super) enemies: HashMap<i32, BattleEnemy>,
     pub(super) random_factors: HashMap<i32, Vec<RandomFactorEntry>>,
     pub(super) copy_drop_ids: HashMap<i32, Vec<i32>>,
+    /// Daily copies use config_daily_group.basic_drop instead of the UI-only
+    /// config_copy_display.drop_info_id rows.
+    pub(super) daily_basic_drop_ids_by_copy: HashMap<i32, Vec<i32>>,
+    /// Daily extra rewards use config_daily_group.extra_drop. They are always
+    /// available because server exposes 99,999 extra reward attempts.
+    pub(super) daily_extra_drop_ids_by_copy: HashMap<i32, Vec<i32>>,
     pub(super) fleet_drop_ids: HashMap<i32, Vec<i32>>,
     pub(super) fleet_other_drop_ids: HashMap<i32, Vec<i32>>,
     pub(super) fleet_settle_drop_ids: HashMap<i32, Vec<i32>>,
@@ -1398,17 +1464,46 @@ pub(super) struct ShipStat {
     pub(super) dodge: i64,
     pub(super) crit: i64,
     pub(super) anti_crit: i64,
+    pub(super) favorite_gifts: Vec<i32>,
+    pub(super) view_range: i64,
+    pub(super) main_gun_cd: i64,
+    pub(super) main_gun_range: i64,
+    pub(super) fate: i64,
+    pub(super) torpedo_num: i64,
+    pub(super) torpedo_range: i64,
+    pub(super) speed: i64,
+    pub(super) plane_health: i64,
+    pub(super) plane_bomb: i64,
+    pub(super) plane_torpedo: i64,
+    pub(super) plane_to_air: i64,
+    pub(super) backup_plane_count: i64,
+    pub(super) submarine: i64,
+    pub(super) submarine_levelup: i64,
+    pub(super) antisubmarine: i64,
+    pub(super) antisubmarine_levelup: i64,
+    pub(super) level_value_effect: Vec<i32>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct ValueEffectConfig {
+    pub(super) target_attr: i32,
+    pub(super) value: f64,
 }
 
 /// 舰船状态目录
 #[derive(Clone, Debug, Default)]
 pub(super) struct ShipStatCatalog {
     pub(super) by_template: BTreeMap<i32, ShipStat>,
+    pub(super) value_effects_by_id: BTreeMap<i32, ValueEffectConfig>,
+    pub(super) level_attribute_by_level: BTreeMap<i32, i32>,
+    pub(super) mubar_level_attribute_by_level: BTreeMap<i32, i32>,
+    pub(super) mubar_templates: BTreeSet<i32>,
 }
 
 pub(super) static SHIP_STAT_CATALOG: OnceLock<ShipStatCatalog> = OnceLock::new();
 pub(super) static SHIP_STAT_MULTIPLIER: OnceLock<f64> = OnceLock::new();
 pub(super) static HERO_SKILL_CATALOG: OnceLock<BTreeMap<i32, Vec<i32>>> = OnceLock::new();
+pub(super) static COMBINATION_CATALOG: OnceLock<CombinationCatalog> = OnceLock::new();
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct RandomFactorEntry {
@@ -1488,6 +1583,53 @@ impl TaskCatalog {
 #[derive(Clone, Debug, Default)]
 pub(super) struct AffectionCatalog {
     pub(super) exp_by_item: BTreeMap<i32, i32>,
+    pub(super) bathroom_item: Option<BathroomItemConfig>,
+    pub(super) gifts_by_id: BTreeMap<i32, BathroomGiftConfig>,
+    pub(super) value_effect_time_by_id: BTreeMap<i32, i32>,
+    pub(super) bath_mood_value: i32,
+    pub(super) gift_mood_value: i32,
+    pub(super) bath_currency_id: i32,
+    pub(super) mood_min: i32,
+    pub(super) mood_max: i32,
+    pub(super) mood_initial: i32,
+    pub(super) mood_natural_recovery: i32,
+    pub(super) mood_natural_limit: i32,
+    pub(super) mood_bath_interval_seconds: i64,
+    pub(super) mood_bath_interval_recovery: i32,
+    pub(super) mood_married_recovery_bonus: i32,
+    pub(super) mood_affection_bonus_threshold: i32,
+    pub(super) mood_stages: Vec<MoodStage>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct MoodStage {
+    pub(super) min: i32,
+    pub(super) max: i32,
+    pub(super) exp_up: i32,
+    pub(super) affection_add: i32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct BathroomItemConfig {
+    pub(super) id: i32,
+    pub(super) duration_seconds: i32,
+    pub(super) once_exp: i32,
+    pub(super) price: i32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct BathroomGiftConfig {
+    pub(super) id: i32,
+    pub(super) gift_type: i32,
+    pub(super) quality: i32,
+    pub(super) price: Vec<i32>,
+    pub(super) value_id: i32,
+    pub(super) match_groups: Vec<i32>,
+    pub(super) not_match_groups: Vec<i32>,
+    pub(super) match_power: Vec<i32>,
+    pub(super) not_match_power: Vec<i32>,
+    pub(super) match_rate: i32,
+    pub(super) not_match_rate: i32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1690,7 +1832,7 @@ use std::sync::{Arc, OnceLock};
 
 use blueoath_protocol::FashionList;
 
-use super::{json_i32, json_i32_array, mix_build_draw_roll, ShopReward};
+use super::{json_i32, json_i32_array, ShopReward};
 
 #[cfg(test)]
 mod validation_tests {

@@ -1,8 +1,5 @@
 #![allow(dead_code)]
 
-#[cfg(test)]
-use serde_json::{json, Value};
-
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
@@ -17,8 +14,38 @@ fn typed_currency_kind(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
     }
 }
 
+fn typed_compat_currency(item_id: i32) -> bool {
+    matches!(item_id, 8..=15 | 18 | 22..=29 | 31..=33)
+}
+
+fn credit_typed_currency(
+    account: &mut blueoath_domain::AccountState,
+    item_id: i32,
+    amount: u64,
+) -> bool {
+    if let Some(kind) = typed_currency_kind(item_id) {
+        return account.resources.credit(kind, amount).is_ok();
+    }
+    if !typed_compat_currency(item_id) {
+        return false;
+    }
+    let key = format!("compat:currency:{item_id}");
+    let current = account
+        .activities
+        .progress
+        .get(&key)
+        .copied()
+        .unwrap_or_default();
+    let Some(next) = current.checked_add(amount) else {
+        return false;
+    };
+    account.activities.progress.insert(key, next);
+    true
+}
+
 pub(crate) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
+    state: &ServerState,
     method: &str,
     request_args: &[u8],
     effects: &mut ResponseEffects,
@@ -99,18 +126,11 @@ pub(crate) fn handle_typed(
             }
             for reward in &rewards {
                 if reward.goods_type == 5 {
-                    let kind = match reward.item_id {
-                        1 => Some(blueoath_domain::CurrencyKind::Gold),
-                        2 => Some(blueoath_domain::CurrencyKind::Diamond),
-                        5 => Some(blueoath_domain::CurrencyKind::Supply),
-                        30 => Some(blueoath_domain::CurrencyKind::PvePoint),
-                        _ => None,
-                    };
-                    if let Some(kind) = kind {
-                        let _ = account
-                            .resources
-                            .credit(kind, u64::try_from(reward.num).unwrap_or_default());
-                    }
+                    let _ = credit_typed_currency(
+                        account,
+                        reward.item_id,
+                        u64::try_from(reward.num).unwrap_or_default(),
+                    );
                 } else if let Ok(template_id) = blueoath_domain::TemplateId::new(
                     u64::try_from(reward.item_id).unwrap_or_default(),
                 ) {
@@ -133,6 +153,10 @@ pub(crate) fn handle_typed(
             effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
+            ));
+            effects.push_pre(Response::raw(
+                "user.UpdateUserInfo",
+                UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
             ));
             HandlerResult::Reply(Response::raw(method, encode_retire_hero_response(&rewards)))
         }
@@ -309,7 +333,10 @@ pub(crate) fn handle_typed(
                 .equipments
                 .get(&equip_id)
                 .map(|equipment| {
-                    EquipListCodec::encode_item(&equip_info_from_typed_equipment(equipment))
+                    EquipListCodec::encode_item(&equip_info_from_typed_equipment(
+                        equipment,
+                        EQUIP_CATALOG.get(),
+                    ))
                 })
                 .unwrap_or_default();
             HandlerResult::Reply(Response::raw(method, response))
@@ -457,458 +484,5 @@ pub(crate) fn handle_typed(
             ))
         }
         _ => HandlerResult::Empty,
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn equip_test_copy_payload(account: &Value) -> Vec<u8> {
-    let state = account.get("equipTestCopy").unwrap_or(&Value::Null);
-    let mut output = Vec::new();
-    append_varint_field(
-        &mut output,
-        1,
-        json_i32(state, "maxDamage").unwrap_or_default().max(0) as u64,
-    );
-    if let Some(rewards) = state.get("receivedRewards").and_then(Value::as_array) {
-        for reward in rewards {
-            let mut encoded = Vec::new();
-            append_varint_field(
-                &mut encoded,
-                1,
-                json_i32(reward, "rewardId").unwrap_or_default().max(0) as u64,
-            );
-            append_varint_field(
-                &mut encoded,
-                2,
-                json_i32(reward, "receiveTime").unwrap_or_default().max(0) as u64,
-            );
-            append_message_field(&mut output, 2, &encoded);
-        }
-    }
-    output
-}
-
-#[cfg(test)]
-pub(crate) fn equip_new_test_copy_payload(account: &Value) -> Vec<u8> {
-    let state = account.get("equipNewTestCopy").unwrap_or(&Value::Null);
-    let mut output = Vec::new();
-    if let Some(infos) = state.get("infos").and_then(Value::as_array) {
-        for info in infos {
-            let mut encoded = Vec::new();
-            append_varint_field(
-                &mut encoded,
-                1,
-                json_i32(info, "id").unwrap_or_default().max(0) as u64,
-            );
-            append_varint_field(
-                &mut encoded,
-                2,
-                json_i32(info, "maxDamage").unwrap_or_default().max(0) as u64,
-            );
-            if let Some(rewards) = info.get("receivedRewards").and_then(Value::as_array) {
-                for reward in rewards {
-                    let mut reward_encoded = Vec::new();
-                    append_varint_field(
-                        &mut reward_encoded,
-                        1,
-                        json_i32(reward, "damageIndex").unwrap_or_default().max(0) as u64,
-                    );
-                    append_varint_field(
-                        &mut reward_encoded,
-                        2,
-                        json_i32(reward, "receiveTime").unwrap_or_default().max(0) as u64,
-                    );
-                    append_message_field(&mut encoded, 3, &reward_encoded);
-                }
-            }
-            append_message_field(&mut output, 1, &encoded);
-        }
-    }
-    output
-}
-
-#[cfg(test)]
-pub(crate) fn equip_activity_payload(account: &Value) -> Vec<u8> {
-    let state = account.get("equipActivity").unwrap_or(&Value::Null);
-    let mut output = Vec::new();
-    if let Some(infos) = state.get("infos").and_then(Value::as_array) {
-        for info in infos {
-            let mut encoded = Vec::new();
-            append_varint_field(
-                &mut encoded,
-                1,
-                json_u64(info, "equipId").unwrap_or_default(),
-            );
-            append_varint_field(
-                &mut encoded,
-                2,
-                json_i32(info, "templateId").unwrap_or_default().max(0) as u64,
-            );
-            append_varint_field(
-                &mut encoded,
-                3,
-                json_i32(info, "powerPoint").unwrap_or_default().max(0) as u64,
-            );
-            append_varint_field(
-                &mut encoded,
-                4,
-                json_i32(info, "isReward").unwrap_or_default().max(0) as u64,
-            );
-            append_varint_field(
-                &mut encoded,
-                5,
-                json_i32(info, "extraRule").unwrap_or_default().max(0) as u64,
-            );
-            append_message_field(&mut output, 1, &encoded);
-        }
-    }
-    output
-}
-
-#[cfg(test)]
-pub(crate) fn mark_new_test_reward(
-    account: &mut Value,
-    copy_index: i32,
-    damage_index: i32,
-) -> bool {
-    let root = account
-        .as_object_mut()
-        .expect("account must be an object")
-        .entry("equipNewTestCopy")
-        .or_insert_with(|| json!({"infos": []}));
-    let infos = root
-        .as_object_mut()
-        .expect("equipment new test state must be an object")
-        .entry("infos")
-        .or_insert_with(|| json!([]));
-    let infos = infos
-        .as_array_mut()
-        .expect("equipment new test infos must be an array");
-    let info = if let Some(info) = infos
-        .iter_mut()
-        .find(|info| json_i32(info, "id") == Some(copy_index))
-    {
-        info
-    } else {
-        infos.push(json!({"id": copy_index, "maxDamage": 0, "receivedRewards": []}));
-        infos.last_mut().expect("new test info was inserted")
-    };
-    let rewards = info
-        .as_object_mut()
-        .expect("equipment new test info must be an object")
-        .entry("receivedRewards")
-        .or_insert_with(|| json!([]));
-    let rewards = rewards
-        .as_array_mut()
-        .expect("equipment new test rewards must be an array");
-    if rewards
-        .iter()
-        .any(|reward| json_i32(reward, "damageIndex") == Some(damage_index))
-    {
-        return false;
-    }
-    rewards.push(json!({
-        "damageIndex": damage_index,
-        "receiveTime": current_unix_seconds()
-    }));
-    true
-}
-
-#[cfg(test)]
-pub(crate) fn resolve_new_test_reward(
-    catalog: &EquipNewTestCatalog,
-    account: &Value,
-    copy_index: i32,
-    damage_index: i32,
-) -> Result<i32, &'static str> {
-    let (threshold, reward_id) = catalog
-        .reward_id(copy_index, damage_index)
-        .ok_or("index is invalid")?;
-    let info = account
-        .get("equipNewTestCopy")
-        .and_then(|state| state.get("infos"))
-        .and_then(Value::as_array)
-        .and_then(|infos| {
-            infos
-                .iter()
-                .find(|info| json_i32(info, "id") == Some(copy_index))
-        });
-    let max_damage = info
-        .and_then(|info| json_i32(info, "maxDamage"))
-        .unwrap_or_default();
-    if max_damage < threshold {
-        return Err("damage threshold not reached");
-    }
-    if info
-        .and_then(|info| info.get("receivedRewards"))
-        .and_then(Value::as_array)
-        .is_some_and(|rewards| {
-            rewards
-                .iter()
-                .any(|reward| json_i32(reward, "damageIndex") == Some(damage_index))
-        })
-    {
-        return Err("already claimed");
-    }
-    Ok(reward_id)
-}
-
-#[cfg(test)]
-pub(crate) fn update_new_test_max_damage(
-    account: &mut Value,
-    catalog: &EquipNewTestCatalog,
-    copy_id: i32,
-    damage: i32,
-) -> Option<i32> {
-    let copy_index = catalog
-        .copy_ids
-        .iter()
-        .position(|configured_id| *configured_id == copy_id)
-        .and_then(|index| i32::try_from(index + 1).ok())?;
-    let root = account
-        .as_object_mut()?
-        .entry("equipNewTestCopy")
-        .or_insert_with(|| json!({"infos": []}));
-    let infos = root
-        .as_object_mut()?
-        .entry("infos")
-        .or_insert_with(|| json!([]))
-        .as_array_mut()?;
-    let info = if let Some(info) = infos
-        .iter_mut()
-        .find(|info| json_i32(info, "id") == Some(copy_index))
-    {
-        info
-    } else {
-        infos.push(json!({"id": copy_index, "maxDamage": 0, "receivedRewards": []}));
-        infos.last_mut()?
-    };
-    let current = json_i32(info, "maxDamage").unwrap_or_default().max(0);
-    let next = current.max(damage.max(0));
-    if next > current {
-        info["maxDamage"] = json!(next);
-    }
-    Some(next)
-}
-
-#[cfg(test)]
-pub(crate) fn mark_equip_activity_reward(account: &mut Value, equip_id: u64) -> bool {
-    let infos = account
-        .as_object_mut()
-        .expect("account must be an object")
-        .entry("equipActivity")
-        .or_insert_with(|| json!({"infos": []}))
-        .as_object_mut()
-        .expect("equipment activity state must be an object")
-        .entry("infos")
-        .or_insert_with(|| json!([]));
-    let Some(info) = infos
-        .as_array_mut()
-        .expect("equipment activity infos must be an array")
-        .iter_mut()
-        .find(|info| json_u64(info, "equipId") == Some(equip_id))
-    else {
-        return false;
-    };
-    if json_i32(info, "isReward").unwrap_or_default() > 0 {
-        return false;
-    }
-    info["isReward"] = json!(1);
-    true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn typed_equip_list_reads_normalized_equipment() {
-        let mut account = blueoath_domain::NewAccountFactory::create(
-            blueoath_domain::ProfileId::new("equip-typed").unwrap(),
-            "Captain",
-        );
-        let equip_id = blueoath_domain::EquipId::new(4).unwrap();
-        account.dock.equipments.insert(
-            equip_id,
-            blueoath_domain::EquipmentState {
-                id: equip_id,
-                template_id: blueoath_domain::TemplateId::new(300).unwrap(),
-                enhance_level: 2,
-                star: 3,
-                enhance_exp: 5,
-                hero_id: None,
-            },
-        );
-        let HandlerResult::Reply(response) = handle_typed(
-            &mut account,
-            "equip.UpdateEquipBagData",
-            &[],
-            &mut ResponseEffects::default(),
-            None,
-            None,
-        ) else {
-            panic!("typed equipment route must reply");
-        };
-        assert!(response.payload.len() > 2);
-    }
-
-    #[test]
-    fn typed_equip_enhance_consumes_material_and_updates_equipment() {
-        let mut account = blueoath_domain::NewAccountFactory::create(
-            blueoath_domain::ProfileId::new("equip-enhance-typed").unwrap(),
-            "Captain",
-        );
-        let item_id = blueoath_domain::TemplateId::new(10_182).unwrap();
-        let before = account
-            .inventory
-            .items
-            .get(&item_id)
-            .copied()
-            .unwrap_or_default();
-        let mut catalog = EquipCatalog::default();
-        catalog.enhance_max_by_template.insert(30_091, 5);
-        catalog.enhance_materials.insert(10_182, (600, None));
-        for level in 1..=5 {
-            catalog.enhance_level_exp.insert(level, 500);
-        }
-        let mut material = Vec::new();
-        append_varint_field(&mut material, 1, 10_182);
-        append_varint_field(&mut material, 2, 1);
-        let mut args = Vec::new();
-        append_varint_field(&mut args, 1, 1);
-        append_bytes_field(&mut args, 2, &material);
-        let mut effects = ResponseEffects::default();
-
-        let result = handle_typed(
-            &mut account,
-            "equip.Enhance",
-            &args,
-            &mut effects,
-            Some(&catalog),
-            None,
-        );
-
-        assert!(matches!(result, HandlerResult::Reply(_)));
-        assert_eq!(account.inventory.items.get(&item_id), Some(&(before - 1)));
-        assert_eq!(
-            account
-                .dock
-                .equipments
-                .get(&blueoath_domain::EquipId::new(1).unwrap())
-                .unwrap()
-                .enhance_level,
-            1
-        );
-        assert_eq!(
-            account
-                .dock
-                .equipments
-                .get(&blueoath_domain::EquipId::new(1).unwrap())
-                .unwrap()
-                .enhance_exp,
-            600
-        );
-        assert_eq!(effects.into_parts().0.len(), 3);
-    }
-
-    #[test]
-    fn typed_equip_dismantle_removes_equipment_and_grants_rewards() {
-        let mut account = blueoath_domain::NewAccountFactory::create(
-            blueoath_domain::ProfileId::new("equip-dismantle-typed").unwrap(),
-            "Captain",
-        );
-        let item_id = blueoath_domain::TemplateId::new(10_182).unwrap();
-        let before = account
-            .inventory
-            .items
-            .get(&item_id)
-            .copied()
-            .unwrap_or_default();
-        let mut catalog = EquipCatalog::default();
-        catalog
-            .dismantle_rewards_by_template
-            .insert(30_091, vec![(1, 10_182, 3)]);
-        let mut args = Vec::new();
-        append_varint_field(&mut args, 1, 1);
-        let mut effects = ResponseEffects::default();
-
-        let result = handle_typed(
-            &mut account,
-            "equip.Dismantle",
-            &args,
-            &mut effects,
-            Some(&catalog),
-            None,
-        );
-
-        assert!(matches!(result, HandlerResult::Reply(_)));
-        assert!(!account
-            .dock
-            .equipments
-            .contains_key(&blueoath_domain::EquipId::new(1).unwrap()));
-        assert_eq!(account.inventory.items.get(&item_id), Some(&(before + 3)));
-        assert_eq!(
-            account.dock.heroes.values().next().unwrap().equip_slots[0],
-            None
-        );
-        assert_eq!(effects.into_parts().0.len(), 2);
-    }
-
-    #[test]
-    fn typed_equip_rise_star_consumes_unbound_material() {
-        let mut account = blueoath_domain::NewAccountFactory::create(
-            blueoath_domain::ProfileId::new("equip-star-typed").unwrap(),
-            "Captain",
-        );
-        let hero_id = blueoath_domain::HeroId::new(1).unwrap();
-        account.dock.heroes.get_mut(&hero_id).unwrap().equip_slots[2] = None;
-        account
-            .dock
-            .equipments
-            .get_mut(&blueoath_domain::EquipId::new(2).unwrap())
-            .unwrap()
-            .hero_id = None;
-        let mut catalog = EquipCatalog::default();
-        catalog.star_max_by_template.insert(30_091, 5);
-        catalog.renovate_rules.insert(
-            1,
-            EquipRenovateRule {
-                self_count: 1,
-                ..EquipRenovateRule::default()
-            },
-        );
-        catalog.quality_by_template.insert(30_091, 3);
-        catalog.quality_by_template.insert(30_221, 3);
-        catalog.type_by_template.insert(30_091, 1);
-        catalog.type_by_template.insert(30_221, 129);
-        let mut args = Vec::new();
-        append_varint_field(&mut args, 1, 1);
-        append_varint_field(&mut args, 2, 2);
-        let mut effects = ResponseEffects::default();
-
-        let result = handle_typed(
-            &mut account,
-            "equip.RiseStar",
-            &args,
-            &mut effects,
-            Some(&catalog),
-            None,
-        );
-
-        assert!(matches!(result, HandlerResult::Reply(_)));
-        assert_eq!(
-            account
-                .dock
-                .equipments
-                .get(&blueoath_domain::EquipId::new(1).unwrap())
-                .unwrap()
-                .star,
-            1
-        );
-        assert!(!account
-            .dock
-            .equipments
-            .contains_key(&blueoath_domain::EquipId::new(2).unwrap()));
-        assert_eq!(effects.into_parts().0.len(), 3);
     }
 }

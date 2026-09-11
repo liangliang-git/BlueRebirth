@@ -30,19 +30,13 @@ use tokio::net::{TcpListener, TcpStream, UdpSocket};
 #[cfg(test)]
 mod account_state;
 mod bootstrap;
-mod catalog;
-mod catalog_db;
-mod catalog_loader;
 pub mod common;
 mod config;
 pub(crate) mod features;
 mod frame_service;
+mod game_config;
 mod game_login;
-#[cfg(test)]
-pub(crate) use features::equip::service::{
-    equip_activity_payload, equip_new_test_copy_payload, equip_test_copy_payload,
-    mark_equip_activity_reward, mark_new_test_reward, resolve_new_test_reward,
-};
+
 mod local_protocol;
 mod logging;
 mod projection;
@@ -58,14 +52,10 @@ use account_state::*;
 pub use blueoath_game::{
     BattleService, BattleStartContext, ProgressService, ResourceService, RewardService,
 };
-#[cfg(test)]
-pub(crate) use bootstrap::bootstrap_response;
 use bootstrap::{
     handle_bootstrap_http, looks_like_http, looks_like_netsocket, read_connection_prefix,
     PrefixedTcpStream,
 };
-use catalog::*;
-use catalog_loader::*;
 use common::clock::{Clock, SystemClock};
 use common::json::*;
 use config::{normalize_multiplier, normalize_profile_id, scale_reward, DEFAULT_PROFILE_ID};
@@ -73,28 +63,17 @@ pub use config::{
     BattleOutcome, Formation, LogLevel, ServerConfig, ServerConfigError, ServerState, Ship, Stage,
 };
 use features::battle::state::*;
-#[cfg(test)]
-pub(crate) use features::building::service::handle_typed as handle_typed_building;
 use features::building::{buildship_state::*, construction_state::*, state::*};
 use features::copy::mopup_state::mop_up_pass_rets;
 #[cfg(test)]
-use features::copy::mopup_state::*;
-#[cfg(test)]
 use features::equip::state::*;
 use features::hero::state::*;
-#[cfg(test)]
-use features::progression::study_state::*;
 use features::shop::state::*;
-#[cfg(test)]
-use features::social::state::*;
 use features::task::state::*;
-#[cfg(test)]
-pub(crate) use features::user::state::default_account_snapshot;
-#[cfg(test)]
-use features::user::state::user_info_from_account;
 use features::user::state::user_info_from_typed_account;
 pub use frame_service::process_frame;
 use frame_service::{prepare_local_request, storage_failure_response};
+use game_config::*;
 #[cfg(test)]
 use game_login::process_game_login_frame_payload_with_catalogs_typed_mut;
 use game_login::process_game_login_frame_payload_with_typed_account;
@@ -132,6 +111,72 @@ const MOOD_BATH_RECOVERY: i32 = 300_000;
 const MOOD_BATH_INTERVAL_RECOVERY: i32 = 40_000;
 const MOOD_BATH_INTERVAL_SECONDS: i64 = 600;
 const MOOD_AFFECTION_BONUS_THRESHOLD: i64 = 1_200_000;
+
+pub(crate) fn initialize_typed_hero_loadout(
+    account: &mut blueoath_domain::AccountState,
+    hero: &mut blueoath_domain::HeroState,
+    default_equipment: Option<&[i32]>,
+) {
+    if hero.equip_slots.len() < 6 {
+        hero.equip_slots.resize(6, None);
+    }
+    let mut next_equip_id = account
+        .dock
+        .equipments
+        .keys()
+        .map(|id| id.get())
+        .max()
+        .unwrap_or_default()
+        .saturating_add(1);
+    if let Some(defaults) = default_equipment {
+        for (slot, equip_template) in defaults.iter().take(6).enumerate() {
+            if hero.equip_slots[slot].is_some() || *equip_template <= 0 {
+                continue;
+            }
+            let Ok(equip_id) = blueoath_domain::EquipId::new(next_equip_id) else {
+                continue;
+            };
+            let Ok(template_id) = blueoath_domain::TemplateId::new(*equip_template as u64) else {
+                continue;
+            };
+            account.dock.equipments.insert(
+                equip_id,
+                blueoath_domain::EquipmentState {
+                    id: equip_id,
+                    template_id,
+                    enhance_level: 0,
+                    star: 0,
+                    enhance_exp: 0,
+                    hero_id: Some(hero.id),
+                },
+            );
+            hero.equip_slots[slot] = Some(equip_id);
+            next_equip_id = next_equip_id.saturating_add(1);
+        }
+    }
+
+    let template_id = i32::try_from(hero.template_id.get()).unwrap_or_default();
+    if let Some(skills) = HERO_SKILL_CATALOG
+        .get()
+        .and_then(|catalog| catalog.get(&template_id))
+    {
+        for skill_id in skills.iter().copied().filter(|skill_id| *skill_id > 0) {
+            hero.pskills.entry(skill_id as u64).or_insert(1);
+        }
+    }
+}
+
+pub(crate) fn initialize_typed_hero_loadout_from_catalog(
+    account: &mut blueoath_domain::AccountState,
+    hero: &mut blueoath_domain::HeroState,
+) {
+    let template_id = i32::try_from(hero.template_id.get()).unwrap_or_default();
+    let defaults = BUILD_SHIP_CATALOG
+        .get()
+        .and_then(|catalog| catalog.ship_defaults.get(&template_id))
+        .map(Vec::as_slice);
+    initialize_typed_hero_loadout(account, hero, defaults);
+}
 
 #[derive(Debug, Error)]
 pub enum ServerError {

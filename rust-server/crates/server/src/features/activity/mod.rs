@@ -1,6 +1,5 @@
 //! Activity feature services.
 
-use crate::catalog;
 use crate::common;
 pub(crate) use crate::common::error::GameError;
 pub(crate) use crate::router::{GameMethod, MethodFamily};

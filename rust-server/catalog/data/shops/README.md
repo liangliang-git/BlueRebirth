@@ -44,7 +44,7 @@ IDs (`1` gold, `2` diamond, `5` supply).
 | shop-0015 | 巡洋舰訓練 | [shop-0015.json](shop-0015.json) | 15 | 20 |
 | shop-0016 | 遠距離炮击 | [shop-0016.json](shop-0016.json) | 16 | 19 |
 | shop-0017 | 航空队奇襲 | [shop-0017.json](shop-0017.json) | 17 | 19 |
-| shop-0018 | SSR装备 | [shop-0018.json](shop-0018.json) | 18 | 4 |
+| shop-0018 | SSR装备 | [shop-0018.json](shop-0018.json) | 18 | 194（运行时补齐全部 quality=4） |
 | shop-0019 | 定期补给品1 | [shop-0019.json](shop-0019.json) | 19 | 3 |
 | shop-0020 | 定期补给品2 | [shop-0020.json](shop-0020.json) | 20 | 21 |
 | shop-0021 | 深海的記忆 | [shop-0021.json](shop-0021.json) | 21 | 37 |
@@ -79,7 +79,7 @@ IDs (`1` gold, `2` diamond, `5` supply).
 | shop-0934 | 策士梅鲁 | [shop-0934.json](shop-0934.json) | 934 | 17 |
 | shop-0935 | 相思相愛 | [shop-0935.json](shop-0935.json) | 935 | 12 |
 | shop-0936 | 和菓子 | [shop-0936.json](shop-0936.json) | 936 | 12 |
-| shop-0940 | UR装备 | [shop-0940.json](shop-0940.json) | 940 | 8 |
+| shop-0940 | UR装备 | [shop-0940.json](shop-0940.json) | 940 | 198（运行时补齐全部 quality=5） |
 | shop-0951 | 指令商店 | [shop-0951.json](shop-0951.json) | 951 | 28 |
 | shop-0955 | 黑猫纸杯蛋糕 | [shop-0955.json](shop-0955.json) | 955 | 13 |
 | shop-0956 | 黑猫软糖 | [shop-0956.json](shop-0956.json) | 956 | 18 |
@@ -105,3 +105,7 @@ IDs (`1` gold, `2` diamond, `5` supply).
 商品类型常用值：`type=2` 装备，`type=3` 舰船，`type=5` 货币，`type=18`
 时装。SR 装备通常为 `type=2` 且在 `config_equip.json` 中对应
 `quality=3`。
+
+SSR/UR 装备页由构建脚本自动补齐：`quality=4` 加入 shop 18，`quality=5`
+加入 shop 940。自动商品统一售价 200，分别消耗 SSR 装备币 `9`、UR 装备币
+`32`；客户端补丁同步注入对应商品配置。

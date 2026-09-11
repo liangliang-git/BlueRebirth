@@ -102,7 +102,7 @@ fn typed_hero_max_hp(
     account: &blueoath_domain::AccountState,
     hero: &blueoath_domain::HeroState,
 ) -> u64 {
-    ship_max_hp_for_typed_hero(
+    ship_max_hp_for_typed_hero_with_heroes(
         hero,
         &account.activities.progress,
         &account.dock.equipments,
@@ -110,6 +110,7 @@ fn typed_hero_max_hp(
         EQUIP_CATALOG.get(),
         SHIP_REMOULD_CATALOG.get(),
         SHIP_STAT_MULTIPLIER.get().copied().unwrap_or(1.0),
+        Some(&account.dock.heroes),
     )
 }
 

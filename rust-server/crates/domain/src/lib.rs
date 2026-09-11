@@ -396,6 +396,15 @@ pub struct BuildingState {
     pub construction_jobs: Vec<ConstructionJobState>,
     #[serde(default)]
     pub last_project: Option<ConstructionProjectState>,
+    /// Current construction worker strength. Wire value is fixed-point: 10000 = 1 point.
+    #[serde(default)]
+    pub worker_strength: u32,
+    /// Last timestamp at which worker recovery was applied.
+    #[serde(default)]
+    pub worker_update_at: u64,
+    /// Last timestamp at which dormitory mood recovery was applied.
+    #[serde(default)]
+    pub mood_update_at: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1237,6 +1246,10 @@ impl NewAccountFactory {
             .resources
             .credit(CurrencyKind::Supply, 10_000)
             .expect("starter supply balance is bounded");
+        account
+            .activities
+            .progress
+            .insert("compat:currency:13".to_owned(), 10_000);
 
         let starter_hero_id = HeroId::new(1).expect("starter hero id is positive");
         account.dock.heroes.insert(
@@ -1295,6 +1308,8 @@ impl NewAccountFactory {
             (10_029, 1_000),
             (10_030, 1_000),
             (10_031, 100),
+            // config_equip_enhance_renovate uses ITEM 10000 for star-up costs.
+            (10_000, 1_000),
         ] {
             account.inventory.items.insert(
                 TemplateId::new(template_id).expect("starter item id is positive"),
@@ -1384,7 +1399,7 @@ mod tests {
         );
         assert_eq!(account.dock.heroes.len(), 1);
         assert_eq!(account.dock.equipments.len(), 2);
-        assert_eq!(account.inventory.items.len(), 13);
+        assert_eq!(account.inventory.items.len(), 14);
         assert_eq!(account.fleet.fleets.len(), 5);
         assert_eq!(account.buildings.levels.get(&1), Some(&2));
     }

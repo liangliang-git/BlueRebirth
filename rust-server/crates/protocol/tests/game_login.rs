@@ -343,7 +343,10 @@ fn hero_bag_codec_emits_client_safe_grid_fields() {
         .any(|window| window == [0x10, 0xC8, 0x01]));
     assert!(payload
         .windows(6)
-        .any(|window| window == [0x1A, 0x04, 0x08, 0x00, 0x10, 0x01]));
+        .any(|window| window == [0x1A, 0x1A, 0x08, 0x01, 0x12, 0x02]));
+    assert!(payload
+        .windows(4)
+        .any(|window| window == [0x12, 0x02, 0x08, 0x00]));
     assert!(payload.contains(&0x6A));
 }
 

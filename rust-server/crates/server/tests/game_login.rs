@@ -485,5 +485,8 @@ async fn user_login_preserves_daily_copy_progress_from_account_snapshot() {
     assert!(payload.windows(2).any(|window| window == [0x20, 0x01]));
     assert!(payload.windows(2).any(|window| window == [0x28, 0x05]));
     assert!(payload.windows(2).any(|window| window == [0x10, 0x03]));
-    assert!(payload.windows(2).any(|window| window == [0x10, 0x04]));
+    // Daily extra reward allowance is server-owned and intentionally unlimited.
+    assert!(payload
+        .windows(4)
+        .any(|window| window == [0x10, 0x9f, 0x8d, 0x06]));
 }

@@ -112,7 +112,7 @@ pub(crate) fn battle_start_payload_from_typed_account(
             // field is absent. It initializes max HP to 1, which makes every ship appear
             // at 1 HP. Keep field 5 for battle runtime input; HeroGrid remains raw and
             // does not expose server-computed display attributes.
-            for (attr_id, value) in ship_attributes_for_typed_hero(
+            let computed_attributes = ship_attributes_for_typed_hero_with_heroes(
                 hero,
                 &account.activities.progress,
                 &account.dock.equipments,
@@ -120,10 +120,15 @@ pub(crate) fn battle_start_payload_from_typed_account(
                 EQUIP_CATALOG.get(),
                 SHIP_REMOULD_CATALOG.get(),
                 ship_stat_multiplier,
-            ) {
+                Some(&account.dock.heroes),
+            );
+            // BattleStartData must receive final values, including equipment,
+            // combination, remould and non-primary attributes. Client panel
+            // keeps its own calculation path; battle runtime consumes this set.
+            for (attr_id, value) in &computed_attributes {
                 let mut attr = Vec::new();
-                append_varint_field(&mut attr, 1, attr_id as u64);
-                append_varint_field(&mut attr, 2, value.max(0) as u64);
+                append_varint_field(&mut attr, 1, *attr_id as u64);
+                append_varint_field(&mut attr, 2, (*value).max(0) as u64);
                 append_message_field(&mut ship, 5, &attr);
             }
             // TStartBaseHero.CurHp uses the same fixed-point ratio as HeroGrid.CurHp.
@@ -134,10 +139,159 @@ pub(crate) fn battle_start_payload_from_typed_account(
                 typed_hero_cur_hp_for_client(account, hero) as u64,
             );
             append_varint_field(&mut ship, 11, 3);
-            let mut skill = Vec::new();
-            append_varint_field(&mut skill, 1, 41210);
-            append_varint_field(&mut skill, 2, 1);
-            append_message_field(&mut ship, 8, &skill);
+            let fashioning = if hero.fashioning > 0 {
+                u64::from(hero.fashioning)
+            } else {
+                template_id.saturating_sub(1) / 10
+            };
+            append_varint_field(&mut ship, 12, fashioning);
+
+            let mut encoded_skill = false;
+            if hero.pskills.is_empty() {
+                let template_id = i32::try_from(hero.template_id.get()).unwrap_or_default();
+                if let Some(configured_skills) = HERO_SKILL_CATALOG
+                    .get()
+                    .and_then(|catalog| catalog.get(&template_id))
+                {
+                    for skill_id in configured_skills {
+                        if *skill_id <= 0 {
+                            continue;
+                        }
+                        let mut skill = Vec::new();
+                        append_varint_field(
+                            &mut skill,
+                            1,
+                            resolved_battle_skill_id(
+                                &account.activities.progress,
+                                hero.id.get(),
+                                *skill_id as u64,
+                            ),
+                        );
+                        append_varint_field(&mut skill, 2, 1);
+                        append_message_field(&mut ship, 8, &skill);
+                        encoded_skill = true;
+                    }
+                }
+            } else {
+                for (&skill_id, &skill_level) in &hero.pskills {
+                    if skill_id == 0 {
+                        continue;
+                    }
+                    let mut skill = Vec::new();
+                    append_varint_field(
+                        &mut skill,
+                        1,
+                        resolved_battle_skill_id(
+                            &account.activities.progress,
+                            hero.id.get(),
+                            skill_id,
+                        ),
+                    );
+                    append_varint_field(&mut skill, 2, u64::from(skill_level.max(1)));
+                    append_message_field(&mut ship, 8, &skill);
+                    encoded_skill = true;
+                }
+            }
+            if !encoded_skill {
+                let mut skill = Vec::new();
+                append_varint_field(&mut skill, 1, 41210);
+                append_varint_field(&mut skill, 2, 1);
+                append_message_field(&mut ship, 8, &skill);
+            }
+
+            let mut battle_equip_index = 0_u64;
+            for equip_id in hero.equip_slots.iter().flatten() {
+                let Some(equipment) = account.dock.equipments.get(equip_id) else {
+                    continue;
+                };
+                let mut equip = Vec::new();
+                append_varint_field(&mut equip, 1, equipment.template_id.get());
+                append_varint_field(&mut equip, 2, battle_equip_index);
+                // TBattleEquip.PlaneNum is required by client air-attack setup.
+                append_varint_field(&mut equip, 3, 100);
+                if let Some(equip_catalog) = EQUIP_CATALOG.get() {
+                    let template_id =
+                        i32::try_from(equipment.template_id.get()).unwrap_or_default();
+                    let mut properties = std::collections::BTreeMap::<i32, i64>::new();
+                    for (attr_id, value) in equip_catalog
+                        .prop_by_template
+                        .get(&template_id)
+                        .into_iter()
+                        .flatten()
+                    {
+                        properties
+                            .entry(*attr_id)
+                            .and_modify(|current| *current = current.saturating_add(*value))
+                            .or_insert(*value);
+                    }
+                    for (attr_id, value) in equip_catalog
+                        .enhance_prop_by_template
+                        .get(&template_id)
+                        .into_iter()
+                        .flatten()
+                    {
+                        let value = value.saturating_mul(i64::from(equipment.enhance_level));
+                        properties
+                            .entry(*attr_id)
+                            .and_modify(|current| *current = current.saturating_add(value))
+                            .or_insert(value);
+                    }
+                    for (attr_id, value) in properties {
+                        if attr_id <= 0 || value < 0 {
+                            continue;
+                        }
+                        let mut property = Vec::new();
+                        append_varint_field(&mut property, 1, attr_id as u64);
+                        append_varint_field(&mut property, 2, value as u64);
+                        append_message_field(&mut equip, 4, &property);
+                    }
+                    if equipment.star > 0 {
+                        if let Some(skills) = equip_catalog.skills_by_template.get(&template_id) {
+                            for (skill_id, max_level) in skills {
+                                if *skill_id <= 0 {
+                                    continue;
+                                }
+                                let mut skill = Vec::new();
+                                append_varint_field(&mut skill, 1, *skill_id as u64);
+                                append_varint_field(
+                                    &mut skill,
+                                    2,
+                                    i32::try_from(equipment.star)
+                                        .unwrap_or(i32::MAX)
+                                        .min(*max_level)
+                                        .max(1) as u64,
+                                );
+                                append_message_field(&mut equip, 5, &skill);
+                            }
+                        }
+                    }
+                }
+                append_message_field(&mut ship, 7, &equip);
+                battle_equip_index = battle_equip_index.saturating_add(1);
+            }
+            if let Some(bathroom_hero) = account
+                .bathroom
+                .heroes
+                .iter()
+                .find(|bathroom_hero| bathroom_hero.hero_id == hero.id.get())
+            {
+                if bathroom_hero.buff_id > 0
+                    && bathroom_hero.buff_time > u64::from(current_unix_seconds())
+                {
+                    append_varint_field(&mut ship, 9, u64::from(bathroom_hero.buff_id));
+                }
+            }
+            if let Some(break_config) = SHIP_BREAK_CATALOG.get().and_then(|catalog| {
+                i32::try_from(template_id)
+                    .ok()
+                    .and_then(|id| catalog.by_template.get(&id))
+            }) {
+                for effect_id in &break_config.ship_break_effect_ids {
+                    if *effect_id > 0 {
+                        append_varint_field(&mut ship, 10, *effect_id as u64);
+                    }
+                }
+            }
             append_message_field(&mut fleet_payload, 4, &ship);
             append_varint_field(&mut fleet_payload, 8, hero.id.get());
         }
@@ -218,8 +372,9 @@ pub(crate) fn battle_start_payload_from_typed_account(
             append_message_field(&mut output, 25, &config);
         }
 
-        // Field 17 carries model/VCR identities only. Client still constructs
-        // enemy ships and all combat attributes from its static catalog.
+        // Field 17 carries model/VCR identities. Enemy combat attributes are
+        // also sent below in field 24 so battle setup does not depend on a
+        // second, potentially mismatched enemy-stat source.
         let mut sent_vcr = std::collections::HashSet::new();
         let mut emit_vcr = |ship_info_id: i32| {
             if ship_info_id <= 0 || !sent_vcr.insert(ship_info_id) {
@@ -275,10 +430,78 @@ pub(crate) fn battle_start_payload_from_typed_account(
             }
         }
     }
+    append_enemy_fleet_payload(&mut output, copy_id, battle_catalog);
     if options.match_type > 0 {
         append_varint_field(&mut output, 26, options.match_type as u64);
     }
     output
+}
+
+fn resolved_battle_skill_id(
+    progress: &std::collections::BTreeMap<String, u64>,
+    hero_id: u64,
+    skill_id: u64,
+) -> u64 {
+    let mut resolved = skill_id;
+    for _ in 0..8 {
+        let key = format!("compat:hero:{hero_id}:pskill:{resolved}:replace");
+        let Some(next) = progress.get(&key).copied().filter(|value| *value > 0) else {
+            break;
+        };
+        if next == resolved {
+            break;
+        }
+        resolved = next;
+    }
+    resolved
+}
+
+fn append_enemy_fleet_payload(
+    output: &mut Vec<u8>,
+    copy_id: i32,
+    battle_catalog: Option<&BattleCatalog>,
+) {
+    let Some(catalog) = battle_catalog else {
+        return;
+    };
+    for fleet_id in battle_session_fleet_ids(copy_id, Some(catalog)) {
+        let Some(enemy_ids) = catalog.fleet_enemies.get(&fleet_id) else {
+            continue;
+        };
+        let mut fleet = Vec::new();
+        append_varint_field(&mut fleet, 1, fleet_id.max(1) as u64);
+        append_varint_field(&mut fleet, 2, 0);
+        let mut encoded_enemy = false;
+        for enemy_id in enemy_ids {
+            let Some(enemy) = catalog.enemies.get(enemy_id) else {
+                continue;
+            };
+            let mut ship = Vec::new();
+            append_varint_field(&mut ship, 1, (*enemy_id).max(1) as u64);
+            for (attr_id, value) in [
+                (1, enemy.hp),
+                (8, enemy.attack),
+                (9, enemy.defense),
+                (10, enemy.torpedo),
+                (11, enemy.torpedo_defense),
+                (19, enemy.hit),
+                (20, enemy.dodge),
+            ] {
+                if value < 0 {
+                    continue;
+                }
+                let mut attr = Vec::new();
+                append_varint_field(&mut attr, 1, attr_id);
+                append_varint_field(&mut attr, 2, value as u64);
+                append_message_field(&mut ship, 2, &attr);
+            }
+            append_message_field(&mut fleet, 3, &ship);
+            encoded_enemy = true;
+        }
+        if encoded_enemy {
+            append_message_field(output, 24, &fleet);
+        }
+    }
 }
 
 fn encode_battle_player(
@@ -578,8 +801,21 @@ pub(crate) fn battle_copy_experience(catalog: Option<&BattleCatalog>, copy_id: i
     if !catalog.copies.contains_key(&copy_id) {
         return (100, 0);
     }
+    battle_fleet_experience(
+        Some(catalog),
+        &battle_session_fleet_ids(copy_id, Some(catalog)),
+    )
+}
+
+pub(crate) fn battle_fleet_experience(
+    catalog: Option<&BattleCatalog>,
+    fleet_ids: &[i32],
+) -> (i32, i32) {
+    let Some(catalog) = catalog else {
+        return (100, 0);
+    };
     let (mut commander_exp, mut ship_exp) = (0i32, 0i32);
-    for fleet_id in battle_session_fleet_ids(copy_id, Some(catalog)) {
+    for fleet_id in fleet_ids {
         if let Some(reward) = catalog.fleet_rewards.get(&fleet_id) {
             commander_exp = commander_exp.saturating_add(reward.commander_exp);
             ship_exp = ship_exp.saturating_add(reward.ship_exp);
@@ -739,6 +975,159 @@ fn increment_daily_group_success(daily: &mut serde_json::Map<String, Value>, gro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn contains_field(payload: &[u8], wanted_field: u64) -> bool {
+        let mut index = 0;
+        while index < payload.len() {
+            let Ok((key, next)) = read_varint(payload, index) else {
+                return false;
+            };
+            if key >> 3 == wanted_field {
+                return true;
+            }
+            if key & 7 == 2 {
+                let Ok((length, body_start)) = read_varint(payload, next) else {
+                    return false;
+                };
+                let Ok(length) = usize::try_from(length) else {
+                    return false;
+                };
+                let Some(body_end) = body_start.checked_add(length) else {
+                    return false;
+                };
+                if body_end > payload.len() {
+                    return false;
+                }
+                if contains_field(&payload[body_start..body_end], wanted_field) {
+                    return true;
+                }
+                index = body_end;
+                continue;
+            }
+            let Some(next) = skip_wire(payload, next, key & 7) else {
+                return false;
+            };
+            index = next;
+        }
+        false
+    }
+
+    fn contains_varint(payload: &[u8], wanted_field: u64, wanted_value: u64) -> bool {
+        let mut index = 0;
+        while index < payload.len() {
+            let Ok((key, next)) = read_varint(payload, index) else {
+                return false;
+            };
+            if key & 7 == 0 {
+                let Ok((value, next)) = read_varint(payload, next) else {
+                    return false;
+                };
+                if key >> 3 == wanted_field && value == wanted_value {
+                    return true;
+                }
+                index = next;
+            } else if key & 7 == 2 {
+                let Ok((length, body_start)) = read_varint(payload, next) else {
+                    return false;
+                };
+                let Ok(length) = usize::try_from(length) else {
+                    return false;
+                };
+                let Some(body_end) = body_start.checked_add(length) else {
+                    return false;
+                };
+                if body_end > payload.len() {
+                    return false;
+                }
+                if contains_varint(&payload[body_start..body_end], wanted_field, wanted_value) {
+                    return true;
+                }
+                index = body_end;
+            } else {
+                let Some(next) = skip_wire(payload, next, key & 7) else {
+                    return false;
+                };
+                index = next;
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn battle_start_includes_real_hero_loadout() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("battle-loadout").unwrap(),
+            "Captain",
+        );
+        let hero_id = *account.dock.heroes.keys().next().expect("starter hero");
+        let equip_id = blueoath_domain::EquipId::new(99).unwrap();
+        let hero = account.dock.heroes.get_mut(&hero_id).expect("hero");
+        hero.fashioning = 987_654;
+        hero.pskills.insert(99_001, 3);
+        hero.equip_slots[0] = Some(equip_id);
+        account.dock.equipments.insert(
+            equip_id,
+            blueoath_domain::EquipmentState {
+                id: equip_id,
+                template_id: blueoath_domain::TemplateId::new(88_001).unwrap(),
+                enhance_level: 2,
+                star: 0,
+                enhance_exp: 0,
+                hero_id: Some(hero_id),
+            },
+        );
+
+        let payload = battle_start_payload_from_typed_account(
+            &account,
+            100,
+            &[vec![hero_id.get() as i32]],
+            None,
+            1.0,
+            BattleStartOptions::default(),
+        );
+
+        assert!(contains_varint(&payload, 12, 987_654));
+        assert!(contains_varint(&payload, 1, 99_001));
+        assert!(contains_varint(&payload, 1, 88_001));
+        assert!(contains_field(&payload, 7));
+        assert!(contains_field(&payload, 8));
+    }
+
+    #[test]
+    fn battle_start_includes_enemy_fleet_stats() {
+        let mut catalog = BattleCatalog::default();
+        catalog.copies.insert(
+            100,
+            BattleCopy {
+                config_id: 100,
+                copy_type: 1,
+                fleet_ids: vec![200],
+            },
+        );
+        catalog.fleet_is_last.insert(200, true);
+        catalog.fleet_enemies.insert(200, vec![300]);
+        catalog.enemies.insert(
+            300,
+            BattleEnemy {
+                hp: 2_000,
+                attack: 300,
+                defense: 150,
+                hit: 100,
+                dodge: 20,
+                torpedo: 40,
+                torpedo_defense: 30,
+                ..BattleEnemy::default()
+            },
+        );
+
+        let mut payload = Vec::new();
+        append_enemy_fleet_payload(&mut payload, 100, Some(&catalog));
+
+        assert!(contains_field(&payload, 24));
+        assert!(contains_varint(&payload, 1, 300));
+        assert!(contains_varint(&payload, 2, 2_000));
+        assert!(contains_varint(&payload, 2, 300));
+    }
 
     #[test]
     fn mubar_search_keeps_its_own_position_fleet() {

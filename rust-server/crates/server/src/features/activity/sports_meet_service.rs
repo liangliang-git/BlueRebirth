@@ -1,7 +1,7 @@
-use super::catalog::GameplayCatalog;
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
+use crate::game_config::GameplayCatalog;
 
 pub(crate) fn handle_typed(
     server_state: &ServerState,

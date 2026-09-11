@@ -9,9 +9,26 @@ pub(crate) fn handle_bathroom_typed(
     request_args: &[u8],
     now: u32,
     mood_recovery_multiplier: f64,
+    affection_catalog: Option<&AffectionCatalog>,
     effects: &mut ResponseEffects,
 ) -> HandlerResult {
-    let Ok(request) = BathroomRequest::decode(request_args) else {
+    let Ok(request) = (match method {
+        "bathroom.BathAuto" => {
+            BathroomAutoRequest::decode(request_args).map(|request| BathroomRequest {
+                hero_id: request.hero_id,
+                position: 0,
+                is_auto: request.is_auto,
+            })
+        }
+        "bathroom.BathService" => {
+            BathroomServiceRequest::decode(request_args).map(|request| BathroomRequest {
+                hero_id: request.hero_id,
+                position: request.gift_id,
+                is_auto: false,
+            })
+        }
+        _ => BathroomRequest::decode(request_args),
+    }) else {
         return HandlerResult::Error(GameError::InvalidRequest("bathroom request is invalid"));
     };
     let requested_hero_id = request.hero_id;
@@ -55,6 +72,7 @@ pub(crate) fn handle_bathroom_typed(
                         .bath_time
                         .max(u64::from(now).saturating_sub(before.start_time)),
                     mood_recovery_multiplier,
+                    affection_catalog,
                     now,
                 );
             }
@@ -69,17 +87,90 @@ pub(crate) fn handle_bathroom_typed(
         }
         "bathroom.BathService" => {
             let hero_id = requested_hero_id;
-            let hero = account
+            let gift_id = i32::try_from(request.position).unwrap_or_default();
+            let Some(catalog) = affection_catalog else {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "bathroom gift catalog is unavailable",
+                ));
+            };
+            let Some(gift) = catalog.gifts_by_id.get(&gift_id) else {
+                return HandlerResult::Error(GameError::InvalidRequest("bathroom gift is invalid"));
+            };
+            let quality_index = usize::try_from(gift.quality.saturating_sub(1)).unwrap_or(0);
+            let gift_price = gift.price.get(quality_index).copied().unwrap_or_default();
+            if !debit_bath_currency(account, catalog.bath_currency_id, gift_price) {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "insufficient bathroom gift currency",
+                ));
+            }
+            let Some(hero) = account
                 .bathroom
                 .heroes
-                .iter()
-                .find(|hero| hero.hero_id == hero_id);
-            bathroom_service_payload(
-                hero_id,
-                hero.map(|hero| i64::from(hero.position))
-                    .unwrap_or_default(),
-                hero.map(|hero| hero.bath_time as i64).unwrap_or_default(),
-            )
+                .iter_mut()
+                .find(|hero| hero.hero_id == hero_id)
+            else {
+                return HandlerResult::Error(GameError::InvalidState(
+                    "bathroom hero is not bathing",
+                ));
+            };
+            let template_id = account
+                .dock
+                .heroes
+                .get(&hero_key(hero_id))
+                .and_then(|hero| i32::try_from(hero.template_id.get()).ok())
+                .unwrap_or_default();
+            let favorite = SHIP_STAT_CATALOG
+                .get()
+                .and_then(|catalog| catalog.by_template.get(&template_id))
+                .is_some_and(|stat| {
+                    stat.favorite_gifts.contains(&gift.gift_type)
+                        || stat.favorite_gifts.contains(&gift.id)
+                });
+            let (powers, rate) = if favorite {
+                (&gift.match_power, gift.match_rate)
+            } else {
+                (&gift.not_match_power, gift.not_match_rate)
+            };
+            let power = powers.get(quality_index).copied().unwrap_or(1).max(1);
+            let mood_base = i64::from(
+                if catalog.gift_mood_value > 0 {
+                    catalog.gift_mood_value
+                } else {
+                    catalog.bath_mood_value
+                }
+                .max(0),
+            );
+            let mood_gain = mood_base
+                .saturating_mul(i64::from(10_000_i32.saturating_add(rate.max(0))))
+                .checked_div(10_000)
+                .unwrap_or(mood_base)
+                .saturating_mul(i64::from(power));
+            hero.buff_id = u32::try_from(gift.gift_type.max(0)).unwrap_or_default();
+            hero.power = u32::try_from(power).unwrap_or(u32::MAX);
+            hero.buff_time = u64::from(now).saturating_add(
+                u64::try_from(
+                    catalog
+                        .value_effect_time_by_id
+                        .get(&(gift.gift_type.max(1)))
+                        .copied()
+                        .unwrap_or(14_400)
+                        .max(0),
+                )
+                .unwrap_or_default(),
+            );
+            if let Some(hero) = account.dock.heroes.get_mut(&hero_key(hero_id)) {
+                hero.mood = hero
+                    .mood
+                    .saturating_add(u32::try_from(mood_gain.max(0)).unwrap_or(u32::MAX))
+                    .min(u32::try_from(catalog.mood_max.max(catalog.mood_min)).unwrap_or(u32::MAX));
+            }
+            let position = hero.position;
+            let buff_id = hero.buff_id;
+            effects.push_post(Response::raw(
+                "hero.UpdateHeroBagData",
+                HeroBagCodec::encode(&hero_bag_from_typed_account(account)),
+            ));
+            bathroom_service_payload(hero_id, i64::from(position), buff_id, favorite)
         }
         "bathroom.BathAuto" => {
             let is_auto = request.is_auto;
@@ -393,25 +484,64 @@ fn recover_typed_hero_mood(
     hero_id: u64,
     bath_seconds: u64,
     multiplier: f64,
+    affection_catalog: Option<&AffectionCatalog>,
     now: u32,
 ) {
     let Some(hero) = account.dock.heroes.get_mut(&hero_key(hero_id)) else {
         return;
     };
-    let intervals = i64::try_from(bath_seconds).unwrap_or(i64::MAX) / MOOD_BATH_INTERVAL_SECONDS;
+    let interval_seconds = affection_catalog
+        .map(|catalog| catalog.mood_bath_interval_seconds)
+        .filter(|value| *value > 0)
+        .unwrap_or(MOOD_BATH_INTERVAL_SECONDS);
+    let interval_recovery = affection_catalog
+        .map(|catalog| catalog.mood_bath_interval_recovery)
+        .filter(|value| *value >= 0)
+        .unwrap_or(MOOD_BATH_INTERVAL_RECOVERY);
+    let bath_recovery = affection_catalog
+        .map(|catalog| catalog.bath_mood_value)
+        .filter(|value| *value >= 0)
+        .unwrap_or(MOOD_BATH_RECOVERY);
+    let mood_min = affection_catalog
+        .map(|catalog| catalog.mood_min)
+        .unwrap_or(MOOD_MIN);
+    let mood_max = affection_catalog
+        .map(|catalog| catalog.mood_max)
+        .filter(|value| *value >= mood_min)
+        .unwrap_or(MOOD_MAX);
+    let intervals = i64::try_from(bath_seconds).unwrap_or(i64::MAX) / interval_seconds;
     let base = if intervals > 0 {
-        i64::from(MOOD_BATH_INTERVAL_RECOVERY)
+        i64::from(interval_recovery)
             .saturating_mul(intervals)
-            .min(i64::from(MOOD_BATH_RECOVERY))
+            .min(i64::from(bath_recovery))
     } else {
-        i64::from(MOOD_BATH_RECOVERY)
+        i64::from(bath_recovery.max(0))
     };
     let recovery = scale_reward(base, multiplier);
     hero.mood = hero
         .mood
         .saturating_add(u32::try_from(recovery.max(0)).unwrap_or(u32::MAX))
-        .min(MOOD_MAX as u32);
+        .min(u32::try_from(mood_max).unwrap_or(u32::MAX))
+        .max(u32::try_from(mood_min.max(0)).unwrap_or_default());
     let _ = now;
+}
+
+fn debit_bath_currency(account: &mut AccountState, currency_id: i32, amount: i32) -> bool {
+    if amount <= 0 {
+        return true;
+    }
+    let key = format!("compat:currency:{currency_id}");
+    let current = account
+        .activities
+        .progress
+        .get(&key)
+        .copied()
+        .unwrap_or_default();
+    let Some(next) = current.checked_sub(u64::try_from(amount).unwrap_or(u64::MAX)) else {
+        return false;
+    };
+    account.activities.progress.insert(key, next);
+    true
 }
 
 pub(crate) fn bathroom_info_payload_from_typed(account: &AccountState) -> Vec<u8> {
@@ -475,6 +605,7 @@ mod typed_tests {
             &start,
             100,
             1.0,
+            None,
             &mut effects,
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
@@ -488,6 +619,7 @@ mod typed_tests {
             &end,
             100,
             1.0,
+            None,
             &mut effects,
         );
         assert!(matches!(result, HandlerResult::Reply(_)));
@@ -496,6 +628,88 @@ mod typed_tests {
         let (_, pushes, error) = effects.into_parts();
         assert_eq!(pushes.len(), 3);
         assert!(error.is_none());
+    }
+
+    #[test]
+    fn typed_bathroom_gift_increases_mood_and_refreshes_hero_bag() {
+        let hero_id = blueoath_domain::HeroId::new(9).unwrap();
+        let mut account = AccountState::default();
+        account.dock.heroes.insert(
+            hero_id,
+            blueoath_domain::HeroState {
+                id: hero_id,
+                template_id: blueoath_domain::TemplateId::new(100).unwrap(),
+                fashioning: 9,
+                name: String::new(),
+                change_name_time: 0,
+                level: 1,
+                exp: 0,
+                mood: 500_000,
+                affection: 0,
+                hp: 100,
+                locked: false,
+                created_utc: String::new(),
+                equip_slots: Vec::new(),
+                pskills: std::collections::BTreeMap::new(),
+            },
+        );
+        account.bathroom.heroes.push(BathroomHeroState {
+            hero_id: hero_id.get(),
+            position: 3,
+            start_time: 100,
+            ..BathroomHeroState::default()
+        });
+        account
+            .activities
+            .progress
+            .insert("compat:currency:13".to_owned(), 100);
+
+        let mut affection_catalog = AffectionCatalog {
+            gift_mood_value: 600_000,
+            bath_mood_value: 300_000,
+            bath_currency_id: 13,
+            mood_min: 0,
+            mood_max: 1_500_000,
+            ..AffectionCatalog::default()
+        };
+        affection_catalog.gifts_by_id.insert(
+            130_001,
+            BathroomGiftConfig {
+                id: 130_001,
+                gift_type: 1,
+                quality: 3,
+                price: vec![5, 13, 50],
+                not_match_power: vec![1, 1, 1],
+                not_match_rate: 2_000,
+                ..BathroomGiftConfig::default()
+            },
+        );
+
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, hero_id.get());
+        append_varint_field(&mut request, 2, 130_001);
+        let mut effects = ResponseEffects::default();
+        let result = handle_bathroom_typed(
+            &mut account,
+            "bathroom.BathService",
+            &request,
+            200,
+            1.0,
+            Some(&affection_catalog),
+            &mut effects,
+        );
+
+        assert!(matches!(result, HandlerResult::Reply(_)));
+        assert_eq!(account.dock.heroes[&hero_id].mood, 1_220_000);
+        assert_eq!(
+            account.activities.progress.get("compat:currency:13"),
+            Some(&50)
+        );
+        let (_, posts, error) = effects.into_parts();
+        assert!(error.is_none());
+        assert!(posts
+            .iter()
+            .any(|response| response.method == "hero.UpdateHeroBagData"));
     }
 
     #[test]

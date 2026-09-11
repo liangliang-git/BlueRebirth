@@ -1,21 +1,7 @@
-#[cfg(test)]
-use serde_json::Value;
-
 use crate::common::response::Response;
 
 use super::*;
 use crate::features::task::state as task_state;
-
-#[cfg(test)]
-pub(crate) fn apply_mail_reward(account: &mut Value, mail: &MailTemplate) {
-    if mail.goods_type == 5 {
-        if let Some(key) = currency_character_key(mail.config_id) {
-            add_character_i64(account, key, mail.num);
-        }
-    } else {
-        add_bag_item(account, mail.config_id, mail.num);
-    }
-}
 
 pub(crate) fn apply_typed_mail_reward(
     account: &mut blueoath_domain::AccountState,
@@ -142,115 +128,6 @@ pub(crate) fn append_method_push<P: ResponsePushBuffer>(
     pushes.push_response(Response::raw(method, ret));
 }
 
-#[allow(dead_code)]
-#[cfg(test)]
-pub(crate) fn apply_shop_good(
-    account: &mut Value,
-    good: &ShopGood,
-    buy_num: i32,
-    now: u32,
-    fashion_catalog: Option<&FashionList>,
-) -> Option<ShopReward> {
-    if good.goods_type == 5 && currency_character_key(good.item_id).is_none() {
-        return None;
-    }
-    if !deduct_shop_costs(account, &good.costs, buy_num) {
-        return None;
-    }
-    let total = good.num.max(1).saturating_mul(buy_num.max(1));
-    match good.goods_type {
-        2 => {
-            let mut last_id = 0;
-            for _ in 0..total {
-                last_id = add_equip_item(account, good.item_id);
-            }
-            Some(ShopReward {
-                goods_type: good.goods_type,
-                item_id: good.item_id,
-                num: total,
-                instance_id: last_id,
-            })
-        }
-        3 => Some(ShopReward {
-            goods_type: good.goods_type,
-            item_id: good.item_id,
-            num: 1,
-            instance_id: add_ship_items(account, good.item_id, total, now),
-        }),
-        5 => {
-            let key = currency_character_key(good.item_id)?;
-            add_character_i64(account, key, total);
-            Some(ShopReward {
-                goods_type: good.goods_type,
-                item_id: good.item_id,
-                num: total,
-                instance_id: 0,
-            })
-        }
-        18 => {
-            add_fashion_item(account, good.item_id, fashion_catalog);
-            Some(ShopReward {
-                goods_type: good.goods_type,
-                item_id: good.item_id,
-                num: total,
-                instance_id: 0,
-            })
-        }
-        _ => {
-            add_bag_item(account, good.item_id, total);
-            Some(ShopReward {
-                goods_type: good.goods_type,
-                item_id: good.item_id,
-                num: total,
-                instance_id: 0,
-            })
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[cfg(test)]
-pub(crate) fn deduct_shop_costs(account: &mut Value, costs: &[ShopCost], buy_num: i32) -> bool {
-    let buy_num = i64::from(buy_num.max(1));
-    let mut totals = std::collections::BTreeMap::<(i32, i32), i64>::new();
-    for cost in costs {
-        let Some(amount) = cost.amount.checked_mul(buy_num) else {
-            return false;
-        };
-        let entry = totals.entry((cost.goods_type, cost.item_id)).or_default();
-        let Some(total) = entry.checked_add(amount) else {
-            return false;
-        };
-        *entry = total;
-    }
-    for (&(goods_type, item_id), &amount) in &totals {
-        if amount <= 0 {
-            return false;
-        }
-        if goods_type == 5 {
-            if currency_character_key(item_id)
-                .map(|key| character_i64(account, key) < amount)
-                .unwrap_or(true)
-            {
-                return false;
-            }
-        } else if i32::try_from(amount).is_err() || bag_item_count(account, item_id) < amount {
-            return false;
-        }
-    }
-    for (&(goods_type, item_id), &amount) in &totals {
-        if goods_type == 5 {
-            let Some(key) = currency_character_key(item_id) else {
-                return false;
-            };
-            adjust_character_i64(account, key, -amount);
-        } else if let Ok(amount) = i32::try_from(amount) {
-            consume_bag_item(account, item_id, amount);
-        }
-    }
-    true
-}
-
 pub(crate) fn shop_info_payload(catalog: Option<&ShopCatalog>) -> Vec<u8> {
     // RetShopsInfo.ShopInfo: all configured shop ids must exist. The client indexes this
     // table from homepage red-dot logic before it sends shop.GetShopsInfo.
@@ -335,27 +212,4 @@ pub(crate) fn shop_refresh_payload(
     append_varint_field(&mut payload, 5, 0);
     append_varint_field(&mut payload, 6, 0);
     Ok(payload)
-}
-
-#[cfg(test)]
-mod response_push_tests {
-    use super::{append_method_push, Response};
-    use blueoath_protocol::TMessageCodec;
-
-    #[test]
-    fn typed_push_buffer_defers_wire_encoding() {
-        let mut responses = Vec::<Response>::new();
-        append_method_push(&mut responses, "bag.UpdateBagData", vec![1, 2, 3]);
-        assert_eq!(responses[0].method, "bag.UpdateBagData");
-        assert_eq!(responses[0].payload, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn legacy_push_buffer_still_encodes_compatibility_bytes() {
-        let mut pushes = Vec::<Vec<u8>>::new();
-        append_method_push(&mut pushes, "bag.UpdateBagData", vec![1, 2, 3]);
-        let response = TMessageCodec::decode_response(&pushes[0]).expect("encoded push");
-        assert_eq!(response.method, "bag.UpdateBagData");
-        assert_eq!(response.ret, Some(vec![1, 2, 3]));
-    }
 }

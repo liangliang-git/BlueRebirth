@@ -1,7 +1,8 @@
-use super::catalog::ChapterCatalog;
 use super::common::error::GameError;
 use super::common::response::{HandlerResult, Response, ResponseEffects};
 use super::*;
+use crate::game_config::ChapterCatalog;
+use crate::projection::daily_copy_snapshot_payload_from_typed_account;
 
 pub(crate) fn handle_typed(
     account: &mut blueoath_domain::AccountState,
@@ -16,10 +17,16 @@ pub(crate) fn handle_typed(
 
     let now = current_unix_seconds();
     let reset_day = (u64::from(now) + 8 * 60 * 60) / 86_400;
-    if account.daily_copy.reset_day != reset_day as u32 {
+    if account.daily_copy.reset_day != 0 && account.daily_copy.reset_day != reset_day as u32 {
         account.daily_copy.reset_day = u32::try_from(reset_day).unwrap_or(u32::MAX);
         account.daily_copy.challenge_times.clear();
         account.daily_copy.select_ex.clear();
+        account.daily_copy.group_success_times.clear();
+        account.daily_copy.extra_group_success_times.clear();
+    } else if account.daily_copy.reset_day == 0 {
+        // Zero marks a newly created profile; initialize reset metadata without
+        // discarding progress populated by bootstrap/config migration.
+        account.daily_copy.reset_day = u32::try_from(reset_day).unwrap_or(u32::MAX);
     }
 
     if method == "dailycopy.SelectEx" {
@@ -55,21 +62,7 @@ pub(crate) fn handle_typed(
             .or_default();
     }
 
-    let fallback_catalog;
-    let catalog = match chapter_catalog {
-        Some(catalog) => catalog,
-        None => {
-            fallback_catalog = ChapterCatalog::fallback();
-            &fallback_catalog
-        }
-    };
-    let payload = DailyCopyCodec::encode_with_progress(
-        &catalog.daily_chapters,
-        &catalog.daily_groups,
-        &daily_copy_progress_from_typed_account(account, catalog, now),
-        &[],
-        &[],
-    );
+    let payload = daily_copy_snapshot_payload_from_typed_account(account, chapter_catalog, now);
     effects.push_post(Response::raw("dailycopy.UpdateDailyCopyData", payload));
     HandlerResult::PushOnly
 }
@@ -105,5 +98,27 @@ mod tests {
         assert!(pre.is_empty());
         assert_eq!(post.len(), 1);
         assert!(error.is_none());
+    }
+
+    #[test]
+    fn typed_daily_copy_snapshot_includes_group_progress() {
+        let mut account =
+            NewAccountFactory::create(ProfileId::new("daily-copy-progress").unwrap(), "Captain");
+        account.daily_copy.group_success_times.insert(1, 3);
+        account.daily_copy.extra_group_success_times.insert(1, 4);
+        let mut effects = ResponseEffects::default();
+
+        assert!(matches!(
+            handle_typed(&mut account, None, "dailycopy.GetData", &[], &mut effects,),
+            HandlerResult::PushOnly
+        ));
+        let (_, post, _) = effects.into_parts();
+        let payload = post[0].payload.clone().into_bytes();
+        assert!(payload
+            .windows([0x12, 0x04, 0x08, 0x01, 0x10, 0x03].len())
+            .any(|window| window == [0x12, 0x04, 0x08, 0x01, 0x10, 0x03]));
+        assert!(payload
+            .windows([0x1A, 0x06, 0x08, 0x01, 0x10, 0x9F, 0x8D, 0x06].len())
+            .any(|window| window == [0x1A, 0x06, 0x08, 0x01, 0x10, 0x9F, 0x8D, 0x06]));
     }
 }

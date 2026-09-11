@@ -1,10 +1,5 @@
 #![allow(dead_code)]
 
-#[cfg(test)]
-use serde_json::json;
-#[cfg(test)]
-use serde_json::Value;
-
 use super::*;
 
 fn typed_base_currency(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
@@ -147,26 +142,25 @@ pub(crate) fn grant_typed_task_reward_with_fashion(
             let Some(id) = typed_next_hero_id(account) else {
                 return false;
             };
-            account.dock.heroes.insert(
+            let mut hero = blueoath_domain::HeroState {
                 id,
-                blueoath_domain::HeroState {
-                    id,
-                    template_id,
-                    fashioning: u32::try_from(template_id.get().saturating_sub(1) / 10)
-                        .unwrap_or(u32::MAX),
-                    name: String::new(),
-                    change_name_time: 0,
-                    level: 1,
-                    exp: 0,
-                    mood: blueoath_domain::HERO_MOOD_INITIAL,
-                    affection: 500_000,
-                    hp: ship_initial_hp_for_template(template_id.get()),
-                    locked: false,
-                    created_utc: String::new(),
-                    equip_slots: vec![None; 6],
-                    pskills: std::collections::BTreeMap::new(),
-                },
-            );
+                template_id,
+                fashioning: u32::try_from(template_id.get().saturating_sub(1) / 10)
+                    .unwrap_or(u32::MAX),
+                name: String::new(),
+                change_name_time: 0,
+                level: 1,
+                exp: 0,
+                mood: blueoath_domain::HERO_MOOD_INITIAL,
+                affection: 500_000,
+                hp: ship_initial_hp_for_template(template_id.get()),
+                locked: false,
+                created_utc: String::new(),
+                equip_slots: vec![None; 6],
+                pskills: std::collections::BTreeMap::new(),
+            };
+            initialize_typed_hero_loadout_from_catalog(account, &mut hero);
+            account.dock.heroes.insert(id, hero);
             last_id = Some(id.get());
         }
         reward.instance_id = i32::try_from(last_id.unwrap_or_default()).unwrap_or(i32::MAX);
@@ -214,6 +208,21 @@ pub(crate) fn grant_typed_task_reward_with_fashion(
         return true;
     }
     false
+}
+
+pub(crate) fn grant_typed_task_rewards_with_fashion(
+    account: &mut blueoath_domain::AccountState,
+    rewards: &mut [ShopReward],
+    fashion_catalog: Option<&FashionList>,
+) -> bool {
+    let snapshot = account.clone();
+    for reward in rewards {
+        if !grant_typed_task_reward_with_fashion(account, reward, fashion_catalog) {
+            *account = snapshot;
+            return false;
+        }
+    }
+    true
 }
 
 pub(crate) fn can_grant_typed_task_reward(
@@ -411,228 +420,6 @@ pub(crate) fn advance_typed_task_event(
     changed
 }
 
-#[cfg(test)]
-pub(crate) fn complete_task(
-    account: &mut Value,
-    task_type: i32,
-    task_id: i32,
-    goal: i32,
-    now: u32,
-) {
-    let Some(account) = account.as_object_mut() else {
-        return;
-    };
-    let tasks = account
-        .entry("tasks".to_owned())
-        .or_insert_with(|| json!({"records": []}));
-    let Some(tasks) = tasks.as_object_mut() else {
-        return;
-    };
-    let records = tasks
-        .entry("records".to_owned())
-        .or_insert_with(|| json!([]));
-    let Some(records) = records.as_array_mut() else {
-        return;
-    };
-    if let Some(record) = records.iter_mut().find(|r| {
-        json_i32(r, "taskType") == Some(task_type) && json_i32(r, "taskId") == Some(task_id)
-    }) {
-        record["count"] = json!(goal);
-        record["finishTime"] = json!(now);
-        record["completed"] = json!(1);
-        record["rewardTime"] = json!(now);
-    } else {
-        records.push(json!({"taskType": task_type, "taskId": task_id, "count": goal, "finishTime": now, "completed": 1, "rewardTime": now}));
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn task_claimed(account: &Value, task_type: i32, task_id: i32) -> bool {
-    account
-        .get("tasks")
-        .and_then(|tasks| tasks.get("records"))
-        .and_then(Value::as_array)
-        .is_some_and(|records| {
-            records.iter().any(|record| {
-                json_i32(record, "taskType") == Some(task_type)
-                    && json_i32(record, "taskId") == Some(task_id)
-                    && json_i64(record, "rewardTime").unwrap_or_default() > 0
-            })
-        })
-}
-
-#[cfg(test)]
-pub(crate) fn task_completed(account: &Value, task_type: i32, task_id: i32, goal: i32) -> bool {
-    account
-        .get("tasks")
-        .and_then(|tasks| tasks.get("records"))
-        .and_then(Value::as_array)
-        .is_some_and(|records| {
-            records.iter().any(|record| {
-                json_i32(record, "taskType") == Some(task_type)
-                    && json_i32(record, "taskId") == Some(task_id)
-                    && (json_i32(record, "completed").unwrap_or_default() == 1
-                        || json_i32(record, "finishTime").unwrap_or_default() > 0
-                        || json_i32(record, "count").unwrap_or_default() >= goal)
-            })
-        })
-}
-
-/// Keep legacy UserInfo.AchievePoint consistent with claimed achievement records.
-/// Achievement points are derived from the client catalog, never accepted from TaskTrigger.
-#[cfg(test)]
-pub(crate) fn sync_achievement_points(account: &mut Value, catalog: &TaskCatalog) -> bool {
-    let points = catalog
-        .definitions
-        .iter()
-        .filter(|definition| definition.task_type == 5)
-        .filter(|definition| task_claimed(account, definition.task_type, definition.id))
-        .map(|definition| definition.point.max(0))
-        .sum::<i32>();
-    let Some(character) = account.get_mut("character").and_then(Value::as_object_mut) else {
-        return false;
-    };
-    if character
-        .get("achievePoint")
-        .and_then(Value::as_i64)
-        .unwrap_or_default()
-        == i64::from(points)
-    {
-        return false;
-    }
-    character.insert("achievePoint".to_owned(), json!(points));
-    true
-}
-
-#[cfg(test)]
-pub(crate) fn task_is_visible(
-    account: &Value,
-    catalog: &TaskCatalog,
-    definition: &TaskDefinition,
-) -> bool {
-    if definition.abandoned != 0 {
-        return false;
-    }
-    let level = value_i64_any(account.get("character").unwrap_or(account), &["level"]);
-    if (definition.level_min > 0 && level < i64::from(definition.level_min))
-        || (definition.level_max > 0 && level > i64::from(definition.level_max))
-    {
-        return false;
-    }
-    if matches!(definition.task_type, 2 | 3 | 8 | 9) || definition.previous_task_id <= 0 {
-        return true;
-    }
-    task_claimed(account, definition.task_type, definition.id)
-        || catalog.definitions.iter().any(|previous| {
-            previous.task_type == definition.task_type
-                && previous.id == definition.previous_task_id
-                && task_claimed(account, previous.task_type, previous.id)
-        })
-}
-
-/// Advance task counters from trusted server-side actions. Client TaskTrigger is rejected.
-#[cfg(test)]
-pub(crate) fn advance_task_event(
-    account: &mut Value,
-    catalog: Option<&TaskCatalog>,
-    event_type: i32,
-    delta: i32,
-    now: u32,
-) -> bool {
-    advance_task_event_impl(account, catalog, event_type, None, delta, now)
-}
-
-/// Advance trusted event counters, optionally restricted to goal[1].
-#[cfg(test)]
-pub(crate) fn advance_task_event_with_param(
-    account: &mut Value,
-    catalog: Option<&TaskCatalog>,
-    event_type: i32,
-    target_param: i32,
-    delta: i32,
-    now: u32,
-) -> bool {
-    advance_task_event_impl(account, catalog, event_type, Some(target_param), delta, now)
-}
-
-#[cfg(test)]
-fn advance_task_event_impl(
-    account: &mut Value,
-    catalog: Option<&TaskCatalog>,
-    event_type: i32,
-    target_param: Option<i32>,
-    delta: i32,
-    now: u32,
-) -> bool {
-    let Some(catalog) = catalog else {
-        return false;
-    };
-    normalize_task_state(account, now);
-    let definitions = catalog
-        .definitions
-        .iter()
-        .filter(|definition| definition.event_type == event_type)
-        .filter(|definition| {
-            definition.event_param.is_none() || definition.event_param == target_param
-        })
-        .filter(|definition| task_is_visible(account, catalog, definition))
-        .cloned()
-        .collect::<Vec<_>>();
-    let mut changed = false;
-    let Some(account) = account.as_object_mut() else {
-        return false;
-    };
-    let tasks = account
-        .entry("tasks".to_owned())
-        .or_insert_with(|| json!({"records": []}));
-    let Some(tasks) = tasks.as_object_mut() else {
-        return false;
-    };
-    let records = tasks
-        .entry("records".to_owned())
-        .or_insert_with(|| json!([]));
-    let Some(records) = records.as_array_mut() else {
-        return false;
-    };
-    for definition in definitions {
-        let current = records
-            .iter()
-            .find(|record| {
-                json_i32(record, "taskType") == Some(definition.task_type)
-                    && json_i32(record, "taskId") == Some(definition.id)
-            })
-            .and_then(|record| json_i32(record, "count"))
-            .unwrap_or_default();
-        let next = current
-            .saturating_add(delta.max(0))
-            .min(definition.goal.max(0));
-        if next <= current {
-            continue;
-        }
-        if let Some(record) = records.iter_mut().find(|record| {
-            json_i32(record, "taskType") == Some(definition.task_type)
-                && json_i32(record, "taskId") == Some(definition.id)
-        }) {
-            record["count"] = json!(next);
-            if next >= definition.goal {
-                record["completed"] = json!(1);
-                record["finishTime"] = json!(now);
-            }
-        } else {
-            records.push(json!({
-                "taskType": definition.task_type,
-                "taskId": definition.id,
-                "count": next,
-                "completed": if next >= definition.goal { 1 } else { 0 },
-                "finishTime": if next >= definition.goal { now } else { 0 },
-                "rewardTime": 0
-            }));
-        }
-        changed = true;
-    }
-    changed
-}
-
 pub(crate) fn task_rewards(
     catalog: Option<&TaskCatalog>,
     task_type: i32,
@@ -668,52 +455,6 @@ pub(crate) fn task_rewards(
         .collect()
 }
 
-#[cfg(test)]
-pub(crate) fn grant_reward(
-    account: &mut Value,
-    reward: ShopReward,
-    now: u32,
-    fashion_catalog: Option<&FashionList>,
-) -> ShopReward {
-    match reward.goods_type {
-        16 => {
-            add_medal(account, reward.item_id, now);
-            reward
-        }
-        5 => {
-            if let Some(key) = currency_character_key(reward.item_id) {
-                add_character_i64(account, key, reward.num);
-            }
-            reward
-        }
-        3 => {
-            let id = add_ship_items(account, reward.item_id, reward.num.max(0), now);
-            ShopReward {
-                instance_id: id,
-                ..reward
-            }
-        }
-        2 => {
-            let mut id = 0;
-            for _ in 0..reward.num.max(0) {
-                id = add_equip_item(account, reward.item_id);
-            }
-            ShopReward {
-                instance_id: id,
-                ..reward
-            }
-        }
-        18 => {
-            add_fashion_item(account, reward.item_id, fashion_catalog);
-            reward
-        }
-        _ => {
-            add_bag_item(account, reward.item_id, reward.num);
-            reward
-        }
-    }
-}
-
 pub(crate) fn encode_task_reward(task_id: i32, rewards: &[ShopReward]) -> Vec<u8> {
     let mut out = Vec::new();
     append_varint_field(&mut out, 1, task_id.max(0) as u64);
@@ -737,154 +478,6 @@ pub(crate) fn encode_task_reward_list(rewards: &[ShopReward]) -> Vec<u8> {
         append_message_field(&mut out, 1, &item);
     }
     out
-}
-
-#[cfg(test)]
-pub(crate) fn task_info_payload(account: &Value, catalog: Option<&TaskCatalog>) -> Vec<u8> {
-    let mut output = Vec::new();
-    let records = account
-        .get("tasks")
-        .and_then(|tasks| tasks.get("records"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let record_for = |definition: &TaskDefinition| {
-        records.iter().find(|record| {
-            value_i64_any(record, &["taskType", "task_type"]) == i64::from(definition.task_type)
-                && value_i64_any(record, &["taskId", "task_id"]) == i64::from(definition.id)
-        })
-    };
-    let claimed = |definition: &TaskDefinition| {
-        record_for(definition)
-            .is_some_and(|record| value_i64_any(record, &["rewardTime", "reward_time"]) > 0)
-    };
-    let Some(catalog) = catalog.filter(|catalog| !catalog.definitions.is_empty()) else {
-        if let Some(ids) = account
-            .get("tasks")
-            .and_then(|tasks| tasks.get("teachingPtRewardIds"))
-            .and_then(Value::as_array)
-        {
-            for id in ids.iter().filter_map(Value::as_i64) {
-                append_varint_field(&mut output, 11, id.max(0) as u64);
-            }
-        }
-        // TaskStageInfo: TeachingStage type 17, stage id 1.
-        output.extend_from_slice(&[0x62, 0x02, 0x08, 0x11, 0x10, 0x01, 0x68, 0x00]);
-        return output;
-    };
-    let level = value_i64_any(account.get("character").unwrap_or(account), &["level"]);
-    let mut selected = catalog
-        .definitions
-        .iter()
-        .filter(|definition| {
-            matches!(definition.task_type, 1 | 2 | 3 | 4 | 5 | 8 | 9)
-                && definition.abandoned == 0
-                && (definition.level_min <= 0 || level >= i64::from(definition.level_min))
-                && (definition.level_max <= 0 || level <= i64::from(definition.level_max))
-                && (matches!(definition.task_type, 2 | 3 | 8 | 9)
-                    || definition.previous_task_id <= 0
-                    || claimed(definition)
-                    || catalog.definitions.iter().any(|candidate| {
-                        candidate.task_type == definition.task_type
-                            && candidate.id == definition.previous_task_id
-                            && claimed(candidate)
-                    }))
-        })
-        .collect::<Vec<_>>();
-    selected.sort_by_key(|definition| (definition.task_type, definition.id));
-    let tag_for = |task_type| match task_type {
-        1 => 0x0A,
-        2 => 0x12,
-        3 => 0x1A,
-        4 => 0x3A,
-        5 => 0x22,
-        8 => 0x4A,
-        9 => 0x52,
-        _ => 0,
-    };
-    for task_type in [1, 2, 3, 4, 5, 8, 9] {
-        let type_defs = selected
-            .iter()
-            .copied()
-            .filter(|definition| definition.task_type == task_type)
-            .collect::<Vec<_>>();
-        let mut event_types = type_defs
-            .iter()
-            .map(|definition| definition.event_type)
-            .collect::<Vec<_>>();
-        event_types.sort_unstable();
-        event_types.dedup();
-        for event_type in event_types {
-            let event_defs = type_defs
-                .iter()
-                .copied()
-                .filter(|definition| definition.event_type == event_type)
-                .collect::<Vec<_>>();
-            let mut event_info = Vec::new();
-            append_varint_field(&mut event_info, 1, event_type.max(0) as u64);
-            let max_goal = event_defs
-                .iter()
-                .map(|definition| definition.goal)
-                .max()
-                .unwrap_or(0);
-            let progress = event_defs
-                .iter()
-                .filter_map(|definition| record_for(definition))
-                .map(|record| value_i64_any(record, &["count"]).max(0))
-                .max()
-                .unwrap_or_default()
-                .min(i64::from(max_goal));
-            append_varint_field(&mut event_info, 2, progress as u64);
-            for definition in event_defs {
-                let mut task = Vec::new();
-                append_varint_field(&mut task, 1, definition.id.max(0) as u64);
-                if let Some(record) = record_for(definition) {
-                    append_varint_field(
-                        &mut task,
-                        2,
-                        value_i64_any(record, &["rewardTime", "reward_time"]).max(0) as u64,
-                    );
-                    append_varint_field(
-                        &mut task,
-                        3,
-                        value_i64_any(record, &["finishTime", "finish_time"]).max(0) as u64,
-                    );
-                    append_varint_field(
-                        &mut task,
-                        4,
-                        value_i64_any(record, &["count"]).max(0) as u64,
-                    );
-                } else {
-                    append_varint_field(&mut task, 2, 0);
-                    append_varint_field(&mut task, 3, 0);
-                    append_varint_field(&mut task, 4, 0);
-                }
-                append_varint_field(&mut task, 7, 0);
-                append_varint_field(&mut task, 8, 0);
-                append_message_field(&mut event_info, 3, &task);
-            }
-            if let Some(tag) = (tag_for(task_type) != 0).then_some(tag_for(task_type)) {
-                append_message_field(&mut output, tag >> 3, &event_info);
-            }
-        }
-    }
-    for definition in selected.iter().filter(|definition| {
-        definition.task_type == 5 && definition.medal_id > 0 && claimed(definition)
-    }) {
-        append_varint_field(&mut output, 5, definition.medal_id as u64);
-    }
-    if let Some(ids) = account
-        .get("tasks")
-        .and_then(|tasks| tasks.get("teachingPtRewardIds"))
-        .and_then(Value::as_array)
-    {
-        for id in ids.iter().filter_map(Value::as_i64) {
-            append_varint_field(&mut output, 11, id.max(0) as u64);
-        }
-    }
-    // TaskStageInfo: TeachingStage type 17, stage id 1.
-    output.extend_from_slice(&[0x62, 0x02, 0x08, 0x11, 0x10, 0x01, 0x68, 0x00]);
-    output
 }
 
 pub(crate) fn task_info_payload_from_typed_account(
@@ -1013,32 +606,4 @@ pub(crate) struct ShopReward {
     pub(crate) item_id: i32,
     pub(crate) num: i32,
     pub(crate) instance_id: i32,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn typed_ship_reward_starts_with_full_mood() {
-        let mut account = blueoath_domain::NewAccountFactory::create(
-            blueoath_domain::ProfileId::new("ship-reward-mood").unwrap(),
-            "Captain",
-        );
-        let mut reward = ShopReward {
-            goods_type: 3,
-            item_id: 30_610_211,
-            num: 1,
-            instance_id: 0,
-        };
-
-        assert!(grant_typed_task_reward(&mut account, &mut reward));
-        let hero = account
-            .dock
-            .heroes
-            .values()
-            .find(|hero| hero.template_id.get() == 30_610_211)
-            .unwrap();
-        assert_eq!(hero.mood, blueoath_domain::HERO_MOOD_INITIAL);
-    }
 }

@@ -19,6 +19,7 @@ pub(crate) fn handle_typed(
     building_catalog: Option<&BuildingCatalog>,
 ) -> HandlerResult {
     handle_typed_with_multipliers(
+        None,
         account,
         method,
         request_args,
@@ -33,6 +34,7 @@ pub(crate) fn handle_typed(
 }
 
 pub(crate) fn handle_typed_with_multipliers(
+    server_state: Option<&ServerState>,
     account: &mut blueoath_domain::AccountState,
     method: &str,
     request_args: &[u8],
@@ -43,11 +45,21 @@ pub(crate) fn handle_typed_with_multipliers(
     let building_catalog = catalogs.building;
     let oil_multiplier = catalogs.oil_multiplier;
     let gold_multiplier = catalogs.gold_multiplier;
+    ensure_typed_worker_state(account, building_catalog, now);
+    apply_typed_dorm_mood(account, building_catalog, now);
+    ensure_typed_building_productions(account, building_catalog, now);
     match method {
-        "building.UpdateBuildingInfo" => HandlerResult::Reply(Response::raw(
-            method,
-            UserBuildingInfoCodec::encode(&building_info_from_typed_account(account, now)),
-        )),
+        "building.UpdateBuildingInfo" => {
+            ensure_typed_building_productions(account, building_catalog, now);
+            HandlerResult::Reply(Response::raw(
+                method,
+                UserBuildingInfoCodec::encode(&building_info_from_typed_account_with_catalog(
+                    account,
+                    now,
+                    building_catalog,
+                )),
+            ))
+        }
         "building.AddBuilding" => {
             let Ok(request) = BuildingAddRequest::decode(request_args) else {
                 return HandlerResult::Error(GameError::InvalidRequest(
@@ -61,7 +73,7 @@ pub(crate) fn handle_typed_with_multipliers(
                     "building placement is invalid",
                 ));
             };
-            append_typed_building_refresh(effects, account, now);
+            append_typed_building_refresh(effects, account, now, building_catalog);
             let mut payload = Vec::new();
             append_varint_field(&mut payload, 1, building_id);
             HandlerResult::Reply(Response::raw(method, payload))
@@ -78,12 +90,12 @@ pub(crate) fn handle_typed_with_multipliers(
             } else {
                 -1
             };
-            if !change_typed_building_level(account, building_id, delta) {
+            if !change_typed_building_level(account, building_id, delta, building_catalog) {
                 return HandlerResult::Error(GameError::InvalidRequest(
                     "building level change is invalid",
                 ));
             }
-            append_typed_building_refresh(effects, account, now);
+            append_typed_building_refresh(effects, account, now, building_catalog);
             HandlerResult::PushOnly
         }
         "building.FinishBuilding" | "building.UseStrengthSpeedup" => {
@@ -99,7 +111,7 @@ pub(crate) fn handle_typed_with_multipliers(
             if !account.buildings.levels.contains_key(&building_id) {
                 return HandlerResult::Error(GameError::InvalidRequest("building was not found"));
             }
-            append_typed_building_refresh(effects, account, now);
+            append_typed_building_refresh(effects, account, now, building_catalog);
             HandlerResult::PushOnly
         }
         "building.ProduceItem" | "building.ComposeItem" => {
@@ -116,7 +128,7 @@ pub(crate) fn handle_typed_with_multipliers(
                     "building production request is invalid",
                 ));
             }
-            append_typed_building_refresh(effects, account, now);
+            append_typed_building_refresh(effects, account, now, building_catalog);
             HandlerResult::PushOnly
         }
         "building.ReceiveBuilding"
@@ -158,7 +170,13 @@ pub(crate) fn handle_typed_with_multipliers(
             for reward in &rewards {
                 apply_typed_building_reward(account, reward);
             }
-            append_typed_building_refresh(effects, account, now);
+            append_typed_building_refresh(effects, account, now, building_catalog);
+            if let Some(state) = server_state {
+                effects.push_pre(Response::raw(
+                    "user.UpdateUserInfo",
+                    UserInfoCodec::encode(&user_info_from_typed_account(state, account)),
+                ));
+            }
             effects.push_pre(Response::raw(
                 "bag.UpdateBagData",
                 BagInfoCodec::encode(&bag_info_from_typed_account(account)),
@@ -233,7 +251,7 @@ pub(crate) fn handle_typed_with_multipliers(
             HandlerResult::Reply(Response::raw(method, encode_rewards_list(&rewards)))
         }
         "building.UpdateHeroAddition" => {
-            append_typed_building_refresh(effects, account, now);
+            append_typed_building_refresh(effects, account, now, building_catalog);
             HandlerResult::PushOnly
         }
         "building.SetHero" | "building.SetBuildingListHero" => {
@@ -257,7 +275,7 @@ pub(crate) fn handle_typed_with_multipliers(
                     "building assignment is invalid",
                 ));
             }
-            append_typed_building_refresh(effects, account, now);
+            append_typed_building_refresh(effects, account, now, building_catalog);
             HandlerResult::PushOnly
         }
         "buildnotes.GetNotesList" | "buildnotes.GiveLike" => {
@@ -566,26 +584,24 @@ fn receive_typed_construction(
     for job in &selected {
         let hero_id = blueoath_domain::HeroId::new(next_hero_id).ok()?;
         let template_id = blueoath_domain::TemplateId::new(job.template_id).ok()?;
-        account.dock.heroes.insert(
-            hero_id,
-            blueoath_domain::HeroState {
-                id: hero_id,
-                template_id,
-                fashioning: u32::try_from(template_id.get().saturating_sub(1) / 10)
-                    .unwrap_or(u32::MAX),
-                name: String::new(),
-                change_name_time: 0,
-                level: 1,
-                exp: 0,
-                mood: 100,
-                affection: 500_000,
-                hp: ship_initial_hp_for_template(template_id.get()),
-                locked: false,
-                created_utc: String::new(),
-                equip_slots: vec![None; 6],
-                pskills: std::collections::BTreeMap::new(),
-            },
-        );
+        let mut hero = blueoath_domain::HeroState {
+            id: hero_id,
+            template_id,
+            fashioning: u32::try_from(template_id.get().saturating_sub(1) / 10).unwrap_or(u32::MAX),
+            name: String::new(),
+            change_name_time: 0,
+            level: 1,
+            exp: 0,
+            mood: blueoath_domain::HERO_MOOD_INITIAL,
+            affection: 500_000,
+            hp: ship_initial_hp_for_template(template_id.get()),
+            locked: false,
+            created_utc: String::new(),
+            equip_slots: vec![None; 6],
+            pskills: std::collections::BTreeMap::new(),
+        };
+        initialize_typed_hero_loadout_from_catalog(account, &mut hero);
+        account.dock.heroes.insert(hero_id, hero);
         rewards.push(ShopReward {
             goods_type: 3,
             item_id: i32::try_from(job.template_id).ok()?,
@@ -605,6 +621,7 @@ fn change_typed_building_level(
     account: &mut blueoath_domain::AccountState,
     building_id: i32,
     delta: i32,
+    catalog: Option<&BuildingCatalog>,
 ) -> bool {
     if building_id <= 0 || delta == 0 {
         return false;
@@ -612,14 +629,220 @@ fn change_typed_building_level(
     let Some(building_id) = u64::try_from(building_id).ok() else {
         return false;
     };
-    let Some(level) = account.buildings.levels.get_mut(&building_id) else {
+    let Some(catalog) = catalog else {
         return false;
     };
-    let next = i64::from(*level).saturating_add(i64::from(delta));
+    let Some(current_level) = account.buildings.levels.get(&building_id).copied() else {
+        return false;
+    };
+    let current_template_id = account
+        .buildings
+        .template_ids
+        .get(&building_id)
+        .copied()
+        .and_then(|value| i32::try_from(value).ok())
+        .unwrap_or_default();
+    let Some(current_config) = catalog.typed_building_configs.get(&current_template_id) else {
+        return false;
+    };
+    let next = i64::from(current_level).saturating_add(i64::from(delta));
     if next <= 0 {
         return false;
     }
-    *level = u32::try_from(next).unwrap_or(u32::MAX);
+    let Ok(next_level) = i32::try_from(next) else {
+        return false;
+    };
+    let Some((next_template_id, next_config)) =
+        catalog.typed_building_configs.iter().find(|(_, config)| {
+            config.building_type == current_config.building_type && config.level == next_level
+        })
+    else {
+        return false;
+    };
+    if delta > 0
+        && current_config.building_type != 1
+        && account
+            .buildings
+            .levels
+            .iter()
+            .find_map(|(id, level)| {
+                let template_id = account.buildings.template_ids.get(id)?;
+                let config = catalog
+                    .typed_building_configs
+                    .get(&i32::try_from(*template_id).ok()?)?;
+                (config.building_type == 1).then_some(*level)
+            })
+            .is_some_and(|office_level| {
+                office_level < u32::try_from(next_level).unwrap_or(u32::MAX)
+            })
+    {
+        return false;
+    }
+    if delta < 0
+        && account
+            .buildings
+            .hero_assignments
+            .get(&building_id)
+            .is_some_and(|heroes| heroes.len() > next_config.hero_capacity)
+    {
+        return false;
+    }
+    if delta > 0 && !can_consume_building_upgrade_cost(account, next_template_id, catalog) {
+        return false;
+    }
+    if delta > 0 && !consume_building_upgrade_cost(account, next_template_id, catalog) {
+        return false;
+    }
+    if current_config.building_type == 1 {
+        let current_max = typed_worker_max_strength_for_office_level(catalog, current_level);
+        let next_max = typed_worker_max_strength_for_office_level(
+            catalog,
+            u32::try_from(next_level).unwrap_or(u32::MAX),
+        );
+        if next_max >= current_max {
+            account.buildings.worker_strength = account
+                .buildings
+                .worker_strength
+                .saturating_add(next_max.saturating_sub(current_max));
+        } else {
+            account.buildings.worker_strength = account.buildings.worker_strength.min(next_max);
+        }
+        account.buildings.worker_update_at = account.buildings.worker_update_at.max(1);
+    }
+    account
+        .buildings
+        .levels
+        .insert(building_id, u32::try_from(next_level).unwrap_or(u32::MAX));
+    account.buildings.template_ids.insert(
+        building_id,
+        u64::try_from(*next_template_id).unwrap_or_default(),
+    );
+    if let Some(production) = account.buildings.productions.get_mut(&building_id) {
+        production.productivity = u32::try_from(next_config.productivity).unwrap_or_default();
+        production.produce_speed = u32::try_from(next_config.produce_speed).unwrap_or_default();
+    }
+    true
+}
+
+fn building_currency_kind(item_id: i32) -> Option<blueoath_domain::CurrencyKind> {
+    Some(match item_id {
+        1 => blueoath_domain::CurrencyKind::Gold,
+        2 => blueoath_domain::CurrencyKind::Diamond,
+        5 => blueoath_domain::CurrencyKind::Supply,
+        19 => blueoath_domain::CurrencyKind::Oil,
+        20 => blueoath_domain::CurrencyKind::BuildMaterial,
+        30 => blueoath_domain::CurrencyKind::PvePoint,
+        _ => return None,
+    })
+}
+
+fn can_consume_building_upgrade_cost(
+    account: &blueoath_domain::AccountState,
+    template_id: &i32,
+    catalog: &BuildingCatalog,
+) -> bool {
+    let Some(rule) = catalog.upgrade_rules_by_template.get(template_id) else {
+        return true;
+    };
+    if rule.cost_work > 0
+        && account.buildings.worker_strength
+            < u32::try_from(rule.cost_work)
+                .unwrap_or(u32::MAX)
+                .saturating_mul(10_000)
+    {
+        return false;
+    }
+    if account
+        .resources
+        .amount(blueoath_domain::CurrencyKind::Gold)
+        .get()
+        < u64::try_from(rule.cost_money).unwrap_or(u64::MAX)
+    {
+        return false;
+    }
+    let mut required = std::collections::BTreeMap::<(i32, i32), u64>::new();
+    for &(goods_type, item_id, amount) in &rule.costs {
+        let Ok(amount) = u64::try_from(amount) else {
+            return false;
+        };
+        let entry = required.entry((goods_type, item_id)).or_default();
+        *entry = entry.saturating_add(amount);
+    }
+    required.into_iter().all(|((goods_type, item_id), amount)| {
+        if goods_type == 5 {
+            building_currency_kind(item_id)
+                .is_some_and(|kind| account.resources.amount(kind).get() >= amount)
+        } else if matches!(goods_type, 1 | 6) {
+            blueoath_domain::TemplateId::new(u64::try_from(item_id).unwrap_or_default())
+                .ok()
+                .is_some_and(|id| {
+                    account
+                        .inventory
+                        .items
+                        .get(&id)
+                        .copied()
+                        .unwrap_or_default()
+                        >= amount
+                })
+        } else {
+            false
+        }
+    })
+}
+
+fn consume_building_upgrade_cost(
+    account: &mut blueoath_domain::AccountState,
+    template_id: &i32,
+    catalog: &BuildingCatalog,
+) -> bool {
+    let Some(rule) = catalog.upgrade_rules_by_template.get(template_id) else {
+        return true;
+    };
+    if rule.cost_money > 0
+        && account
+            .resources
+            .debit(
+                blueoath_domain::CurrencyKind::Gold,
+                u64::try_from(rule.cost_money).unwrap_or(u64::MAX),
+            )
+            .is_err()
+    {
+        return false;
+    }
+    for &(goods_type, item_id, amount) in &rule.costs {
+        let amount = u64::try_from(amount).unwrap_or_default();
+        if goods_type == 5 {
+            let Some(kind) = building_currency_kind(item_id) else {
+                return false;
+            };
+            if account.resources.debit(kind, amount).is_err() {
+                return false;
+            }
+        } else if matches!(goods_type, 1 | 6) {
+            let Ok(template_id) =
+                blueoath_domain::TemplateId::new(u64::try_from(item_id).unwrap_or_default())
+            else {
+                return false;
+            };
+            if let Some(count) = account.inventory.items.get_mut(&template_id) {
+                *count = count.saturating_sub(amount);
+                if *count == 0 {
+                    account.inventory.items.remove(&template_id);
+                }
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    if rule.cost_work > 0 {
+        account.buildings.worker_strength = account.buildings.worker_strength.saturating_sub(
+            u32::try_from(rule.cost_work)
+                .unwrap_or(u32::MAX)
+                .saturating_mul(10_000),
+        );
+    }
     true
 }
 
@@ -702,7 +925,7 @@ fn collect_typed_building_rewards(
         let Some(production) = account.buildings.productions.get(&id).cloned() else {
             continue;
         };
-        let (reward, completed) = if matches!(building_type, 3 | 4) {
+        let (reward, completed) = if matches!(building_type, 2 | 3 | 4 | 6) {
             typed_resource_reward(
                 &production,
                 config,
@@ -771,7 +994,7 @@ fn typed_resource_reward(
     gold_multiplier: f64,
 ) -> Option<ShopReward> {
     let product_id = config.product_id?;
-    if !matches!(product_id, 1 | 5) || resource_id.is_some_and(|id| id != product_id) {
+    if !matches!(product_id, 1 | 5 | 19 | 20) || resource_id.is_some_and(|id| id != product_id) {
         return None;
     }
     let max = config.product_max.max(0);
@@ -780,7 +1003,7 @@ fn typed_resource_reward(
         let delta = i64::from(now)
             .saturating_sub(i64::try_from(production.last_update_at).ok()?)
             .max(0);
-        let parameter_id = if product_id == 5 { 209 } else { 210 };
+        let parameter_id = if product_id == 19 { 209 } else { 210 };
         let period = i64::from(
             catalog
                 .resource_time_seconds
@@ -794,10 +1017,11 @@ fn typed_resource_reward(
             .checked_div(i128::from(period) * 10_000)
             .and_then(|value| i64::try_from(value).ok())
             .unwrap_or_default();
-        let multiplier = if product_id == 5 {
-            oil_multiplier
-        } else {
-            gold_multiplier
+        let multiplier = match product_id {
+            19 => oil_multiplier,
+            1 => gold_multiplier,
+            // Supply and building material have no gold/oil production bonus.
+            _ => 1.0,
         };
         count = count
             .saturating_add(scale_reward(produced, multiplier))
@@ -859,6 +1083,8 @@ fn apply_typed_building_reward(account: &mut blueoath_domain::AccountState, rewa
             1 => Some(blueoath_domain::CurrencyKind::Gold),
             2 => Some(blueoath_domain::CurrencyKind::Diamond),
             5 => Some(blueoath_domain::CurrencyKind::Supply),
+            19 => Some(blueoath_domain::CurrencyKind::Oil),
+            20 => Some(blueoath_domain::CurrencyKind::BuildMaterial),
             30 => Some(blueoath_domain::CurrencyKind::PvePoint),
             _ => None,
         };
@@ -951,11 +1177,445 @@ fn set_typed_building_assignments(
 
 fn append_typed_building_refresh(
     effects: &mut ResponseEffects,
-    account: &blueoath_domain::AccountState,
+    account: &mut blueoath_domain::AccountState,
     now: u32,
+    catalog: Option<&BuildingCatalog>,
 ) {
+    ensure_typed_building_productions(account, catalog, now);
     effects.push_pre(Response::raw(
         "building.UpdateBuildingInfo",
-        UserBuildingInfoCodec::encode(&building_info_from_typed_account(account, now)),
+        UserBuildingInfoCodec::encode(&building_info_from_typed_account_with_catalog(
+            account, now, catalog,
+        )),
     ));
+}
+
+fn ensure_typed_building_productions(
+    account: &mut blueoath_domain::AccountState,
+    catalog: Option<&BuildingCatalog>,
+    now: u32,
+) {
+    let Some(catalog) = catalog else {
+        return;
+    };
+    let building_ids = account.buildings.levels.keys().copied().collect::<Vec<_>>();
+    for building_id in building_ids {
+        let Some(template_id) = account
+            .buildings
+            .template_ids
+            .get(&building_id)
+            .and_then(|value| i32::try_from(*value).ok())
+        else {
+            continue;
+        };
+        let Some(config) = catalog.typed_building_configs.get(&template_id) else {
+            continue;
+        };
+        if !matches!(config.building_type, 2 | 3 | 4 | 6) {
+            continue;
+        }
+        let production = account
+            .buildings
+            .productions
+            .entry(building_id)
+            .or_default();
+        if production.last_update_at == 0 {
+            production.last_update_at = u64::from(now);
+        }
+        if production.status == 0 {
+            production.status = 3;
+        }
+        production.productivity = u32::try_from(config.productivity.max(0)).unwrap_or_default();
+        production.produce_speed =
+            u32::try_from(crate::game_config::building_produce_speed(config).max(0))
+                .unwrap_or_default();
+    }
+}
+
+fn apply_typed_dorm_mood(
+    account: &mut blueoath_domain::AccountState,
+    catalog: Option<&BuildingCatalog>,
+    now: u32,
+) {
+    let Some(catalog) = catalog else {
+        return;
+    };
+    let interval = u64::try_from(
+        catalog
+            .resource_time_seconds
+            .get(&139)
+            .copied()
+            .unwrap_or(6)
+            .max(1),
+    )
+    .unwrap_or(6)
+    .saturating_mul(60);
+    let now = u64::from(now);
+    if account.buildings.mood_update_at == 0 {
+        account.buildings.mood_update_at = now;
+        return;
+    }
+    if now <= account.buildings.mood_update_at {
+        return;
+    }
+    let periods = (now - account.buildings.mood_update_at) / interval;
+    if periods == 0 {
+        return;
+    }
+    let dorm_mood_by_hero = account
+        .buildings
+        .levels
+        .iter()
+        .filter_map(|(building_id, _)| {
+            let template_id = account.buildings.template_ids.get(building_id)?;
+            let template_id = i32::try_from(*template_id).ok()?;
+            let config = catalog.typed_building_configs.get(&template_id)?;
+            (config.building_type == 5 && config.add_mood > 0).then_some((
+                account
+                    .buildings
+                    .hero_assignments
+                    .get(building_id)
+                    .cloned()
+                    .unwrap_or_default(),
+                config.add_mood,
+            ))
+        })
+        .flat_map(|(hero_ids, add_mood)| {
+            hero_ids.into_iter().map(move |hero_id| (hero_id, add_mood))
+        })
+        .collect::<Vec<_>>();
+    for (hero_id, add_mood) in dorm_mood_by_hero {
+        let Some(hero) = account.dock.heroes.get_mut(&hero_id) else {
+            continue;
+        };
+        let recovery =
+            i64::from(add_mood.max(0)).saturating_mul(i64::try_from(periods).unwrap_or(i64::MAX));
+        hero.mood = hero
+            .mood
+            .saturating_add(u32::try_from(recovery).unwrap_or(u32::MAX))
+            .min(MOOD_MAX as u32);
+    }
+    account.buildings.mood_update_at = account
+        .buildings
+        .mood_update_at
+        .saturating_add(periods.saturating_mul(interval));
+}
+
+fn typed_worker_max_strength(
+    account: &blueoath_domain::AccountState,
+    catalog: &BuildingCatalog,
+) -> u32 {
+    let office_level = account
+        .buildings
+        .levels
+        .iter()
+        .find_map(|(building_id, level)| {
+            let template_id = account.buildings.template_ids.get(building_id)?;
+            let config = catalog
+                .typed_building_configs
+                .get(&i32::try_from(*template_id).ok()?)?;
+            (config.building_type == 1).then_some(*level)
+        })
+        .unwrap_or(1)
+        .max(1);
+    typed_worker_max_strength_for_office_level(catalog, office_level)
+}
+
+fn typed_worker_max_strength_for_office_level(catalog: &BuildingCatalog, office_level: u32) -> u32 {
+    let level_bonus = catalog
+        .worker_hp_level_up
+        .iter()
+        .take(usize::try_from(office_level.max(1)).unwrap_or_default())
+        .fold(0_i32, |total, bonus| total.saturating_add(*bonus));
+    u32::try_from(
+        catalog
+            .worker_hp_max
+            .saturating_add(level_bonus)
+            .max(0)
+            .saturating_mul(10_000),
+    )
+    .unwrap_or(u32::MAX)
+}
+
+fn ensure_typed_worker_state(
+    account: &mut blueoath_domain::AccountState,
+    catalog: Option<&BuildingCatalog>,
+    now: u32,
+) {
+    let Some(catalog) = catalog else {
+        return;
+    };
+    let max_strength = typed_worker_max_strength(account, catalog);
+    let update_at = account.buildings.worker_update_at;
+    if account.buildings.worker_strength == 0 {
+        account.buildings.worker_strength = max_strength;
+        account.buildings.worker_update_at = u64::from(now);
+        return;
+    }
+    account.buildings.worker_strength = account.buildings.worker_strength.min(max_strength);
+    if update_at == 0 || u64::from(now) <= update_at {
+        account.buildings.worker_update_at = u64::from(now);
+        return;
+    }
+    let interval = u64::try_from(catalog.worker_recover_interval_seconds.max(1)).unwrap_or(60);
+    let periods = (u64::from(now) - update_at) / interval;
+    if periods == 0 {
+        return;
+    }
+    let recovery = u64::try_from(catalog.worker_recover.max(0))
+        .unwrap_or_default()
+        .saturating_mul(periods)
+        .saturating_mul(10_000);
+    account.buildings.worker_strength = account
+        .buildings
+        .worker_strength
+        .saturating_add(u32::try_from(recovery).unwrap_or(u32::MAX))
+        .min(max_strength);
+    account.buildings.worker_update_at = update_at.saturating_add(periods.saturating_mul(interval));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_catalog() -> BuildingCatalog {
+        let mut catalog = BuildingCatalog::default();
+        for (template_id, level) in [(1, 1), (2, 2), (3, 3), (41, 1), (42, 2)] {
+            catalog.typed_building_configs.insert(
+                template_id,
+                BuildingConfig {
+                    building_type: if template_id < 10 { 1 } else { 5 },
+                    level,
+                    hero_capacity: 5,
+                    product_max: 0,
+                    product_id: None,
+                    productivity: 0,
+                    produce_speed: 0,
+                    ..BuildingConfig::default()
+                },
+            );
+            catalog.capacities.insert(template_id, 5);
+        }
+        catalog.worker_hp_max = 50;
+        catalog.worker_hp_level_up = vec![50, 50, 50];
+        catalog
+    }
+
+    #[test]
+    fn upgrading_building_changes_template_and_worker_strength() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("building-upgrade").unwrap(),
+            "Captain",
+        );
+        let catalog = test_catalog();
+        let mut effects = ResponseEffects::default();
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, 1);
+
+        assert!(matches!(
+            handle_typed(
+                &mut account,
+                "building.UpgradeBuilding",
+                &request,
+                100,
+                &mut effects,
+                Some(&catalog),
+            ),
+            HandlerResult::PushOnly
+        ));
+        assert_eq!(account.buildings.levels.get(&1), Some(&3));
+        assert_eq!(account.buildings.template_ids.get(&1), Some(&3));
+        let info = building_info_from_typed_account_with_catalog(&account, 100, Some(&catalog));
+        assert_eq!(info.worker_strength, 2_000_000);
+        assert_eq!(info.buildings[0].template_id, 3);
+        assert_eq!(info.buildings[0].level, 3);
+    }
+
+    #[test]
+    fn degrading_building_restores_previous_template() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("building-degrade").unwrap(),
+            "Captain",
+        );
+        account.buildings.levels.insert(1, 3);
+        account.buildings.template_ids.insert(1, 3);
+        let catalog = test_catalog();
+        let mut effects = ResponseEffects::default();
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, 1);
+
+        assert!(matches!(
+            handle_typed(
+                &mut account,
+                "building.DegradeBuilding",
+                &request,
+                100,
+                &mut effects,
+                Some(&catalog),
+            ),
+            HandlerResult::PushOnly
+        ));
+        assert_eq!(account.buildings.levels.get(&1), Some(&2));
+        assert_eq!(account.buildings.template_ids.get(&1), Some(&2));
+    }
+
+    #[test]
+    fn dormitory_recovers_assigned_hero_mood_from_configured_rate() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("dorm-mood").unwrap(),
+            "Captain",
+        );
+        account
+            .dock
+            .heroes
+            .get_mut(&blueoath_domain::HeroId::new(1).unwrap())
+            .unwrap()
+            .mood = 0;
+        account
+            .buildings
+            .hero_assignments
+            .insert(2, vec![blueoath_domain::HeroId::new(1).unwrap()]);
+        let mut catalog = test_catalog();
+        catalog.resource_time_seconds.insert(139, 6);
+        catalog
+            .typed_building_configs
+            .get_mut(&41)
+            .unwrap()
+            .add_mood = 25_000;
+        let mut effects = ResponseEffects::default();
+        let request = Vec::new();
+
+        assert!(matches!(
+            handle_typed(
+                &mut account,
+                "building.UpdateBuildingInfo",
+                &request,
+                100,
+                &mut effects,
+                Some(&catalog),
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account.dock.heroes[&blueoath_domain::HeroId::new(1).unwrap()].mood,
+            0
+        );
+
+        assert!(matches!(
+            handle_typed(
+                &mut account,
+                "building.UpdateBuildingInfo",
+                &request,
+                460,
+                &mut effects,
+                Some(&catalog),
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account.dock.heroes[&blueoath_domain::HeroId::new(1).unwrap()].mood,
+            25_000
+        );
+    }
+
+    #[test]
+    fn refinery_uses_configured_productivity_for_wire_produce_speed() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("refinery-speed").unwrap(),
+            "Captain",
+        );
+        account.buildings.levels.insert(3, 2);
+        account.buildings.template_ids.insert(3, 22);
+
+        let mut catalog = test_catalog();
+        catalog.typed_building_configs.insert(
+            22,
+            BuildingConfig {
+                building_type: 3,
+                level: 2,
+                product_max: 5_400,
+                product_id: Some(5),
+                productivity: 310_000,
+                ..BuildingConfig::default()
+            },
+        );
+
+        let info = building_info_from_typed_account_with_catalog(&account, 100, Some(&catalog));
+        let refinery = info
+            .buildings
+            .iter()
+            .find(|building| building.id == 3)
+            .expect("refinery is projected");
+        assert_eq!(refinery.productivity, 310_000);
+        assert_eq!(refinery.produce_speed, 310_000);
+        assert_eq!(refinery.product_count, 0);
+        assert_eq!(refinery.status, 3);
+    }
+
+    #[test]
+    fn receiving_refinery_supply_pushes_updated_user_info() {
+        let mut account = blueoath_domain::NewAccountFactory::create(
+            blueoath_domain::ProfileId::new("refinery-supply-push").unwrap(),
+            "Captain",
+        );
+        account.buildings.levels.insert(3, 2);
+        account.buildings.template_ids.insert(3, 22);
+        account.buildings.productions.insert(
+            3,
+            blueoath_domain::BuildingProductionState {
+                status: 1,
+                product_count: 123,
+                ..blueoath_domain::BuildingProductionState::default()
+            },
+        );
+
+        let mut catalog = test_catalog();
+        catalog.typed_building_configs.insert(
+            22,
+            BuildingConfig {
+                building_type: 3,
+                level: 2,
+                product_max: 5_400,
+                product_id: Some(5),
+                productivity: 310_000,
+                ..BuildingConfig::default()
+            },
+        );
+        let supply_before = account
+            .resources
+            .amount(blueoath_domain::CurrencyKind::Supply)
+            .get();
+        let server_state = ServerState::new("refinery-supply-push", "Captain", "test");
+        let mut request = Vec::new();
+        append_varint_field(&mut request, 1, 5);
+        let mut effects = ResponseEffects::default();
+
+        assert!(matches!(
+            handle_typed_with_multipliers(
+                Some(&server_state),
+                &mut account,
+                "building.ReceiveResource",
+                &request,
+                100,
+                &mut effects,
+                BuildingTypedCatalogs {
+                    building: Some(&catalog),
+                    oil_multiplier: 1.0,
+                    gold_multiplier: 1.0,
+                },
+            ),
+            HandlerResult::Reply(_)
+        ));
+        assert_eq!(
+            account
+                .resources
+                .amount(blueoath_domain::CurrencyKind::Supply)
+                .get(),
+            supply_before + 123
+        );
+        let (pre, _, _) = effects.into_parts();
+        assert!(pre
+            .iter()
+            .any(|response| response.method == "user.UpdateUserInfo"));
+    }
 }

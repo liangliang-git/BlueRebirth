@@ -1,30 +1,30 @@
 use blueoath_protocol::{
     ActivityCodeExchangeRequest, ActivityExchangeRewardRequest, ActivityExtractDrawRequest,
     ActivityFormulaRequest, ActivityItemIdRequest, ActivityRewardIndexRequest,
-    ActivitySelectShipRequest, ActivitySelectTeamRequest, AlchemyRequest, BathroomRequest,
-    BathroomStartAllRequest, BathroomStartEntry, BattleAutoMessageRequest, BattlePassLevelRequest,
-    BattlePassRefreshRequest, BattlePassRewardRequest, BattlePassTaskRewardRequest,
-    BattlePassTypeRequest, BigActivityRankRequest, BirthdayFeedRequest, BuildShipRequest,
-    BuildShipRewardRequest, ChangeNameRequest, ChangeWorldChannelRequest,
-    ChristmasBuyBlindBoxRequest, ChristmasBuyItemRequest, CoopChangeChapterRequest,
-    CoopCreateRoomRequest, CoopKickRequest, CoopMatchTypeRequest, CoopPasswordRequest,
-    CoopRoomHeroesRequest, CoopRoomIdRequest, CopyAttackRequest, CopyIdRequest,
-    CopyPassBaseRequest, CopyPassRequest, CopyRecordRequest, CopyRewardCountRequest,
-    CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest, Decode, DiscussRequest,
-    ExchangeRequest, FashionEquipRequest, FashionPurchaseRequest, FleetInfo, FleetTactic,
-    FoodComposeRequest, FriendSearchRequest, FriendTargetRequest, GetBarrageByIdRequest,
-    GuideSettingEntry, GuideSettingRequest, GuildActivityPresentRequest, GuildBoxAnonymousRequest,
-    GuildBoxIdRequest, GuildCreateRequest, GuildIdRequest, GuildListRequest, GuildModifyRequest,
-    GuildOfferRequest, GuildSearchRequest, GuildTaskDonateRequest, GuildTaskIdRequest,
-    GuildTaskMemberRequest, GuildWarBaseRequest, GuildWarScoreRequest, HeroAwakenFinishRequest,
-    HeroAwakenRewardRequest, HeroChangeEquipRequest, InviteRecordVersionRequest,
-    InviteStateTypeRequest, OutpostBuildingRequest, OutpostSetHeroRequest, PaperCutRequest,
-    ProtocolError, SeaDifficultyRequest, SendBarrageRequest, SendMessageRequest,
-    SetHeadFrameRequest, SetHeadRequest, SetMessageRequest, SetSecretaryRequest,
-    ShipTaskCurrentShipRequest, ShipTaskRewardRequest, SignDayRequest, SportsMeetPointsRequest,
-    StudyProgressRequest, StudySpeedupItem, StudySpeedupRequest, StudyStartRequest,
-    TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest, ValentineRewardRequest,
-    WorldEventStageRequest,
+    ActivitySelectShipRequest, ActivitySelectTeamRequest, AlchemyRequest, BathroomAutoRequest,
+    BathroomRequest, BathroomServiceRequest, BathroomStartAllRequest, BathroomStartEntry,
+    BattleAutoMessageRequest, BattlePassLevelRequest, BattlePassRefreshRequest,
+    BattlePassRewardRequest, BattlePassTaskRewardRequest, BattlePassTypeRequest,
+    BigActivityRankRequest, BirthdayFeedRequest, BuildShipRequest, BuildShipRewardRequest,
+    ChangeNameRequest, ChangeWorldChannelRequest, ChristmasBuyBlindBoxRequest,
+    ChristmasBuyItemRequest, CoopChangeChapterRequest, CoopCreateRoomRequest, CoopKickRequest,
+    CoopMatchTypeRequest, CoopPasswordRequest, CoopRoomHeroesRequest, CoopRoomIdRequest,
+    CopyAttackRequest, CopyIdRequest, CopyPassBaseRequest, CopyPassRequest, CopyRecordRequest,
+    CopyRewardCountRequest, CopyStartRequest, DailyCopyEnterRequest, DailyCopySelectExRequest,
+    Decode, DiscussRequest, EquipRiseStarRequest, ExchangeRequest, FashionEquipRequest,
+    FashionPurchaseRequest, FleetInfo, FleetTactic, FoodComposeRequest, FriendSearchRequest,
+    FriendTargetRequest, GetBarrageByIdRequest, GuideSettingEntry, GuideSettingRequest,
+    GuildActivityPresentRequest, GuildBoxAnonymousRequest, GuildBoxIdRequest, GuildCreateRequest,
+    GuildIdRequest, GuildListRequest, GuildModifyRequest, GuildOfferRequest, GuildSearchRequest,
+    GuildTaskDonateRequest, GuildTaskIdRequest, GuildTaskMemberRequest, GuildWarBaseRequest,
+    GuildWarScoreRequest, HeroAwakenFinishRequest, HeroAwakenRewardRequest, HeroChangeEquipRequest,
+    InviteRecordVersionRequest, InviteStateTypeRequest, OutpostBuildingRequest,
+    OutpostSetHeroRequest, PaperCutRequest, ProtocolError, SeaDifficultyRequest,
+    SendBarrageRequest, SendMessageRequest, SetHeadFrameRequest, SetHeadRequest, SetMessageRequest,
+    SetSecretaryRequest, ShipTaskCurrentShipRequest, ShipTaskRewardRequest, SignDayRequest,
+    SportsMeetPointsRequest, StudyProgressRequest, StudySpeedupItem, StudySpeedupRequest,
+    StudyStartRequest, TaskAllRewardRequest, TaskRewardRequest, TeachingUserRequest,
+    ValentineRewardRequest, WorldEventStageRequest,
 };
 
 #[test]
@@ -668,6 +668,26 @@ fn decodes_typed_progression_requests() {
             position: 2,
             is_auto: true,
         }
+    );
+    assert_eq!(
+        BathroomAutoRequest::decode(&[0x08, 9, 0x10, 1]).unwrap(),
+        BathroomAutoRequest {
+            hero_id: 9,
+            is_auto: true,
+        }
+    );
+    assert_eq!(
+        BathroomServiceRequest::decode(&[0x08, 9, 0x10, 0xD1, 0xF7, 0x07]).unwrap(),
+        BathroomServiceRequest {
+            hero_id: 9,
+            gift_id: 130001,
+        }
+    );
+    assert_eq!(
+        EquipRiseStarRequest::decode(&[0x08, 7])
+            .unwrap()
+            .consume_ids,
+        Vec::<u64>::new()
     );
     assert_eq!(
         BathroomStartAllRequest::decode(&[0x0a, 4, 0x08, 1, 0x10, 2]).unwrap(),

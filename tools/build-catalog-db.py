@@ -17,6 +17,15 @@ from typing import Any
 SCHEMA_VERSION = "2"
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
+# Server shop IDs for equipment-quality pages.  Good IDs live outside the
+# client-config ranges; the client patch injects matching config_shop_goods
+# entries at runtime.
+SSR_EQUIPMENT_SHOP_ID = 18
+UR_EQUIPMENT_SHOP_ID = 940
+SSR_EQUIPMENT_GOOD_BASE = 1_800_000
+UR_EQUIPMENT_GOOD_BASE = 2_800_000
+EQUIPMENT_SHOP_PRICE = 200
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -113,6 +122,32 @@ def encode_cell(value: Any, kind: str) -> Any:
     if kind == "text":
         return str(value)
     raise ValueError(f"unsupported column kind: {kind}")
+
+
+def mapped_columns(
+    field_order: list[str], field_kinds: dict[str, str | None]
+) -> list[tuple[str, str, str]]:
+    """Map JSON keys to SQLite columns without losing case-sensitive keys."""
+    columns: list[tuple[str, str, str]] = []
+    # Reserve both schema id and compatibility alias. The exact JSON key
+    # `id` must always map to `value_id`, regardless of row field order.
+    used = {"id", "value_id"}
+    for field_name in field_order:
+        if field_name == "id":
+            columns.append((field_name, "value_id", field_kinds[field_name] or "json"))
+            continue
+        elif IDENTIFIER.fullmatch(field_name):
+            base = field_name
+        else:
+            base = "field_" + "_".join(f"{ord(character):x}" for character in field_name)
+        column_name = base
+        suffix = 2
+        while column_name.casefold() in used:
+            column_name = f"{base}__{suffix}"
+            suffix += 1
+        used.add(column_name.casefold())
+        columns.append((field_name, column_name, field_kinds[field_name] or "json"))
+    return columns
 
 
 def create_schema(connection: sqlite3.Connection) -> None:
@@ -226,15 +261,12 @@ def import_config_rows(connection: sqlite3.Connection, config_dir: Path) -> int:
             for field_name, field_value in value.items():
                 if not isinstance(field_name, str):
                     raise ValueError(f"{path} row {row_id} has non-string field name")
-                column_name = "value_id" if field_name == "id" else field_name
-                quote_identifier(column_name)
                 if field_name not in field_kinds:
                     field_order.append(field_name)
                     field_kinds[field_name] = None
                 field_kinds[field_name] = merge_kind(field_kinds[field_name], field_value)
 
-        columns = [(field, "value_id" if field == "id" else field, field_kinds[field] or "json")
-                   for field in field_order]
+        columns = mapped_columns(field_order, field_kinds)
         column_sql = ", ".join(
             [f'"id" INTEGER PRIMARY KEY CHECK (id > 0)']
             + [f"{quote_identifier(column)} {sqlite_type(kind)}" for _, column, kind in columns]
@@ -334,6 +366,54 @@ def import_shop_goods(connection: sqlite3.Connection, catalog_root: Path) -> Non
                     " VALUES (?, ?, ?, ?, ?, ?)",
                     (good_id, priority, ordinal, cost_type, cost_item, amount),
                 )
+
+    # Make every static SSR/UR equipment purchasable.  Keep explicitly
+    # configured goods (for example the existing 300-token featured item) and
+    # add deterministic server-owned good IDs for the remaining equipment.
+    existing_items: dict[int, set[int]] = {
+        SSR_EQUIPMENT_SHOP_ID: set(),
+        UR_EQUIPMENT_SHOP_ID: set(),
+    }
+    for shop_id, item_id in connection.execute(
+        "SELECT shop_id, item_id FROM server_shop_goods "
+        "WHERE source_priority = 2 AND shop_id IN (?, ?)",
+        (SSR_EQUIPMENT_SHOP_ID, UR_EQUIPMENT_SHOP_ID),
+    ):
+        existing_items[shop_id].add(item_id)
+
+    equip_path = catalog_root / "server-config" / "config_equip.json"
+    if not equip_path.is_file():
+        return
+    equip_document = json.loads(equip_path.read_text(encoding="utf-8"))
+    for row in equip_document.get("rows", []):
+        equipment_id = json_int(row.get("id"))
+        quality = json_int((row.get("value") or {}).get("quality"))
+        if quality == 4:
+            shop_id = SSR_EQUIPMENT_SHOP_ID
+            good_id = SSR_EQUIPMENT_GOOD_BASE + equipment_id
+            currency_id = 9
+        elif quality == 5:
+            shop_id = UR_EQUIPMENT_SHOP_ID
+            good_id = UR_EQUIPMENT_GOOD_BASE + equipment_id
+            currency_id = 32
+        else:
+            continue
+        if equipment_id <= 0 or equipment_id in existing_items[shop_id]:
+            continue
+
+        connection.execute(
+            "INSERT OR REPLACE INTO server_shop_goods "
+            "(good_id, shop_id, goods_type, item_id, num, source_priority) "
+            "VALUES (?, ?, 2, ?, 1, 2)",
+            (good_id, shop_id, equipment_id),
+        )
+        connection.execute(
+            "INSERT OR REPLACE INTO server_shop_good_costs "
+            "(good_id, source_priority, ordinal, goods_type, item_id, amount) "
+            "VALUES (?, 2, 0, 5, ?, ?)",
+            (good_id, currency_id, EQUIPMENT_SHOP_PRICE),
+        )
+        existing_items[shop_id].add(equipment_id)
 
 
 def import_mails(connection: sqlite3.Connection, catalog_root: Path) -> None:
