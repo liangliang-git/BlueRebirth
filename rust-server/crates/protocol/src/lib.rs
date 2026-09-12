@@ -2383,6 +2383,19 @@ impl Decode for CoopRoomHeroesRequest {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoopHeroListRequest {
+    pub hero_ids: Vec<u64>,
+}
+
+impl Decode for CoopHeroListRequest {
+    fn decode(payload: &[u8]) -> Result<Self, ProtocolError> {
+        Ok(Self {
+            hero_ids: decode_coop_hero_ids(payload)?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoopKickRequest {
     pub room_id: u64,
@@ -3990,10 +4003,13 @@ impl GuideInfoCodec {
         let mut output = Vec::new();
         write_varint_field(&mut output, 1, 0);
         write_varint_field(&mut output, 2, 0);
-        // Skip login/startup tutorial stages and the broken 2A defense-ring
-        // guide. The latter leaves the client input-locked at stage 1200000.
-        const INITIAL_DONE_STAGES: [&str; 7] = [
-            "10000", "100000", "1000000", "99995", "99998", "99992", "1200000",
+        // Match the original C# bootstrap: mark every top-level guide stage
+        // complete so login cannot reopen the prologue/plot battle guide.
+        const INITIAL_DONE_STAGES: [&str; 29] = [
+            "10000", "100000", "1000000", "99995", "99998", "99992", "1200000", "14000", "200000",
+            "22001", "300000", "40001", "700000", "800000", "910000", "92000", "93000", "94000",
+            "95000", "96000", "97000", "98000", "99000", "110000", "120000", "130000", "140000",
+            "150000", "160000",
         ];
         let done_stages =
             merge_done_stages(settings.get("GUIDE_DONE_STAGES"), &INITIAL_DONE_STAGES);

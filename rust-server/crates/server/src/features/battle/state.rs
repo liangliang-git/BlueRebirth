@@ -320,6 +320,13 @@ pub(crate) fn battle_start_payload_from_typed_account(
         append_message_field(&mut output, 15, &list);
     }
     append_varint_field(&mut output, 2, u64::from(current_unix_seconds()));
+    // Client CopyEnter requires TStartBaseRet.Rid before it enters battle.
+    // Co-op and normal PVE use same response contract.
+    append_varint_field(
+        &mut output,
+        3,
+        u64::from(current_unix_seconds()).saturating_add(account.character.uid % 997),
+    );
     let copy_info = battle_catalog.and_then(|catalog| catalog.copies.get(&copy_id));
     append_varint_field(
         &mut output,
@@ -1086,6 +1093,9 @@ mod tests {
             BattleStartOptions::default(),
         );
 
+        assert!(blueoath_protocol::decode_varint_fields(&payload)
+            .unwrap()
+            .contains_key(&3));
         assert!(contains_varint(&payload, 12, 987_654));
         assert!(contains_varint(&payload, 1, 99_001));
         assert!(contains_varint(&payload, 1, 88_001));

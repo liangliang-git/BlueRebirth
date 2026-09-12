@@ -76,30 +76,67 @@ pub(crate) fn handle_pass_base(
             })
             .collect()
     };
-    let Some(current_fleet_id) = remaining_fleet_ids.first().copied() else {
-        return HandlerResult::Error(GameError::InvalidState(
-            "battle session has no remaining wave",
-        ));
+
+    // 允许的舰队ID列表
+    let allowed_fleet_ids = battle_session_fleet_ids(
+        i32::try_from(copy_id.get()).unwrap_or_default(),
+        battle_catalog,
+    )
+    .into_iter()
+    .filter_map(|fleet_id| u32::try_from(fleet_id).ok())
+    .collect::<Vec<_>>();
+
+    let Some(session_fleet_id) = remaining_fleet_ids.first().copied() else {
+        return HandlerResult::Error(GameError::InvalidState("战斗回合没有剩余波次"));
     };
-    // Client can report more than one fleet in FleetInfo/EnemyFleets. One
-    // PassBase is one wave settlement; session order is authoritative.
-    // Otherwise a 5-wave copy can be completed after 4 requests.
-    if !reported_fleet_ids.is_empty() && !reported_fleet_ids.contains(&u64::from(current_fleet_id))
-    {
+    // EnemyFleets/FleetInfo 是客户端实际遇到的敌方舰队。
+    // remaining_fleet_ids 只用于防止重复结算和非法舰队。
+    let reported_fleet_id = reported_fleet_ids
+        .iter()
+        .filter_map(|fleet_id| u32::try_from(*fleet_id).ok())
+        .find(|fleet_id| {
+            allowed_fleet_ids.contains(fleet_id) && remaining_fleet_ids.contains(fleet_id)
+        });
+
+    let passed_fleet_id = reported_fleet_id.unwrap_or(session_fleet_id);
+
+    if !reported_fleet_ids.is_empty() && reported_fleet_id.is_none() {
         tracing::warn!(
             copy_id = copy_id.get(),
-            current_fleet_id,
+            session_fleet_id,
             reported_fleet_ids = ?reported_fleet_ids,
-            "battle pass reported fleet is not current; using session wave"
+            "battle pass reported fleet has no valid remaining id; using session wave"
         );
     }
-    let passed_fleet_ids = vec![u64::from(current_fleet_id)];
+    let passed_fleet_ids = [passed_fleet_id];
+
     let remaining_after_wave = remaining_fleet_ids
         .into_iter()
-        .filter(|fleet_id| !passed_fleet_ids.contains(&u64::from(*fleet_id)))
+        .filter(|fleet_id| *fleet_id != passed_fleet_id)
         .collect::<Vec<_>>();
-    let is_final_wave = remaining_after_wave.is_empty();
+
+    let configured_final_fleet = battle_catalog
+        .and_then(|catalog| {
+            i32::try_from(passed_fleet_id)
+                .ok()
+                .and_then(|fleet_id| catalog.fleet_is_last.get(&fleet_id).copied())
+        })
+        .unwrap_or(false);
+
+    // 随机遇敌时，2040104 即使不是 remaining[0]，也必须直接最终结算。
+    let is_final_wave = configured_final_fleet || remaining_after_wave.is_empty();
+
+    tracing::debug!(
+        copy_id = copy_id.get(),
+        session_fleet_id,
+        passed_fleet_id,
+        remaining_after_wave = ?remaining_after_wave,
+        is_final_wave,
+        "battle wave selected for settlement"
+    );
+
     let mut rewards = Vec::new();
+
     if grade < 9 {
         if is_final_wave && first_pass_expected {
             rewards.extend(

@@ -190,7 +190,7 @@ pub(crate) fn append_typed_user_login_bootstrap(
     state: &ServerState,
     account: &AccountState,
     chapter_catalog: Option<&ChapterCatalog>,
-    battle_catalog: Option<&BattleCatalog>,
+    _battle_catalog: Option<&BattleCatalog>,
 ) {
     let fallback_catalog;
     let catalog = match chapter_catalog {
@@ -213,69 +213,12 @@ pub(crate) fn append_typed_user_login_bootstrap(
         "strategy.GetStrategy",
         base_handler::typed_strategy_info_payload(account),
     ));
-    let last_copy_id = account
-        .battle
-        .active
-        .as_ref()
-        .map(|active| active.copy_id.get())
-        .or_else(|| {
-            account
-                .battle
-                .records
-                .last()
-                .map(|record| record.copy_id.get())
-        })
-        .and_then(|copy_id| i32::try_from(copy_id).ok());
-    let preferred_type = last_copy_id
-        .and_then(|copy_id| {
-            battle_catalog
-                .and_then(|battle| battle.copies.get(&copy_id).map(|copy| copy.copy_type))
-                .or_else(|| catalog.plot.contains(&copy_id).then_some(1))
-                .or_else(|| catalog.sea.contains(&copy_id).then_some(2))
-                .or_else(|| catalog.mubar.contains(&copy_id).then_some(33))
-                .or_else(|| catalog.daily.contains(&copy_id).then_some(9))
-        })
-        .map(|copy_type| match copy_type {
-            2 | 32 | 69 | 71 => 2,
-            9 | 33 => copy_type,
-            _ => 1,
-        })
-        .unwrap_or(1);
-    let copy_bottom_index = super::copy::copy_bottom_index_for_type(preferred_type);
-    let prefs = account
-        .guide
-        .settings
-        .get(misc_handler::CLIENT_PREFS_SETTING_KEY)
-        .cloned()
-        .map(|prefs| {
-            if last_copy_id.is_some() {
-                super::copy::copy_navigation_prefs_json(Some(&prefs), copy_bottom_index)
-            } else {
-                prefs
-            }
-        })
-        .unwrap_or_else(|| format!(r#"{{"NewCopyButtomIndex":{copy_bottom_index}}}"#));
-    let mut prefs_payload = Vec::new();
-    append_message_field(&mut prefs_payload, 1, prefs.as_bytes());
-    append_varint_field(&mut prefs_payload, 2, u64::from(now));
-    effects.push_pre(super::common::response::Response::raw(
-        "prefs.UpdatePrefsInfo",
-        prefs_payload,
-    ));
-    let mut copy_pushes = [1, 2, 33, 9]
-        .into_iter()
-        .map(|copy_type| {
-            (
-                copy_type,
-                CopyInfoCodec::encode_payload(&copy_info_payload(catalog, copy_type, account)),
-            )
-        })
-        .collect::<Vec<_>>();
-    copy_pushes.sort_by_key(|(copy_type, _)| *copy_type != preferred_type);
-    for (_, payload) in copy_pushes {
+    // Match original client/server contract: route selection lives in the
+    // client's PlayerPrefs. Login only supplies copy data, in fixed order.
+    for copy_type in [1, 2, 33, 9, 10] {
         effects.push_pre(super::common::response::Response::raw(
             "copy.GetCopy",
-            payload,
+            CopyInfoCodec::encode_payload(&copy_info_payload(catalog, copy_type, account)),
         ));
     }
     effects.push_pre(super::common::response::Response::raw(

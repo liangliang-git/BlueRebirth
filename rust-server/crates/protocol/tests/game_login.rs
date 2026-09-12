@@ -11,23 +11,23 @@ use blueoath_protocol::{
 };
 
 #[test]
-fn initial_guide_progress_skips_startup_and_2a_locking_guide() {
+fn initial_guide_progress_completes_all_top_level_guides() {
     let payload = GuideInfoCodec::encode_initial_progress_completed();
 
     assert!(payload
         .windows(b"GUIDE_DONE_STAGES".len())
         .any(|window| window == b"GUIDE_DONE_STAGES"));
     for stage_id in [
-        "10000", "100000", "1000000", "99995", "99998", "99992", "1200000",
+        "10000", "100000", "1000000", "99995", "99998", "99992", "1200000", "14000", "200000",
+        "22001", "300000", "40001", "700000", "800000", "910000", "92000", "93000", "94000",
+        "95000", "96000", "97000", "98000", "99000", "110000", "120000", "130000", "140000",
+        "150000", "160000",
     ] {
         let stage_id = stage_id.as_bytes();
         assert!(payload
             .windows(stage_id.len())
             .any(|window| window == stage_id));
     }
-    assert!(!payload
-        .windows(b"160000".len())
-        .any(|window| window == b"160000"));
 }
 
 #[test]

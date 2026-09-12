@@ -181,6 +181,14 @@ pub(crate) fn load_build_ship_catalog(catalog_path: Option<&Path>) -> BuildShipC
             .collect::<Vec<_>>();
         let drop_id = json_i32(&value, "drop_id").unwrap_or_default();
         if item_id > 0 && (!options.is_empty() || drop_id > 0) {
+            // Client has two selected-box pages. `SelectRandTreasurePage` sends
+            // `bag.GetSelectTreasureInfo`, while `SelectTreasurePage` sends
+            // `bag.GetNormalTreasureInfo` even though its item is declared in
+            // config_item_selected. Keep selected-box drop pools in normal
+            // lookup map too; config_item_info does not contain these rows.
+            if drop_id > 0 {
+                catalog.treasure_drop_by_item.entry(item_id).or_insert(drop_id);
+            }
             catalog
                 .selected_treasure_by_item
                 .insert(item_id, SelectedTreasure { drop_id, options });

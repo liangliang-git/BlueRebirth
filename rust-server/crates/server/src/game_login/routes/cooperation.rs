@@ -41,7 +41,14 @@ pub(super) fn handle(
             if let HandlerResult::Error(error) = &result {
                 handler_error = Some(error.clone());
             }
-            handler_payload(result, request.method.as_str())
+            match result {
+                HandlerResult::Reply(mut response) => {
+                    // Zone-scoped matchsvr requests need response method to keep zone suffix.
+                    response.method = request.method.clone();
+                    Some(response)
+                }
+                result => handler_payload(result, request.method.as_str()),
+            }
         }
         _ if method.is_family(MethodFamily::MatchServer)
             || method.is_family(MethodFamily::Room)

@@ -3,6 +3,7 @@
 -- Keep gameplay pages usable while server-side guide progress is repaired.
 
 local patched = false
+local mainline_patched = false
 
 local function patch_guide_hub(guide_hub)
   if patched or type(guide_hub) ~= "table" then
@@ -35,6 +36,36 @@ local function patch_guide_hub(guide_hub)
   return guide_hub
 end
 
+local function patch_open_mainline(module)
+  if mainline_patched or type(module) ~= "table" then
+    return module
+  end
+
+  local function disable_open_mainline(target)
+    if type(target) ~= "table" then
+      return
+    end
+    if type(target.doBehaviour) == "function" then
+      target.doBehaviour = function(_, _, on_done)
+        if type(on_done) == "function" then
+          on_done()
+        end
+      end
+      mainline_patched = true
+    end
+  end
+
+  disable_open_mainline(module)
+  local metatable = getmetatable(module)
+  if type(metatable) == "table" and type(metatable.__index) == "table" then
+    disable_open_mainline(metatable.__index)
+  end
+  if mainline_patched then
+    mod.info("OpenMainLine guide behavior disabled")
+  end
+  return module
+end
+
 local function install_require_hook()
   local original_require = _G.require
   if type(original_require) ~= "function" then
@@ -45,6 +76,8 @@ local function install_require_hook()
     local module = original_require(name, ...)
     if name == "game.guide.guidehub" then
       patch_guide_hub(module)
+    elseif string.lower(tostring(name)) == "game.guide.guidebehaviours.openmainline" then
+      patch_open_mainline(module)
     end
     return module
   end

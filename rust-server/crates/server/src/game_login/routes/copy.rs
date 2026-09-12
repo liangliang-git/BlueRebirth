@@ -146,17 +146,6 @@ pub(super) fn handle(
                 && successful_battle_result
             {
                 if let (Some(copy_id), Some(catalog)) = (settled_copy_id, chapter_catalog) {
-                    let navigation_payload = typed_account.as_deref_mut().map(|typed| {
-                        super::copy::set_copy_navigation_pref(
-                            typed,
-                            catalog,
-                            copy_id,
-                            current_unix_seconds(),
-                        )
-                    });
-                    if let Some(payload) = navigation_payload {
-                        append_method_push(post_pushes, "prefs.UpdatePrefsInfo", payload);
-                    }
                     if let Some(typed) = typed_account.as_deref() {
                         if catalog
                             .daily_level_ids_by_chapter

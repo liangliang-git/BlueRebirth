@@ -1,0 +1,9 @@
+{
+  "id": "coop-solo.mod",
+  "version": "1.0.0",
+  "entry": "main.lua",
+  "targetClients": ["jp-1.4.0"],
+  "dependencies": [],
+  "loadOrder": 58,
+  "enabled": true
+}

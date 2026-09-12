@@ -70,6 +70,7 @@ unsigned short redirectPort = 0;
 unsigned short httpRedirectPort = 0;
 std::string redirectHost = "127.0.0.1";
 int payloadLogLevel = 2;
+bool stageGotoLogging = false;
 bool allowUntrusted = false;
 bool captureBugly = false;
 unsigned short capturePort = 9887;
@@ -1128,9 +1129,14 @@ static volatile bool gBattleStarted = false;
 // ---- ͨ���ַ�����ȡ��������������ջ��ԭ�ã� ----
 
 void LogStageGoto(void* self, int nextStateType, void* enterParam) {
-    Log("StageMgr.Goto nextStateType=" + std::to_string(nextStateType) +
-        " self=0x" + std::to_string(reinterpret_cast<uintptr_t>(self)) +
-        " enterParam=0x" + std::to_string(reinterpret_cast<uintptr_t>(enterParam)));
+    // Stage transitions are frequent and run on Unity's main thread. Opening
+    // and closing the log file for every transition makes UI input lag at the
+    // normal info log level. Keep this high-volume probe trace-only.
+    if (stageGotoLogging) {
+        Log("StageMgr.Goto nextStateType=" + std::to_string(nextStateType) +
+            " self=0x" + std::to_string(reinterpret_cast<uintptr_t>(self)) +
+            " enterParam=0x" + std::to_string(reinterpret_cast<uintptr_t>(enterParam)));
+    }
     if (nextStateType == 1) stageMgrInstance = reinterpret_cast<uintptr_t>(self);
 }
 
@@ -2841,6 +2847,8 @@ void InitializeHooks(HMODULE module) {
     else if (_wcsicmp(logLevelBuffer, L"debug") == 0) payloadLogLevel = 3;
     else if (_wcsicmp(logLevelBuffer, L"trace") == 0) payloadLogLevel = 4;
     else payloadLogLevel = 2;
+    stageGotoLogging = GetPrivateProfileIntW(
+        L"debug", L"stage_goto_logging", payloadLogLevel >= 4 ? 1 : 0, config.c_str()) != 0;
     allowUntrusted = GetPrivateProfileIntW(L"trust", L"allow_untrusted", 0, config.c_str()) != 0;
     captureBugly = GetPrivateProfileIntW(L"redirect", L"capture_bugly", 0, config.c_str()) != 0;
     capturePort = static_cast<unsigned short>(GetPrivateProfileIntW(L"redirect", L"capture_port", 9887, config.c_str()));
@@ -2886,6 +2894,7 @@ void InitializeHooks(HMODULE module) {
         " port=" + std::to_string(redirectPort) +
         " http_port=" + std::to_string(httpRedirectPort) +
         " log_level=" + std::to_string(payloadLogLevel) +
+        " stage_goto_logging=" + (stageGotoLogging ? "true" : "false") +
         " allow_untrusted=" + (allowUntrusted ? "true" : "false"));
 
     const auto eventName = L"Local\\BlueOath.Inject." + std::to_wstring(GetCurrentProcessId());

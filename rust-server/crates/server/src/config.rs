@@ -72,6 +72,15 @@ pub(crate) struct SharedPush {
 }
 
 #[derive(Clone, Debug, Default)]
+pub(crate) struct TypedCoopHero {
+    pub(crate) hid: u64,
+    pub(crate) tid: u64,
+    pub(crate) level: u32,
+    pub(crate) advance: u32,
+    pub(crate) fashioning: u32,
+}
+
+#[derive(Clone, Debug, Default)]
 pub(crate) struct TypedCoopUser {
     pub(crate) uid: u64,
     pub(crate) name: String,
@@ -80,6 +89,8 @@ pub(crate) struct TypedCoopUser {
     pub(crate) is_ready: bool,
     pub(crate) enter_time: u32,
     pub(crate) hero_ids: Vec<i32>,
+    pub(crate) hero_infos: Vec<TypedCoopHero>,
+    pub(crate) strategy_id: u32,
     pub(crate) auto_ready: bool,
 }
 
