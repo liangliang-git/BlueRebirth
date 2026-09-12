@@ -1,7 +1,9 @@
+//! Hero state payload and equipment slot helpers.
 #![allow(dead_code)]
 
 use super::*;
 
+/// 读取指定装备类型对应的英雄装备槽数据。
 fn hero_slot_ids(hero: &Value, equip_type: u64) -> Option<&Value> {
     if equip_type == 1 {
         Some(hero.get("equipSlots")?)
@@ -10,6 +12,7 @@ fn hero_slot_ids(hero: &Value, equip_type: u64) -> Option<&Value> {
     }
 }
 
+/// 读取指定装备类型对应的英雄装备状态数据。
 fn hero_slot_states(hero: &Value, equip_type: u64) -> Option<&Value> {
     if equip_type == 1 {
         hero.get("equipStates")
@@ -18,6 +21,7 @@ fn hero_slot_states(hero: &Value, equip_type: u64) -> Option<&Value> {
     }
 }
 
+/// 获取指定装备类型的可变装备槽，并在缺失时创建默认槽位。
 fn hero_slots_mut(hero: &mut serde_json::Map<String, Value>, equip_type: u64) -> &mut Value {
     if equip_type == 1 {
         hero.entry("equipSlots".to_owned())
@@ -32,6 +36,7 @@ fn hero_slots_mut(hero: &mut serde_json::Map<String, Value>, equip_type: u64) ->
     }
 }
 
+/// 获取指定装备类型的可变装备状态，并在缺失时创建默认状态。
 fn hero_states_mut(hero: &mut serde_json::Map<String, Value>, equip_type: u64) -> &mut Value {
     if equip_type == 1 {
         hero.entry("equipStates".to_owned())
@@ -46,6 +51,7 @@ fn hero_states_mut(hero: &mut serde_json::Map<String, Value>, equip_type: u64) -
     }
 }
 
+/// 将英雄退役奖励编码为客户端使用的响应 payload。
 pub(crate) fn encode_retire_hero_response(rewards: &[ShopReward]) -> Vec<u8> {
     let mut output = Vec::new();
     for reward in rewards {
@@ -58,6 +64,7 @@ pub(crate) fn encode_retire_hero_response(rewards: &[ShopReward]) -> Vec<u8> {
     output
 }
 
+/// 根据英雄模板生成图鉴信息增量 payload。
 pub(crate) fn illustrate_info_payload_for_templates(
     template_ids: &[i32],
     handbook_behaviours: Option<&[i32]>,
@@ -77,6 +84,7 @@ pub(crate) fn illustrate_info_payload_for_templates(
     output
 }
 
+/// 根据图鉴条目和行为生成图鉴信息增量 payload。
 pub(crate) fn illustrate_info_payload_for_entries(entries: &[(i32, Vec<i32>)]) -> Vec<u8> {
     let now = current_unix_seconds();
     let mut output = Vec::new();
@@ -98,6 +106,7 @@ pub(crate) fn illustrate_info_payload_for_entries(entries: &[(i32, Vec<i32>)]) -
     output
 }
 
+/// 追加一个包含行为列表和结婚次数字段的图鉴条目。
 fn append_illustrate_info_item(
     output: &mut Vec<u8>,
     illustrate_id: i32,
@@ -121,6 +130,7 @@ fn append_illustrate_info_item(
     append_message_field(output, 1, &item);
 }
 
+/// 将剧情记忆条目编码为客户端 payload。
 pub(crate) fn story_memory_payload(memories: Option<&[(i32, i32)]>) -> Vec<u8> {
     let mut output = Vec::new();
     if let Some(memories) = memories {

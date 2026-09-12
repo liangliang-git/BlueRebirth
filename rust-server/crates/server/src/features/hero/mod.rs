@@ -8,9 +8,9 @@ use crate::common::json::*;
 use crate::*;
 use blueoath_protocol::*;
 
-#[path = "compat_service.rs"]
+#[path = "compat/mod.rs"]
 pub(crate) mod compat_service;
-#[path = "service.rs"]
+#[path = "service/mod.rs"]
 pub(crate) mod service;
 #[path = "state.rs"]
 pub(crate) mod state;
